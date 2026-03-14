@@ -1,0 +1,31 @@
+services:
+  zoekt:
+    build:
+      context: ./zoekt
+    command: ["zoekt-webserver", "-listen", ":6070", "-index", "/data/index"]
+    ports:
+      - "6070:6070"
+    volumes:
+      - ./repos:/repos:ro
+      - zoekt-index:/data/index
+
+  zoekt-indexer:
+    build:
+      context: ./zoekt
+    command: ["/usr/local/bin/index-repos.sh"]
+    environment:
+      INDEX_INTERVAL_SECONDS: ${INDEX_INTERVAL_SECONDS:-300}
+    volumes:
+      - ./repos:/repos:ro
+      - zoekt-index:/data/index
+
+  mcp-server:
+    build:
+      context: ./mcp-server
+    depends_on:
+      - zoekt
+    volumes:
+      - ./repos:/repos:ro
+
+volumes:
+  zoekt-index:

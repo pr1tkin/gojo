@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+npm-debug.log*
+.git
+.gitignore
+.eslintignore
+.eslintrc.cjs
+.prettierignore
+.prettierrc

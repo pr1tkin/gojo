@@ -1,0 +1,93 @@
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+
+import { loadConfig } from './config.js';
+import { buildSymbolIndex } from './symbol-index/indexer.js';
+import { findRelatedFilesToolDefinition, runFindRelatedFilesTool } from './tools/find-related-files.js';
+import { findSymbolToolDefinition, runFindSymbolTool } from './tools/find-symbol.js';
+import { findReferencesToolDefinition, runFindReferencesTool } from './tools/find-references.js';
+import { runListSymbolsTool, listSymbolsToolDefinition } from './tools/list-symbols.js';
+import { openFileToolDefinition, runOpenFileTool } from './tools/open-file.js';
+import { runSearchCodeTool, searchCodeToolDefinition } from './tools/search-code.js';
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  const shouldBuildSymbolIndex = process.env.BUILD_SYMBOL_INDEX_ON_STARTUP === 'true';
+
+  if (shouldBuildSymbolIndex) {
+    await buildSymbolIndex(config.reposRoot);
+  }
+
+  const server = new McpServer({
+    name: 'local-code-search',
+    version: '0.1.0',
+  });
+
+  server.registerTool(
+    searchCodeToolDefinition.name,
+    {
+      title: searchCodeToolDefinition.title,
+      description: searchCodeToolDefinition.description,
+      inputSchema: searchCodeToolDefinition.inputSchema,
+    },
+    async (input) => runSearchCodeTool(config.zoektBaseUrl, input),
+  );
+
+  server.registerTool(
+    openFileToolDefinition.name,
+    {
+      title: openFileToolDefinition.title,
+      description: openFileToolDefinition.description,
+      inputSchema: openFileToolDefinition.inputSchema,
+    },
+    async (input) => runOpenFileTool(config.reposRoot, input),
+  );
+
+  server.registerTool(
+    listSymbolsToolDefinition.name,
+    {
+      title: listSymbolsToolDefinition.title,
+      description: listSymbolsToolDefinition.description,
+      inputSchema: listSymbolsToolDefinition.inputSchema,
+    },
+    async (input) => runListSymbolsTool(config.reposRoot, input),
+  );
+
+  server.registerTool(
+    findSymbolToolDefinition.name,
+    {
+      title: findSymbolToolDefinition.title,
+      description: findSymbolToolDefinition.description,
+      inputSchema: findSymbolToolDefinition.inputSchema,
+    },
+    async (input) => runFindSymbolTool(config.reposRoot, input),
+  );
+
+  server.registerTool(
+    findReferencesToolDefinition.name,
+    {
+      title: findReferencesToolDefinition.title,
+      description: findReferencesToolDefinition.description,
+      inputSchema: findReferencesToolDefinition.inputSchema,
+    },
+    async (input) => runFindReferencesTool(config.reposRoot, config.zoektBaseUrl, input),
+  );
+
+  server.registerTool(
+    findRelatedFilesToolDefinition.name,
+    {
+      title: findRelatedFilesToolDefinition.title,
+      description: findRelatedFilesToolDefinition.description,
+      inputSchema: findRelatedFilesToolDefinition.inputSchema,
+    },
+    async (input) => runFindRelatedFilesTool(input),
+  );
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+main().catch((error: unknown) => {
+  console.error('Failed to start MCP server.', error);
+  process.exit(1);
+});

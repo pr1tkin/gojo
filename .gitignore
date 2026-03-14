@@ -1,0 +1,46 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Logs and temp files
+logs/
+*.log
+.tmp/
+.cache/
+tmp/
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local repo mount contents
+repos/*
+!repos/.gitkeep
+
+# Optional host-side Zoekt index directories
+zoekt-index/
+zoekt-data/
+
+# Local MCP symbol index
+mcp-server/.data/*.json
+!mcp-server/.data/.gitkeep
