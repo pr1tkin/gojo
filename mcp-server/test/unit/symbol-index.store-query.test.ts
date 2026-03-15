@@ -54,7 +54,7 @@ describe('symbol-index store and query', () => {
     const loadedIndex = await loadSymbolIndex();
     const fileId = createFileId('query-repo', 'src/query.ts');
 
-    expect(loadedIndex.schemaVersion).toBe(3);
+    expect(loadedIndex.schemaVersion).toBe(4);
     expect(loadedIndex.byFile[fileId]).toEqual(
       expect.objectContaining({
         fileId,
@@ -65,6 +65,13 @@ describe('symbol-index store and query', () => {
         importTokens: ['./helper', 'helper'],
       }),
     );
+    expect(loadedIndex.stats).toEqual({
+      globalByName: { lookup: 1 },
+      globalByNameLower: { lookup: 1 },
+      byRepo: { 'query-repo': { lookup: 1 } },
+      exportedByName: { lookup: 1 },
+      byKind: { function: { lookup: 1 } },
+    });
     expect(loadedIndex.symbols).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -151,7 +158,7 @@ describe('symbol-index store and query', () => {
     const loadedIndex = await loadSymbolIndex();
     const fileId = createFileId('legacy-repo', 'src/legacy.ts');
 
-    expect(loadedIndex.schemaVersion).toBe(3);
+    expect(loadedIndex.schemaVersion).toBe(4);
     expect(loadedIndex.byFile[fileId]).toEqual(
       expect.objectContaining({
         fileId,
@@ -162,6 +169,13 @@ describe('symbol-index store and query', () => {
         importTokens: [],
       }),
     );
+    expect(loadedIndex.stats).toEqual({
+      globalByName: {},
+      globalByNameLower: {},
+      byRepo: {},
+      exportedByName: {},
+      byKind: {},
+    });
     expect(loadedIndex.byName.legacyLookup).toEqual([
       expect.objectContaining({
         symbolId: createSymbolId(fileId, 'function', 'legacyLookup', 1),

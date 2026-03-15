@@ -7,7 +7,7 @@ import { isSupportedSymbolFile } from '../tree-sitter.js';
 import { classifyFile } from './file-classification.js';
 import { extractFileMetadata } from './file-metadata.js';
 import { createDeclarationFingerprint, createFileId, createSymbolId } from './ids.js';
-import type { FileRelation, IndexedSymbol, SymbolIndex } from './types.js';
+import type { FileRelation, IndexedSymbol, SymbolFrequencyStats, SymbolIndex } from './types.js';
 
 const IGNORED_DIRECTORIES = new Set([
   '.git',
@@ -106,12 +106,50 @@ function appendLookupEntry(
 
 function createEmptySymbolIndex(): SymbolIndex {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     symbols: [],
     byName: Object.create(null) as Record<string, IndexedSymbol[]>,
     byNameLower: Object.create(null) as Record<string, IndexedSymbol[]>,
     byFile: Object.create(null) as Record<string, FileRelation>,
+    stats: createEmptySymbolFrequencyStats(),
   };
+}
+
+function createEmptySymbolFrequencyStats(): SymbolFrequencyStats {
+  return {
+    globalByName: Object.create(null) as SymbolFrequencyStats['globalByName'],
+    globalByNameLower: Object.create(null) as SymbolFrequencyStats['globalByNameLower'],
+    byRepo: Object.create(null) as SymbolFrequencyStats['byRepo'],
+    exportedByName: Object.create(null) as SymbolFrequencyStats['exportedByName'],
+    byKind: Object.create(null) as SymbolFrequencyStats['byKind'],
+  };
+}
+
+function incrementCounter(table: Record<string, number>, key: string): void {
+  table[key] = (table[key] ?? 0) + 1;
+}
+
+function incrementNestedCounter(
+  table: Record<string, Record<string, number>>,
+  outerKey: string,
+  innerKey: string,
+): void {
+  if (!table[outerKey]) {
+    table[outerKey] = Object.create(null) as Record<string, number>;
+  }
+
+  incrementCounter(table[outerKey], innerKey);
+}
+
+function updateSymbolFrequencyStats(stats: SymbolFrequencyStats, symbol: IndexedSymbol): void {
+  incrementCounter(stats.globalByName, symbol.name);
+  incrementCounter(stats.globalByNameLower, symbol.name.toLowerCase());
+  incrementNestedCounter(stats.byRepo, symbol.repo, symbol.name);
+  incrementNestedCounter(stats.byKind, symbol.kind, symbol.name);
+
+  if (symbol.exported) {
+    incrementCounter(stats.exportedByName, symbol.name);
+  }
 }
 
 function createFileRelationKey(repo: string, filePath: string): string {
@@ -149,6 +187,7 @@ export async function buildIndexedSymbols(reposRoot: string): Promise<SymbolInde
         index.symbols.push(symbol);
         appendLookupEntry(index.byName, symbol.name, symbol);
         appendLookupEntry(index.byNameLower, symbol.name.toLowerCase(), symbol);
+        updateSymbolFrequencyStats(index.stats, symbol);
       }
 
       index.byFile[createFileRelationKey(repository.id, filePath)] = createFileRelation(

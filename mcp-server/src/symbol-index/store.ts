@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { createDeclarationFingerprint, createFileId, createSymbolId } from './ids.js';
-import type { FileRelation, IndexedSymbol, SymbolIndex } from './types.js';
+import type { FileRelation, IndexedSymbol, SymbolFrequencyStats, SymbolIndex } from './types.js';
 
 function getSymbolIndexDirectory(): string {
   return path.resolve(process.cwd(), '.data');
@@ -22,6 +22,14 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
+function isStringNumberRecord(value: unknown): value is Record<string, number> {
+  return isObject(value) && Object.values(value).every((entry) => typeof entry === 'number');
+}
+
+function isNestedStringNumberRecord(value: unknown): value is Record<string, Record<string, number>> {
+  return isObject(value) && Object.values(value).every((entry) => isStringNumberRecord(entry));
 }
 
 function isImportBinding(value: unknown): boolean {
@@ -84,14 +92,76 @@ function isFileRelation(value: unknown): value is FileRelation {
   );
 }
 
+function createEmptySymbolFrequencyStats(): SymbolFrequencyStats {
+  return {
+    globalByName: Object.create(null) as SymbolFrequencyStats['globalByName'],
+    globalByNameLower: Object.create(null) as SymbolFrequencyStats['globalByNameLower'],
+    byRepo: Object.create(null) as SymbolFrequencyStats['byRepo'],
+    exportedByName: Object.create(null) as SymbolFrequencyStats['exportedByName'],
+    byKind: Object.create(null) as SymbolFrequencyStats['byKind'],
+  };
+}
+
+function normalizeStringNumberRecord(value: unknown): Record<string, number> {
+  const normalized = Object.create(null) as Record<string, number>;
+
+  if (!isObject(value)) {
+    return normalized;
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === 'number') {
+      normalized[key] = entry;
+    }
+  }
+
+  return normalized;
+}
+
+function normalizeNestedStringNumberRecord(value: unknown): Record<string, Record<string, number>> {
+  const normalized = Object.create(null) as Record<string, Record<string, number>>;
+
+  if (!isObject(value)) {
+    return normalized;
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    normalized[key] = normalizeStringNumberRecord(entry);
+  }
+
+  return normalized;
+}
+
+function normalizeSymbolFrequencyStats(value: unknown): SymbolFrequencyStats {
+  if (
+    isObject(value) &&
+    isStringNumberRecord(value.globalByName) &&
+    isStringNumberRecord(value.globalByNameLower) &&
+    isNestedStringNumberRecord(value.byRepo) &&
+    isStringNumberRecord(value.exportedByName) &&
+    isNestedStringNumberRecord(value.byKind)
+  ) {
+    return {
+      globalByName: normalizeStringNumberRecord(value.globalByName),
+      globalByNameLower: normalizeStringNumberRecord(value.globalByNameLower),
+      byRepo: normalizeNestedStringNumberRecord(value.byRepo),
+      exportedByName: normalizeStringNumberRecord(value.exportedByName),
+      byKind: normalizeNestedStringNumberRecord(value.byKind),
+    };
+  }
+
+  return createEmptySymbolFrequencyStats();
+}
+
 function createEmptyIndex(): SymbolIndex {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     symbols: [],
     byName: Object.create(null) as SymbolIndex['byName'],
     byNameLower: Object.create(null) as SymbolIndex['byNameLower'],
     byFile: Object.create(null) as SymbolIndex['byFile'],
-    };
+    stats: createEmptySymbolFrequencyStats(),
+  };
 }
 
 function normalizeSymbols(value: unknown): SymbolIndex['symbols'] {
@@ -232,11 +302,12 @@ function normalizeLoadedIndex(value: unknown): SymbolIndex {
     schemaVersion:
       typeof value.schemaVersion === 'number' && Number.isInteger(value.schemaVersion)
         ? value.schemaVersion
-        : 3,
+        : 4,
     symbols,
     byName,
     byNameLower,
     byFile,
+    stats: normalizeSymbolFrequencyStats(value.stats),
   };
 }
 

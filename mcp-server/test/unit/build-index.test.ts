@@ -68,6 +68,40 @@ describe('buildIndexedSymbols', () => {
     ]);
     expect(Object.getPrototypeOf(index.byName)).toBeNull();
     expect(Object.getPrototypeOf(index.byNameLower)).toBeNull();
+    expect(index.stats.globalByName).toEqual(
+      expect.objectContaining({
+        constructor: 1,
+        toString: 1,
+      }),
+    );
+    expect(index.stats.globalByNameLower).toEqual(
+      expect.objectContaining({
+        constructor: 1,
+        tostring: 1,
+      }),
+    );
+    expect(index.stats.byRepo['prototype-repo']).toEqual(
+      expect.objectContaining({
+        constructor: 1,
+        toString: 1,
+      }),
+    );
+    expect(index.stats.exportedByName).toEqual(
+      expect.objectContaining({
+        constructor: 1,
+        toString: 1,
+      }),
+    );
+    expect(index.stats.byKind.function).toEqual(
+      expect.objectContaining({
+        constructor: 1,
+      }),
+    );
+    expect(index.stats.byKind.variable).toEqual(
+      expect.objectContaining({
+        toString: 1,
+      }),
+    );
   });
 
   it('excludes generated directories and declaration files from the symbol index', async () => {
@@ -108,7 +142,7 @@ describe('buildIndexedSymbols', () => {
 
     const index = await buildIndexedSymbols(reposRoot);
 
-    expect(index.schemaVersion).toBe(3);
+    expect(index.schemaVersion).toBe(4);
     expect(index.symbols).toEqual([
       expect.objectContaining({
         symbolId: createSymbolId(
@@ -152,6 +186,15 @@ describe('buildIndexedSymbols', () => {
         importTokens: [],
       }),
     );
+    expect(index.stats.globalByName).toEqual({ keepMe: 1 });
+    expect(index.stats.globalByNameLower).toEqual({ keepme: 1 });
+    expect(index.stats.byRepo['generated-repo']).toEqual({ keepMe: 1 });
+    expect(index.stats.exportedByName).toEqual({ keepMe: 1 });
+    expect(index.stats.byKind.function).toEqual({ keepMe: 1 });
+    expect(index.stats.globalByName).not.toHaveProperty('GeneratedRoute');
+    expect(index.stats.globalByName).not.toHaveProperty('GeneratedComponent');
+    expect(index.stats.globalByName).not.toHaveProperty('fromGeneratedDir');
+    expect(index.stats.globalByName).not.toHaveProperty('GeneratedTypes');
   });
 
   it('generates deterministic file and symbol IDs and disambiguates repeated names by ordinal', async () => {
@@ -212,5 +255,11 @@ describe('buildIndexedSymbols', () => {
       }),
     );
     expect(secondIndex.symbols).toEqual(firstIndex.symbols);
+    expect(firstIndex.stats.globalByName).toEqual({ repeat: 3 });
+    expect(firstIndex.stats.globalByNameLower).toEqual({ repeat: 3 });
+    expect(firstIndex.stats.byRepo['identity-repo']).toEqual({ repeat: 3 });
+    expect(firstIndex.stats.exportedByName).toEqual({ repeat: 3 });
+    expect(firstIndex.stats.byKind.function).toEqual({ repeat: 2 });
+    expect(firstIndex.stats.byKind.class).toEqual({ repeat: 1 });
   });
 });

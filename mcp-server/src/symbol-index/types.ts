@@ -60,10 +60,19 @@ export interface FileRelation {
   importTokens: string[];
 }
 
+export interface SymbolFrequencyStats {
+  globalByName: Record<string, number>;
+  globalByNameLower: Record<string, number>;
+  byRepo: Record<string, Record<string, number>>;
+  exportedByName: Record<string, number>;
+  byKind: Record<string, Record<string, number>>;
+}
+
 export interface SymbolIndex {
   schemaVersion: number;
   symbols: IndexedSymbol[];
   byName: Record<string, IndexedSymbol[]>;
   byNameLower: Record<string, IndexedSymbol[]>;
   byFile: Record<string, FileRelation>;
+  stats: SymbolFrequencyStats;
 }
