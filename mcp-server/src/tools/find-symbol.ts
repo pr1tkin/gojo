@@ -1,5 +1,6 @@
 import { findSymbolInputSchema } from '../schemas.js';
-import { rankFindSymbolResults } from '../ranking.js';
+import { rankSymbolCandidates } from '../ranking/index.js';
+import { loadSymbolIndex } from '../symbol-index/store.js';
 import type { FindSymbolInput } from '../types.js';
 import { findSymbolWithTypeScriptFallback } from '../typescript/fallback.js';
 
@@ -15,10 +16,18 @@ export async function runFindSymbolTool(
   input: FindSymbolInput,
 ): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
   const matches = await findSymbolWithTypeScriptFallback(reposRoot, input);
-  const rankedMatches = rankFindSymbolResults(matches, {
-    kind: input.kind,
-    repo: input.repo,
-  });
+  const index = await loadSymbolIndex();
+  const rankedMatches = rankSymbolCandidates(
+    matches,
+    {
+      queryName: input.name,
+      kind: input.kind,
+      repo: input.repo,
+    },
+    {
+      stats: index.stats,
+    },
+  ).map((entry) => entry.item);
 
   return {
     content: [

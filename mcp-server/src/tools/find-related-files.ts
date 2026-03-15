@@ -1,4 +1,5 @@
-import { rankRelatedFiles } from '../ranking.js';
+import { getRelatedFiles as getGraphRelatedFiles } from '../graph/query.js';
+import { rankRelatedFileCandidates } from '../ranking/index.js';
 import { findRelatedFilesInputSchema } from '../schemas.js';
 import { getFileRelation, listFileRelations } from '../symbol-index/query.js';
 import type { FindRelatedFilesInput } from '../types.js';
@@ -18,10 +19,32 @@ export async function runFindRelatedFilesTool(
   const target = await getFileRelation(input.filePath, input.repo);
   const limit = input.limit ?? DEFAULT_RELATED_FILES_LIMIT;
   const relations = await listFileRelations();
+  const graphRelatedFiles = await getGraphRelatedFiles(target.fileId);
+  const graphSignalsByFileId = new Map(
+    graphRelatedFiles.map((entry) => [
+      entry.file.fileId,
+      {
+        edgeTypes: [entry.via],
+        connectionCount: graphRelatedFiles.filter((candidate) => candidate.file.fileId === entry.file.fileId).length,
+      },
+    ]),
+  );
   const candidates = relations.filter(
     (relation) => !(relation.repo === target.repo && relation.filePath === target.filePath),
   );
-  const ranked = rankRelatedFiles(target, candidates, limit);
+  const ranked = rankRelatedFileCandidates(
+    target,
+    candidates.map((relation) => ({
+      relation,
+      graphSignals: graphSignalsByFileId.get(relation.fileId),
+    })),
+    limit,
+  ).map((entry) => ({
+    repo: entry.repo,
+    filePath: entry.filePath,
+    reason: entry.reason,
+    score: entry.score,
+  }));
 
   return {
     content: [
