@@ -1,7 +1,6 @@
-import path from 'node:path';
-
 import { loadRequiredSymbolIndex } from '../symbol-index/store.js';
 import type { ExportRecord, FileRelation, ImportRecord, SymbolIndex } from '../symbol-index/types.js';
+import { resolveLocalFileTarget } from './local-resolution.js';
 import {
   CODE_GRAPH_SCHEMA_VERSION,
   type CodeGraphSnapshot,
@@ -11,10 +10,6 @@ import {
   type RepoNode,
   type SymbolNode,
 } from './types.js';
-
-function normalizePath(value: string): string {
-  return value.replace(/\\/g, '/');
-}
 
 function createRepoNode(repoId: string): RepoNode {
   return {
@@ -70,63 +65,21 @@ function createEdge(
   };
 }
 
-function resolveRelativeTargetFileId(
-  relation: FileRelation,
-  source: string,
-  filesById: Record<string, FileRelation>,
-): string | null {
-  if (!source.startsWith('.')) {
-    return null;
-  }
-
-  const baseDirectory = path.posix.dirname(normalizePath(relation.filePath));
-  const normalizedBase =
-    baseDirectory === '.' ? '' : baseDirectory;
-  const resolvedBase = normalizePath(path.posix.normalize(path.posix.join(normalizedBase, source)));
-  const candidates = new Set<string>();
-
-  const candidatePaths = source.endsWith('.ts') || source.endsWith('.tsx')
-    ? [resolvedBase]
-    : [
-        resolvedBase,
-        `${resolvedBase}.ts`,
-        `${resolvedBase}.tsx`,
-        path.posix.join(resolvedBase, 'index.ts'),
-        path.posix.join(resolvedBase, 'index.tsx'),
-      ];
-
-  for (const candidatePath of candidatePaths) {
-    const normalizedCandidate = normalizePath(candidatePath).replace(/^\/+/, '');
-
-    for (const fileRelation of Object.values(filesById)) {
-      if (fileRelation.repo !== relation.repo) {
-        continue;
-      }
-
-      if (normalizePath(fileRelation.filePath) === normalizedCandidate) {
-        candidates.add(fileRelation.fileId);
-      }
-    }
-  }
-
-  return candidates.size === 1 ? Array.from(candidates)[0] : null;
-}
-
 function maybeCreateFileImportEdge(
   relation: FileRelation,
   importRecord: ImportRecord,
   filesById: Record<string, FileRelation>,
 ): GraphEdge | null {
-  const targetFileId = resolveRelativeTargetFileId(relation, importRecord.source, filesById);
+  const resolution = resolveLocalFileTarget(relation, importRecord.source, filesById);
 
-  if (!targetFileId) {
+  if (resolution.status !== 'resolved' || !resolution.targetFileId) {
     return null;
   }
 
   return createEdge(
     'file_imports_file',
     relation.fileId,
-    targetFileId,
+    resolution.targetFileId,
     { source: importRecord.source },
     importRecord.source,
   );
@@ -141,16 +94,16 @@ function maybeCreateFileReexportEdge(
     return null;
   }
 
-  const targetFileId = resolveRelativeTargetFileId(relation, exportRecord.source, filesById);
+  const resolution = resolveLocalFileTarget(relation, exportRecord.source, filesById);
 
-  if (!targetFileId) {
+  if (resolution.status !== 'resolved' || !resolution.targetFileId) {
     return null;
   }
 
   return createEdge(
     'file_reexports_file',
     relation.fileId,
-    targetFileId,
+    resolution.targetFileId,
     {
       source: exportRecord.source,
       exportedName: exportRecord.exportedName,

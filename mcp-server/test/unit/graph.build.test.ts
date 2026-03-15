@@ -192,4 +192,167 @@ describe('buildCodeGraphFromSymbolIndex', () => {
       ]),
     );
   });
+
+  it('resolves extensionless local imports to ts and tsx files when exactly one target exists', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'extensionless-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'foo.ts'),
+      'export const foo = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'bar.tsx'),
+      'export const Bar = () => null;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { foo } from './foo';",
+        "import { Bar } from './bar';",
+        'export const consumer = [foo, Bar];',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const graph = buildCodeGraphFromSymbolIndex(index);
+    const consumerFileId = createFileId('extensionless-repo', 'src/consumer.ts');
+
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: consumerFileId,
+          toId: createFileId('extensionless-repo', 'src/foo.ts'),
+          metadata: { source: './foo' },
+        }),
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: consumerFileId,
+          toId: createFileId('extensionless-repo', 'src/bar.tsx'),
+          metadata: { source: './bar' },
+        }),
+      ]),
+    );
+  });
+
+  it('resolves index-file conventions when they produce a single local target', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'index-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'widgets'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'panels'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'widgets', 'index.ts'),
+      'export const widget = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'panels', 'index.tsx'),
+      'export const Panel = () => null;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { widget } from './widgets';",
+        "import { Panel } from './panels';",
+        'export const consumer = [widget, Panel];',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const graph = buildCodeGraphFromSymbolIndex(index);
+    const consumerFileId = createFileId('index-repo', 'src/consumer.ts');
+
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: consumerFileId,
+          toId: createFileId('index-repo', 'src/widgets/index.ts'),
+          metadata: { source: './widgets' },
+        }),
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: consumerFileId,
+          toId: createFileId('index-repo', 'src/panels/index.tsx'),
+          metadata: { source: './panels' },
+        }),
+      ]),
+    );
+  });
+
+  it('resolves parent-directory local imports across folders', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'nested-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'shared'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'features'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'shared', 'button.ts'),
+      'export const button = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'features', 'consumer.ts'),
+      [
+        "import { button } from '../shared/button';",
+        'export const consumer = button;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const graph = buildCodeGraphFromSymbolIndex(index);
+
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: createFileId('nested-repo', 'src/features/consumer.ts'),
+          toId: createFileId('nested-repo', 'src/shared/button.ts'),
+          metadata: { source: '../shared/button' },
+        }),
+      ]),
+    );
+  });
+
+  it('does not resolve alias or missing imports to local file edges', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'strict-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { AliasThing } from '@/shared/button';",
+        "import { MissingThing } from './missing';",
+        'export const consumer = [AliasThing, MissingThing];',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const graph = buildCodeGraphFromSymbolIndex(index);
+    const consumerFileId = createFileId('strict-repo', 'src/consumer.ts');
+    const importEdges = graph.edges.filter(
+      (edge) => edge.type === 'file_imports_file' && edge.fromId === consumerFileId,
+    );
+
+    expect(importEdges).toEqual([]);
+  });
 });
