@@ -3,6 +3,11 @@ import path from 'node:path';
 import ts from 'typescript';
 
 import type { RepositoryInfo, SymbolKind } from '../types.js';
+import {
+  createDeclarationFingerprint,
+  createFileId,
+  createSymbolId,
+} from '../symbol-index/ids.js';
 import { discoverRepositoryTsconfigs } from './tsconfig-discovery.js';
 import { loadTypeScriptProject } from './project-loader.js';
 import type { IndexedSymbol } from '../symbol-index/types.js';
@@ -98,13 +103,17 @@ function createIndexedSymbol(
   node: ts.Node,
   name: string,
   kind: SymbolKind,
+  ordinal: number,
 ): IndexedSymbol {
   const absoluteFilePath = normalizePath(sourceFile.fileName);
   const relativeFilePath = normalizeRelativePath(path.relative(repository.rootPath, absoluteFilePath));
+  const fileId = createFileId(repository.id, relativeFilePath);
   const startLine = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1;
   const endLine = sourceFile.getLineAndCharacterOfPosition(node.getEnd()).line + 1;
 
   return {
+    symbolId: createSymbolId(fileId, kind, name, ordinal),
+    fileId,
     name,
     kind,
     repo: repository.id,
@@ -112,6 +121,7 @@ function createIndexedSymbol(
     startLine,
     endLine,
     exported: hasExportModifier(node),
+    declarationFingerprint: createDeclarationFingerprint(kind, name, ordinal),
   };
 }
 
@@ -122,6 +132,7 @@ function collectDefinitionMatches(
   requestedName: string,
   requestedKind: SymbolKind | undefined,
   results: IndexedSymbol[],
+  ordinalsByFile: Map<string, Map<string, number>>,
 ): void {
   const kind = getSymbolKind(node);
 
@@ -130,12 +141,34 @@ function collectDefinitionMatches(
     const name = nameNode && ts.isIdentifier(nameNode) ? nameNode.text : undefined;
 
     if (name === requestedName && (!requestedKind || requestedKind === kind)) {
-      results.push(createIndexedSymbol(repository, sourceFile, node, name, kind));
+      const relativeFilePath = normalizeRelativePath(
+        path.relative(repository.rootPath, normalizePath(sourceFile.fileName)),
+      );
+      const fileId = createFileId(repository.id, relativeFilePath);
+
+      if (!ordinalsByFile.has(fileId)) {
+        ordinalsByFile.set(fileId, new Map<string, number>());
+      }
+
+      const fileOrdinals = ordinalsByFile.get(fileId) as Map<string, number>;
+      const ordinalKey = `${kind}:${name}`;
+      const ordinal = (fileOrdinals.get(ordinalKey) ?? 0) + 1;
+      fileOrdinals.set(ordinalKey, ordinal);
+
+      results.push(createIndexedSymbol(repository, sourceFile, node, name, kind, ordinal));
     }
   }
 
   ts.forEachChild(node, (child) => {
-    collectDefinitionMatches(repository, sourceFile, child, requestedName, requestedKind, results);
+    collectDefinitionMatches(
+      repository,
+      sourceFile,
+      child,
+      requestedName,
+      requestedKind,
+      results,
+      ordinalsByFile,
+    );
   });
 }
 
@@ -176,6 +209,7 @@ export async function findTypeScriptDefinitions(
   }
 
   const matches: IndexedSymbol[] = [];
+  const ordinalsByFile = new Map<string, Map<string, number>>();
 
   for (const tsconfigPath of tsconfigPaths) {
     const context = loadTypeScriptProject(repository.rootPath, tsconfigPath);
@@ -195,7 +229,15 @@ export async function findTypeScriptDefinitions(
         continue;
       }
 
-      collectDefinitionMatches(repository, sourceFile, sourceFile, name, kind, matches);
+      collectDefinitionMatches(
+        repository,
+        sourceFile,
+        sourceFile,
+        name,
+        kind,
+        matches,
+        ordinalsByFile,
+      );
     }
   }
 

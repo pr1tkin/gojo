@@ -1,11 +1,20 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import type { FileRelation, SymbolIndex } from './types.js';
+import { createDeclarationFingerprint, createFileId, createSymbolId } from './ids.js';
+import type { FileRelation, IndexedSymbol, SymbolIndex } from './types.js';
 
-const SYMBOL_INDEX_DIRECTORY = path.resolve(process.cwd(), '.data');
-const SYMBOL_INDEX_TEMP_FILE_PATH = path.join(SYMBOL_INDEX_DIRECTORY, 'symbol-index.tmp.json');
-const SYMBOL_INDEX_FILE_PATH = path.join(SYMBOL_INDEX_DIRECTORY, 'symbol-index.json');
+function getSymbolIndexDirectory(): string {
+  return path.resolve(process.cwd(), '.data');
+}
+
+function getSymbolIndexTempFilePath(): string {
+  return path.join(getSymbolIndexDirectory(), 'symbol-index.tmp.json');
+}
+
+function getSymbolIndexFilePathInternal(): string {
+  return path.join(getSymbolIndexDirectory(), 'symbol-index.json');
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -18,6 +27,7 @@ function isStringArray(value: unknown): value is string[] {
 function isFileRelation(value: unknown): value is FileRelation {
   return (
     isObject(value) &&
+    typeof value.fileId === 'string' &&
     typeof value.repo === 'string' &&
     typeof value.filePath === 'string' &&
     isStringArray(value.symbols) &&
@@ -25,17 +35,97 @@ function isFileRelation(value: unknown): value is FileRelation {
   );
 }
 
-function normalizeLookupTable(value: unknown): Record<string, SymbolIndex['symbols']> {
-  const lookup = Object.create(null) as Record<string, SymbolIndex['symbols']>;
+function createEmptyIndex(): SymbolIndex {
+  return {
+    schemaVersion: 2,
+    symbols: [],
+    byName: Object.create(null) as SymbolIndex['byName'],
+    byNameLower: Object.create(null) as SymbolIndex['byNameLower'],
+    byFile: Object.create(null) as SymbolIndex['byFile'],
+    };
+}
 
-  if (!isObject(value)) {
-    return lookup;
+function normalizeSymbols(value: unknown): SymbolIndex['symbols'] {
+  if (!Array.isArray(value)) {
+    return [];
   }
 
-  for (const [key, bucket] of Object.entries(value)) {
-    if (Array.isArray(bucket)) {
-      lookup[key] = bucket as SymbolIndex['symbols'];
-    }
+  const ordinalsByFile = new Map<string, Map<string, number>>();
+
+  return value
+    .filter((entry): entry is Record<string, unknown> => isObject(entry))
+    .filter(
+      (entry) =>
+        typeof entry.name === 'string' &&
+        typeof entry.kind === 'string' &&
+        typeof entry.repo === 'string' &&
+        typeof entry.filePath === 'string' &&
+        typeof entry.startLine === 'number' &&
+        typeof entry.endLine === 'number',
+    )
+    .map((entry) => {
+      const repo = entry.repo as string;
+      const filePath = entry.filePath as string;
+      const kind = entry.kind as SymbolIndex['symbols'][number]['kind'];
+      const name = entry.name as string;
+      const fileId =
+        typeof entry.fileId === 'string' ? entry.fileId : createFileId(repo, filePath);
+
+      if (!ordinalsByFile.has(fileId)) {
+        ordinalsByFile.set(fileId, new Map<string, number>());
+      }
+
+      const fileOrdinals = ordinalsByFile.get(fileId) as Map<string, number>;
+      const ordinalKey = `${kind}:${name}`;
+      const fallbackOrdinal = (fileOrdinals.get(ordinalKey) ?? 0) + 1;
+      fileOrdinals.set(ordinalKey, fallbackOrdinal);
+
+      const declarationFingerprint =
+        typeof entry.declarationFingerprint === 'string'
+          ? entry.declarationFingerprint
+          : createDeclarationFingerprint(kind, name, fallbackOrdinal);
+      const symbolId =
+        typeof entry.symbolId === 'string'
+          ? entry.symbolId
+          : createSymbolId(fileId, kind, name, fallbackOrdinal);
+
+      return {
+        symbolId,
+        fileId,
+        name,
+        kind,
+        repo,
+        filePath,
+        startLine: entry.startLine as number,
+        endLine: entry.endLine as number,
+        exported: typeof entry.exported === 'boolean' ? entry.exported : undefined,
+        declarationFingerprint,
+      };
+    });
+}
+
+function appendLookupEntry(
+  lookup: Record<string, IndexedSymbol[]>,
+  key: string,
+  symbol: IndexedSymbol,
+): void {
+  const existingEntry = lookup[key];
+
+  if (!Array.isArray(existingEntry)) {
+    lookup[key] = [];
+  }
+
+  lookup[key].push(symbol);
+}
+
+function buildLookupTable(
+  symbols: IndexedSymbol[],
+  keySelector: (symbol: IndexedSymbol) => string,
+): Record<string, IndexedSymbol[]> {
+  const lookup = Object.create(null) as Record<string, IndexedSymbol[]>;
+
+  for (const symbol of symbols) {
+    appendLookupEntry(lookup, keySelector(symbol), symbol);
   }
 
   return lookup;
@@ -48,9 +138,27 @@ function normalizeFileRelationTable(value: unknown): Record<string, FileRelation
     return lookup;
   }
 
-  for (const [key, relation] of Object.entries(value)) {
+  for (const relation of Object.values(value)) {
     if (isFileRelation(relation)) {
-      lookup[key] = relation;
+      lookup[relation.fileId] = relation;
+      continue;
+    }
+
+    if (
+      isObject(relation) &&
+      typeof relation.repo === 'string' &&
+      typeof relation.filePath === 'string' &&
+      isStringArray(relation.symbols) &&
+      isStringArray(relation.imports)
+    ) {
+      const fileId = createFileId(relation.repo, relation.filePath);
+      lookup[fileId] = {
+        fileId,
+        repo: relation.repo,
+        filePath: relation.filePath,
+        symbols: relation.symbols,
+        imports: relation.imports,
+      };
     }
   }
 
@@ -59,20 +167,19 @@ function normalizeFileRelationTable(value: unknown): Record<string, FileRelation
 
 function normalizeLoadedIndex(value: unknown): SymbolIndex {
   if (!isObject(value)) {
-    return {
-      symbols: [],
-      byName: Object.create(null) as SymbolIndex['byName'],
-      byNameLower: Object.create(null) as SymbolIndex['byNameLower'],
-      byFile: Object.create(null) as SymbolIndex['byFile'],
-    };
+    return createEmptyIndex();
   }
 
-  const symbols = Array.isArray(value.symbols) ? value.symbols : [];
-  const byName = normalizeLookupTable(value.byName);
-  const byNameLower = normalizeLookupTable(value.byNameLower);
+  const symbols = normalizeSymbols(value.symbols);
+  const byName = buildLookupTable(symbols, (symbol) => symbol.name);
+  const byNameLower = buildLookupTable(symbols, (symbol) => symbol.name.toLowerCase());
   const byFile = normalizeFileRelationTable(value.byFile);
 
   return {
+    schemaVersion:
+      typeof value.schemaVersion === 'number' && Number.isInteger(value.schemaVersion)
+        ? value.schemaVersion
+        : 2,
     symbols,
     byName,
     byNameLower,
@@ -82,7 +189,7 @@ function normalizeLoadedIndex(value: unknown): SymbolIndex {
 
 export async function loadSymbolIndex(): Promise<SymbolIndex> {
   try {
-    const content = await fs.readFile(SYMBOL_INDEX_FILE_PATH, 'utf8');
+    const content = await fs.readFile(getSymbolIndexFilePathInternal(), 'utf8');
     const parsed = JSON.parse(content) as unknown;
 
     return normalizeLoadedIndex(parsed);
@@ -93,12 +200,7 @@ export async function loadSymbolIndex(): Promise<SymbolIndex> {
         : '';
 
     if (code === 'ENOENT') {
-      return {
-        symbols: [],
-        byName: Object.create(null) as SymbolIndex['byName'],
-        byNameLower: Object.create(null) as SymbolIndex['byNameLower'],
-        byFile: Object.create(null) as SymbolIndex['byFile'],
-      };
+      return createEmptyIndex();
     }
 
     throw error;
@@ -107,7 +209,7 @@ export async function loadSymbolIndex(): Promise<SymbolIndex> {
 
 export async function loadRequiredSymbolIndex(): Promise<SymbolIndex> {
   try {
-    await fs.access(SYMBOL_INDEX_FILE_PATH);
+    await fs.access(getSymbolIndexFilePathInternal());
   } catch (error) {
     const code =
       typeof error === 'object' && error !== null && 'code' in error
@@ -125,12 +227,16 @@ export async function loadRequiredSymbolIndex(): Promise<SymbolIndex> {
 }
 
 export async function saveSymbolIndex(index: SymbolIndex): Promise<string> {
-  await fs.mkdir(SYMBOL_INDEX_DIRECTORY, { recursive: true });
-  await fs.writeFile(SYMBOL_INDEX_TEMP_FILE_PATH, JSON.stringify(index, null, 2), 'utf8');
-  await fs.rename(SYMBOL_INDEX_TEMP_FILE_PATH, SYMBOL_INDEX_FILE_PATH);
-  return SYMBOL_INDEX_FILE_PATH;
+  const symbolIndexDirectory = getSymbolIndexDirectory();
+  const tempFilePath = getSymbolIndexTempFilePath();
+  const filePath = getSymbolIndexFilePathInternal();
+
+  await fs.mkdir(symbolIndexDirectory, { recursive: true });
+  await fs.writeFile(tempFilePath, JSON.stringify(index, null, 2), 'utf8');
+  await fs.rename(tempFilePath, filePath);
+  return filePath;
 }
 
 export function getSymbolIndexFilePath(): string {
-  return SYMBOL_INDEX_FILE_PATH;
+  return getSymbolIndexFilePathInternal();
 }

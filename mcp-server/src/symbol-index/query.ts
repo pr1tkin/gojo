@@ -1,6 +1,7 @@
 import path from 'node:path';
 
 import type { SymbolKind } from '../types.js';
+import { createFileId } from './ids.js';
 import { loadRequiredSymbolIndex } from './store.js';
 import type { FileRelation, IndexedSymbol, SymbolIndex } from './types.js';
 
@@ -46,7 +47,7 @@ function resolveFileRelationKey(index: SymbolIndex, filePath: string, repo?: str
 
   if (repo) {
     const repoRelativePath = normalizedPath.replace(/^\/+/, '');
-    const directKey = `${repo}/${repoRelativePath}`;
+    const directKey = createFileId(repo, repoRelativePath);
 
     if (index.byFile[directKey]) {
       return directKey;
@@ -62,7 +63,7 @@ function resolveFileRelationKey(index: SymbolIndex, filePath: string, repo?: str
   const segments = normalizedKey.split('/').filter(Boolean);
 
   if (segments.length >= 2) {
-    const repoScopedKey = `${segments[0]}/${segments.slice(1).join('/')}`;
+    const repoScopedKey = createFileId(segments[0], segments.slice(1).join('/'));
 
     if (index.byFile[repoScopedKey]) {
       return repoScopedKey;

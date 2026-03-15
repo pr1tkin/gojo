@@ -5,6 +5,7 @@ import { listRepositories } from '../repositories.js';
 import { extractSymbolsFromSource } from '../symbols.js';
 import { isSupportedSymbolFile } from '../tree-sitter.js';
 import { classifyFile } from './file-classification.js';
+import { createDeclarationFingerprint, createFileId, createSymbolId } from './ids.js';
 import type { FileRelation, IndexedSymbol, SymbolIndex } from './types.js';
 
 const IGNORED_DIRECTORIES = new Set([
@@ -65,16 +66,27 @@ function mapIndexedSymbols(
   symbols: ReturnType<typeof extractSymbolsFromSource>,
 ): IndexedSymbol[] {
   const lines = source.split(/\r?\n/);
+  const fileId = createFileId(repositoryId, filePath);
+  const symbolOrdinals = new Map<string, number>();
 
-  return symbols.map((symbol) => ({
-    name: symbol.name,
-    kind: symbol.kind,
-    repo: repositoryId,
-    filePath,
-    startLine: symbol.startLine,
-    endLine: symbol.endLine,
-    exported: /\bexport\b/.test(lines[symbol.startLine - 1] ?? ''),
-  }));
+  return symbols.map((symbol) => {
+    const ordinalKey = `${symbol.kind}:${symbol.name}`;
+    const ordinal = (symbolOrdinals.get(ordinalKey) ?? 0) + 1;
+    symbolOrdinals.set(ordinalKey, ordinal);
+
+    return {
+      symbolId: createSymbolId(fileId, symbol.kind, symbol.name, ordinal),
+      fileId,
+      name: symbol.name,
+      kind: symbol.kind,
+      repo: repositoryId,
+      filePath,
+      startLine: symbol.startLine,
+      endLine: symbol.endLine,
+      exported: /\bexport\b/.test(lines[symbol.startLine - 1] ?? ''),
+      declarationFingerprint: createDeclarationFingerprint(symbol.kind, symbol.name, ordinal),
+    };
+  });
 }
 
 function appendLookupEntry(
@@ -93,6 +105,7 @@ function appendLookupEntry(
 
 function createEmptySymbolIndex(): SymbolIndex {
   return {
+    schemaVersion: 2,
     symbols: [],
     byName: Object.create(null) as Record<string, IndexedSymbol[]>,
     byNameLower: Object.create(null) as Record<string, IndexedSymbol[]>,
@@ -101,7 +114,7 @@ function createEmptySymbolIndex(): SymbolIndex {
 }
 
 function createFileRelationKey(repo: string, filePath: string): string {
-  return `${repo}/${filePath}`;
+  return createFileId(repo, filePath);
 }
 
 function extractImportedSymbolNames(source: string): string[] {
@@ -191,6 +204,7 @@ function createFileRelation(
   symbols: IndexedSymbol[],
 ): FileRelation {
   return {
+    fileId: createFileId(repo, filePath),
     repo,
     filePath,
     symbols: Array.from(new Set(symbols.map((symbol) => symbol.name))).sort((left, right) =>

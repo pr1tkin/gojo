@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
+import { createFileId, createSymbolId } from '../../src/symbol-index/ids.js';
 
 const { findSymbolMock } = vi.hoisted(() => ({
   findSymbolMock: vi.fn(),
@@ -37,6 +38,13 @@ describe('find_symbol compiler-aware integration', () => {
   it('returns compiler-refined results with the existing public result shape when compiler context exists', async () => {
     findSymbolMock.mockResolvedValue([
       {
+        symbolId: createSymbolId(
+          createFileId('ts-project', 'src/wrong.ts'),
+          'class',
+          'UserService',
+          1,
+        ),
+        fileId: createFileId('ts-project', 'src/wrong.ts'),
         name: 'UserService',
         kind: 'class',
         repo: 'ts-project',
@@ -44,6 +52,7 @@ describe('find_symbol compiler-aware integration', () => {
         startLine: 1,
         endLine: 1,
         exported: false,
+        declarationFingerprint: 'class:UserService:1',
       },
     ]);
 
@@ -56,6 +65,13 @@ describe('find_symbol compiler-aware integration', () => {
 
     expect(parsed).toEqual([
       {
+        symbolId: createSymbolId(
+          createFileId('ts-project', 'src/models.ts'),
+          'class',
+          'UserService',
+          1,
+        ),
+        fileId: createFileId('ts-project', 'src/models.ts'),
         name: 'UserService',
         kind: 'class',
         repo: 'ts-project',
@@ -63,6 +79,7 @@ describe('find_symbol compiler-aware integration', () => {
         startLine: 5,
         endLine: 9,
         exported: true,
+        declarationFingerprint: 'class:UserService:1',
       },
     ]);
   });
@@ -70,6 +87,13 @@ describe('find_symbol compiler-aware integration', () => {
   it('falls back to the baseline result shape when compiler context does not exist', async () => {
     findSymbolMock.mockResolvedValue([
       {
+        symbolId: createSymbolId(
+          createFileId('missing-project', 'src/missing.ts'),
+          'class',
+          'MissingService',
+          1,
+        ),
+        fileId: createFileId('missing-project', 'src/missing.ts'),
         name: 'MissingService',
         kind: 'class',
         repo: 'missing-project',
@@ -77,6 +101,7 @@ describe('find_symbol compiler-aware integration', () => {
         startLine: 1,
         endLine: 3,
         exported: false,
+        declarationFingerprint: 'class:MissingService:1',
       },
     ]);
 
@@ -89,6 +114,13 @@ describe('find_symbol compiler-aware integration', () => {
 
     expect(parsed).toEqual([
       {
+        symbolId: createSymbolId(
+          createFileId('missing-project', 'src/missing.ts'),
+          'class',
+          'MissingService',
+          1,
+        ),
+        fileId: createFileId('missing-project', 'src/missing.ts'),
         name: 'MissingService',
         kind: 'class',
         repo: 'missing-project',
@@ -96,6 +128,7 @@ describe('find_symbol compiler-aware integration', () => {
         startLine: 1,
         endLine: 3,
         exported: false,
+        declarationFingerprint: 'class:MissingService:1',
       },
     ]);
   });

@@ -11,6 +11,8 @@ export interface IndexedFileMetadata {
 }
 
 export interface IndexedSymbol {
+  symbolId: string;
+  fileId: string;
   name: string;
   kind: SymbolKind;
   repo: string;
@@ -18,9 +20,11 @@ export interface IndexedSymbol {
   startLine: number;
   endLine: number;
   exported?: boolean;
+  declarationFingerprint?: string;
 }
 
 export interface FileRelation {
+  fileId: string;
   repo: string;
   filePath: string;
   symbols: string[];
@@ -28,6 +32,7 @@ export interface FileRelation {
 }
 
 export interface SymbolIndex {
+  schemaVersion: number;
   symbols: IndexedSymbol[];
   byName: Record<string, IndexedSymbol[]>;
   byNameLower: Record<string, IndexedSymbol[]>;
