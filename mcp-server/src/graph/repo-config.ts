@@ -169,7 +169,7 @@ function parseConfigEntry(repoRootPath: string, configPath: string): RepoConfigE
     }
   }
 
-  if (!baseUrlRelativePath && pathMappings.length === 0) {
+  if (baseUrlRelativePath === undefined && pathMappings.length === 0) {
     return null;
   }
 

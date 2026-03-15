@@ -431,6 +431,126 @@ describe('buildCodeGraphFromSymbolIndex', () => {
     );
   });
 
+  it('resolves repo-root baseUrl imports for components, utils, and lib paths', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'root-baseurl-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'components', 'admin', 'cleanup'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'utils', 'api'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'lib'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'components', 'admin', 'cleanup', 'header.tsx'),
+      'export const AdminCleanupHeader = () => null;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'utils', 'api', 'index.ts'),
+      'export const api = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'lib', 'session.ts'),
+      'export const session = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'pages.tsx'),
+      [
+        "import { AdminCleanupHeader } from 'components/admin/cleanup/header';",
+        "import { api } from 'utils/api';",
+        "import { session } from 'lib/session';",
+        'export const page = [AdminCleanupHeader, api, session];',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'root-baseurl-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+    const consumerFileId = createFileId('root-baseurl-repo', 'pages.tsx');
+
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: consumerFileId,
+          toId: createFileId('root-baseurl-repo', 'components/admin/cleanup/header.tsx'),
+          metadata: { source: 'components/admin/cleanup/header' },
+        }),
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: consumerFileId,
+          toId: createFileId('root-baseurl-repo', 'utils/api/index.ts'),
+          metadata: { source: 'utils/api' },
+        }),
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: consumerFileId,
+          toId: createFileId('root-baseurl-repo', 'lib/session.ts'),
+          metadata: { source: 'lib/session' },
+        }),
+      ]),
+    );
+  });
+
+  it('resolves deterministic repo-root baseUrl reexports', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'root-baseurl-reexport-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'components', 'ui'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'components', 'ui', 'Button.tsx'),
+      'export const Button = () => null;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'index.ts'),
+      "export { Button } from 'components/ui/Button';",
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'root-baseurl-reexport-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'file_reexports_file',
+          fromId: createFileId('root-baseurl-reexport-repo', 'index.ts'),
+          toId: createFileId('root-baseurl-reexport-repo', 'components/ui/Button.tsx'),
+          metadata: {
+            source: 'components/ui/Button',
+            exportedName: 'Button',
+            localName: 'Button',
+          },
+        }),
+      ]),
+    );
+  });
+
   it('resolves alias reexports when the configured target is deterministic', async () => {
     const reposRoot = await createTempDirectory();
     tempDirectories.push(reposRoot);
@@ -510,6 +630,85 @@ describe('buildCodeGraphFromSymbolIndex', () => {
     const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'strict-package-repo');
     const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
     const consumerFileId = createFileId('strict-package-repo', 'src/consumer.ts');
+
+    expect(graph.edges.filter((edge) => edge.type === 'file_imports_file' && edge.fromId === consumerFileId)).toEqual(
+      [],
+    );
+  });
+
+  it('does not resolve missing repo-root baseUrl targets', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'missing-root-baseurl-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'consumer.ts'),
+      [
+        "import { MissingHeader } from 'components/admin/cleanup/header';",
+        'export const consumer = MissingHeader;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'missing-root-baseurl-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+    const consumerFileId = createFileId('missing-root-baseurl-repo', 'consumer.ts');
+
+    expect(graph.edges.filter((edge) => edge.type === 'file_imports_file' && edge.fromId === consumerFileId)).toEqual(
+      [],
+    );
+  });
+
+  it('does not resolve ambiguous repo-root baseUrl candidates', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'ambiguous-root-baseurl-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'utils', 'api'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'utils', 'api.ts'),
+      'export const api = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'utils', 'api', 'index.ts'),
+      'export const apiIndex = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'consumer.ts'),
+      [
+        "import { api } from 'utils/api';",
+        'export const consumer = api;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'ambiguous-root-baseurl-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+    const consumerFileId = createFileId('ambiguous-root-baseurl-repo', 'consumer.ts');
 
     expect(graph.edges.filter((edge) => edge.type === 'file_imports_file' && edge.fromId === consumerFileId)).toEqual(
       [],

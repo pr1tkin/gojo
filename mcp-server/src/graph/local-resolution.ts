@@ -85,7 +85,7 @@ function buildConfiguredLocalCandidatePaths(
     }
   }
 
-  if (configEntry.baseUrlRelativePath) {
+  if (configEntry.baseUrlRelativePath !== undefined) {
     const baseUrlPath =
       configEntry.baseUrlRelativePath === ''
         ? source
