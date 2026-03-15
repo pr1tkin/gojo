@@ -4,6 +4,7 @@ import path from 'node:path';
 import { listRepositories } from '../repositories.js';
 import { extractSymbolsFromSource } from '../symbols.js';
 import { isSupportedSymbolFile } from '../tree-sitter.js';
+import { classifyFile } from './file-classification.js';
 import type { FileRelation, IndexedSymbol, SymbolIndex } from './types.js';
 
 const IGNORED_DIRECTORIES = new Set([
@@ -20,6 +21,7 @@ function normalizeRelativePath(filePath: string): string {
 
 async function collectRepositorySourceFiles(
   repositoryRoot: string,
+  repositoryId: string,
   currentDirectory: string = repositoryRoot,
 ): Promise<string[]> {
   const entries = await fs.readdir(currentDirectory, { withFileTypes: true });
@@ -33,7 +35,7 @@ async function collectRepositorySourceFiles(
         continue;
       }
 
-      files.push(...(await collectRepositorySourceFiles(repositoryRoot, entryPath)));
+      files.push(...(await collectRepositorySourceFiles(repositoryRoot, repositoryId, entryPath)));
       continue;
     }
 
@@ -42,6 +44,11 @@ async function collectRepositorySourceFiles(
     }
 
     const relativePath = normalizeRelativePath(path.relative(repositoryRoot, entryPath));
+    const classification = classifyFile(repositoryId, relativePath);
+
+    if (classification.classification !== 'source') {
+      continue;
+    }
 
     if (isSupportedSymbolFile(relativePath)) {
       files.push(relativePath);
@@ -200,7 +207,7 @@ export async function buildIndexedSymbols(reposRoot: string): Promise<SymbolInde
   const index = createEmptySymbolIndex();
 
   for (const repository of repositories) {
-    const files = await collectRepositorySourceFiles(repository.rootPath);
+    const files = await collectRepositorySourceFiles(repository.rootPath, repository.id);
 
     for (const filePath of files) {
       const absolutePath = path.join(repository.rootPath, filePath);

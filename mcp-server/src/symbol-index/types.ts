@@ -1,5 +1,15 @@
 import type { SymbolKind } from '../types.js';
 
+export type FileClassification = 'source' | 'generated' | 'unknown';
+
+export interface IndexedFileMetadata {
+  fileId: string;
+  repo: string;
+  filePath: string;
+  classification: FileClassification;
+  language: 'ts' | 'tsx';
+}
+
 export interface IndexedSymbol {
   name: string;
   kind: SymbolKind;
