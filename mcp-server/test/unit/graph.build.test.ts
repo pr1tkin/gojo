@@ -5,11 +5,18 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildCodeGraphFromSymbolIndex } from '../../src/graph/build-graph.js';
+import { loadRepoResolutionConfigs } from '../../src/graph/repo-config.js';
 import { createFileId, createSymbolId } from '../../src/symbol-index/ids.js';
 import { buildIndexedSymbols } from '../../src/symbol-index/build-index.js';
 
 async function createTempDirectory(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'reporadar-graph-build-test-'));
+}
+
+async function loadGraphRepoConfigs(reposRoot: string, ...repoIds: string[]) {
+  return loadRepoResolutionConfigs(
+    Object.fromEntries(repoIds.map((repoId) => [repoId, path.join(reposRoot, repoId)])),
+  );
 }
 
 const tempDirectories: string[] = [];
@@ -329,30 +336,312 @@ describe('buildCodeGraphFromSymbolIndex', () => {
     );
   });
 
-  it('does not resolve alias or missing imports to local file edges', async () => {
+  it('resolves tsconfig alias imports when a simple local mapping is configured', async () => {
     const reposRoot = await createTempDirectory();
     tempDirectories.push(reposRoot);
 
-    const repositoryRoot = path.join(reposRoot, 'strict-repo');
+    const repositoryRoot = path.join(reposRoot, 'alias-repo');
     await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
-    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'shared'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@/*': ['./src/*'],
+          },
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'shared', 'button.ts'),
+      'export const button = 1;',
+      'utf8',
+    );
     await fs.writeFile(
       path.join(repositoryRoot, 'src', 'consumer.ts'),
       [
-        "import { AliasThing } from '@/shared/button';",
-        "import { MissingThing } from './missing';",
-        'export const consumer = [AliasThing, MissingThing];',
+        "import { button } from '@/shared/button';",
+        'export const consumer = button;',
       ].join('\n'),
       'utf8',
     );
 
     const index = await buildIndexedSymbols(reposRoot);
-    const graph = buildCodeGraphFromSymbolIndex(index);
-    const consumerFileId = createFileId('strict-repo', 'src/consumer.ts');
-    const importEdges = graph.edges.filter(
-      (edge) => edge.type === 'file_imports_file' && edge.fromId === consumerFileId,
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'alias-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: createFileId('alias-repo', 'src/consumer.ts'),
+          toId: createFileId('alias-repo', 'src/shared/button.ts'),
+          metadata: { source: '@/shared/button' },
+        }),
+      ]),
+    );
+  });
+
+  it('resolves baseUrl-style local imports when they map to one indexed file', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'baseurl-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'components', 'card'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: './src',
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'components', 'card', 'index.tsx'),
+      'export const Card = () => null;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { Card } from 'components/card';",
+        'export const consumer = Card;',
+      ].join('\n'),
+      'utf8',
     );
 
-    expect(importEdges).toEqual([]);
+    const index = await buildIndexedSymbols(reposRoot);
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'baseurl-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: createFileId('baseurl-repo', 'src/consumer.ts'),
+          toId: createFileId('baseurl-repo', 'src/components/card/index.tsx'),
+          metadata: { source: 'components/card' },
+        }),
+      ]),
+    );
+  });
+
+  it('resolves alias reexports when the configured target is deterministic', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'alias-reexport-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'shared'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@/*': ['./src/*'],
+          },
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'shared', 'button.tsx'),
+      'export const Button = () => null;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'index.ts'),
+      "export { Button } from '@/shared/button';",
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'alias-reexport-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'file_reexports_file',
+          fromId: createFileId('alias-reexport-repo', 'src/index.ts'),
+          toId: createFileId('alias-reexport-repo', 'src/shared/button.tsx'),
+          metadata: {
+            source: '@/shared/button',
+            exportedName: 'Button',
+            localName: 'Button',
+          },
+        }),
+      ]),
+    );
+  });
+
+  it('keeps package imports unresolved even when baseUrl exists', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'strict-package-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: './src',
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import React from 'react';",
+        'export const consumer = React;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'strict-package-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+    const consumerFileId = createFileId('strict-package-repo', 'src/consumer.ts');
+
+    expect(graph.edges.filter((edge) => edge.type === 'file_imports_file' && edge.fromId === consumerFileId)).toEqual(
+      [],
+    );
+  });
+
+  it('does not resolve configured alias imports when the target is missing', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'missing-alias-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@/*': ['./src/*'],
+          },
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { MissingThing } from '@/missing';",
+        'export const consumer = MissingThing;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'missing-alias-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+    const consumerFileId = createFileId('missing-alias-repo', 'src/consumer.ts');
+
+    expect(graph.edges.filter((edge) => edge.type === 'file_imports_file' && edge.fromId === consumerFileId)).toEqual(
+      [],
+    );
+  });
+
+  it('does not resolve configured imports when alias or baseUrl candidates are ambiguous', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'ambiguous-alias-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'shared'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@/*': ['./src/*'],
+          },
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'shared.ts'),
+      'export const shared = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'shared', 'index.ts'),
+      'export const sharedIndex = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { shared } from '@/shared';",
+        'export const consumer = shared;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'ambiguous-alias-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+    const consumerFileId = createFileId('ambiguous-alias-repo', 'src/consumer.ts');
+
+    expect(graph.edges.filter((edge) => edge.type === 'file_imports_file' && edge.fromId === consumerFileId)).toEqual(
+      [],
+    );
+  });
+
+  it('does not guess through unsupported complex alias config', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'complex-alias-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'shared'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@/*': ['./src/*', './generated/*'],
+          },
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'shared', 'button.ts'),
+      'export const button = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { button } from '@/shared/button';",
+        'export const consumer = button;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'complex-alias-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+    const consumerFileId = createFileId('complex-alias-repo', 'src/consumer.ts');
+
+    expect(graph.edges.filter((edge) => edge.type === 'file_imports_file' && edge.fromId === consumerFileId)).toEqual(
+      [],
+    );
   });
 });

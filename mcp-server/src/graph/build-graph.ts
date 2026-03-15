@@ -1,5 +1,8 @@
+import { loadConfig } from '../config.js';
+import { listRepositories } from '../repositories.js';
 import { loadRequiredSymbolIndex } from '../symbol-index/store.js';
 import type { ExportRecord, FileRelation, ImportRecord, SymbolIndex } from '../symbol-index/types.js';
+import { loadRepoResolutionConfigs, type RepoResolutionConfig } from './repo-config.js';
 import { resolveLocalFileTarget } from './local-resolution.js';
 import {
   CODE_GRAPH_SCHEMA_VERSION,
@@ -65,12 +68,23 @@ function createEdge(
   };
 }
 
+export interface BuildCodeGraphOptions {
+  repoResolutionConfigsById?: Record<string, RepoResolutionConfig>;
+  reposRoot?: string;
+}
+
 function maybeCreateFileImportEdge(
   relation: FileRelation,
   importRecord: ImportRecord,
   filesById: Record<string, FileRelation>,
+  repoResolutionConfigsById: Record<string, RepoResolutionConfig> | undefined,
 ): GraphEdge | null {
-  const resolution = resolveLocalFileTarget(relation, importRecord.source, filesById);
+  const resolution = resolveLocalFileTarget(
+    relation,
+    importRecord.source,
+    filesById,
+    repoResolutionConfigsById?.[relation.repo],
+  );
 
   if (resolution.status !== 'resolved' || !resolution.targetFileId) {
     return null;
@@ -89,12 +103,18 @@ function maybeCreateFileReexportEdge(
   relation: FileRelation,
   exportRecord: ExportRecord,
   filesById: Record<string, FileRelation>,
+  repoResolutionConfigsById: Record<string, RepoResolutionConfig> | undefined,
 ): GraphEdge | null {
   if (!exportRecord.source) {
     return null;
   }
 
-  const resolution = resolveLocalFileTarget(relation, exportRecord.source, filesById);
+  const resolution = resolveLocalFileTarget(
+    relation,
+    exportRecord.source,
+    filesById,
+    repoResolutionConfigsById?.[relation.repo],
+  );
 
   if (resolution.status !== 'resolved' || !resolution.targetFileId) {
     return null;
@@ -129,7 +149,10 @@ function dedupeEdges(edges: GraphEdge[]): GraphEdge[] {
   return deduped;
 }
 
-export function buildCodeGraphFromSymbolIndex(index: SymbolIndex): CodeGraphSnapshot {
+export function buildCodeGraphFromSymbolIndex(
+  index: SymbolIndex,
+  options: BuildCodeGraphOptions = {},
+): CodeGraphSnapshot {
   const repos: CodeGraphSnapshot['nodes']['repos'] = Object.create(null);
   const files: CodeGraphSnapshot['nodes']['files'] = Object.create(null);
   const symbols: CodeGraphSnapshot['nodes']['symbols'] = Object.create(null);
@@ -169,7 +192,12 @@ export function buildCodeGraphFromSymbolIndex(index: SymbolIndex): CodeGraphSnap
     }
 
     for (const importRecord of relation.imports) {
-      const edge = maybeCreateFileImportEdge(relation, importRecord, index.byFile);
+      const edge = maybeCreateFileImportEdge(
+        relation,
+        importRecord,
+        index.byFile,
+        options.repoResolutionConfigsById,
+      );
 
       if (edge) {
         edges.push(edge);
@@ -177,7 +205,12 @@ export function buildCodeGraphFromSymbolIndex(index: SymbolIndex): CodeGraphSnap
     }
 
     for (const exportRecord of relation.exports) {
-      const edge = maybeCreateFileReexportEdge(relation, exportRecord, index.byFile);
+      const edge = maybeCreateFileReexportEdge(
+        relation,
+        exportRecord,
+        index.byFile,
+        options.repoResolutionConfigsById,
+      );
 
       if (edge) {
         edges.push(edge);
@@ -198,7 +231,29 @@ export function buildCodeGraphFromSymbolIndex(index: SymbolIndex): CodeGraphSnap
   };
 }
 
-export async function buildCodeGraph(): Promise<CodeGraphSnapshot> {
+export async function buildCodeGraph(options: BuildCodeGraphOptions = {}): Promise<CodeGraphSnapshot> {
   const index = await loadRequiredSymbolIndex();
-  return buildCodeGraphFromSymbolIndex(index);
+  const repoResolutionConfigsById =
+    options.repoResolutionConfigsById ?? (await loadRepoResolutionConfigsForGraph(options.reposRoot));
+  return buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+}
+
+async function loadRepoResolutionConfigsForGraph(
+  reposRootOverride?: string,
+): Promise<Record<string, RepoResolutionConfig>> {
+  const reposRoot = reposRootOverride ?? loadConfig().reposRoot;
+
+  try {
+    const repositories = await listRepositories(reposRoot);
+
+    if (repositories.length === 0) {
+      return {};
+    }
+
+    return loadRepoResolutionConfigs(
+      Object.fromEntries(repositories.map((repository) => [repository.id, repository.rootPath])),
+    );
+  } catch {
+    return {};
+  }
 }

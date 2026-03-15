@@ -1,6 +1,8 @@
 import path from 'node:path';
 
 import type { FileRelation } from '../symbol-index/types.js';
+import type { RepoResolutionConfig, SimplePathMapping } from './repo-config.js';
+import { getNearestRepoConfigEntry } from './repo-config.js';
 
 export type LocalResolutionStatus = 'resolved' | 'unresolved' | 'ambiguous' | 'non_local';
 
@@ -12,6 +14,22 @@ export interface LocalResolutionResult {
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, '/');
+}
+
+function buildCandidatePathsFromBasePath(basePath: string): string[] {
+  const normalizedBasePath = normalizePath(basePath).replace(/^\/+/, '');
+  const hasExplicitExtension = normalizedBasePath.endsWith('.ts') || normalizedBasePath.endsWith('.tsx');
+
+  if (hasExplicitExtension) {
+    return [normalizedBasePath];
+  }
+
+  return [
+    `${normalizedBasePath}.ts`,
+    `${normalizedBasePath}.tsx`,
+    path.posix.join(normalizedBasePath, 'index.ts'),
+    path.posix.join(normalizedBasePath, 'index.tsx'),
+  ];
 }
 
 export function isRelativeLocalSpecifier(source: string): boolean {
@@ -28,34 +46,74 @@ export function buildLocalResolutionCandidatePaths(
   const normalizedBase = baseDirectory === '.' ? '' : baseDirectory;
   const resolvedBase = normalizePath(
     path.posix.normalize(path.posix.join(normalizedBase, normalizedSource)),
-  ).replace(/^\/+/, '');
-  const hasExplicitExtension = resolvedBase.endsWith('.ts') || resolvedBase.endsWith('.tsx');
+  );
 
-  if (hasExplicitExtension) {
-    return [resolvedBase];
+  return buildCandidatePathsFromBasePath(resolvedBase);
+}
+
+function applySimplePathMapping(mapping: SimplePathMapping, source: string): string | null {
+  if (!mapping.wildcard) {
+    return source === mapping.aliasPattern ? mapping.targetPattern : null;
   }
 
-  return [
-    `${resolvedBase}.ts`,
-    `${resolvedBase}.tsx`,
-    path.posix.join(resolvedBase, 'index.ts'),
-    path.posix.join(resolvedBase, 'index.tsx'),
-  ];
+  if (!source.startsWith(mapping.aliasPrefix) || !source.endsWith(mapping.aliasSuffix)) {
+    return null;
+  }
+
+  const matchedSegment = source.slice(mapping.aliasPrefix.length, source.length - mapping.aliasSuffix.length);
+  return `${mapping.targetPrefix}${matchedSegment}${mapping.targetSuffix}`;
+}
+
+function buildConfiguredLocalCandidatePaths(
+  relation: FileRelation,
+  source: string,
+  repoConfig: RepoResolutionConfig | undefined,
+): string[] {
+  const configEntry = getNearestRepoConfigEntry(repoConfig, relation.filePath);
+
+  if (!configEntry) {
+    return [];
+  }
+
+  const candidateBasePaths = new Set<string>();
+
+  for (const mapping of configEntry.pathMappings) {
+    const mappedPath = applySimplePathMapping(mapping, source);
+
+    if (mappedPath) {
+      candidateBasePaths.add(mappedPath);
+    }
+  }
+
+  if (configEntry.baseUrlRelativePath) {
+    const baseUrlPath =
+      configEntry.baseUrlRelativePath === ''
+        ? source
+        : path.posix.join(configEntry.baseUrlRelativePath, normalizePath(source));
+    candidateBasePaths.add(baseUrlPath);
+  }
+
+  return Array.from(candidateBasePaths).flatMap((candidateBasePath) =>
+    buildCandidatePathsFromBasePath(candidateBasePath),
+  );
 }
 
 export function resolveLocalFileTarget(
   relation: FileRelation,
   source: string,
   filesById: Record<string, FileRelation>,
+  repoConfig?: RepoResolutionConfig,
 ): LocalResolutionResult {
-  if (!isRelativeLocalSpecifier(source)) {
+  const candidatePaths = isRelativeLocalSpecifier(source)
+    ? buildLocalResolutionCandidatePaths(relation.filePath, source)
+    : buildConfiguredLocalCandidatePaths(relation, source, repoConfig);
+
+  if (candidatePaths.length === 0) {
     return {
       status: 'non_local',
       candidateFileIds: [],
     };
   }
-
-  const candidatePaths = buildLocalResolutionCandidatePaths(relation.filePath, source);
   const candidateFileIds = new Set<string>();
 
   for (const candidatePath of candidatePaths) {
