@@ -108,7 +108,7 @@ describe('buildIndexedSymbols', () => {
 
     const index = await buildIndexedSymbols(reposRoot);
 
-    expect(index.schemaVersion).toBe(2);
+    expect(index.schemaVersion).toBe(3);
     expect(index.symbols).toEqual([
       expect.objectContaining({
         symbolId: createSymbolId(
@@ -137,6 +137,19 @@ describe('buildIndexedSymbols', () => {
         fileId: createFileId('generated-repo', 'src/kept.ts'),
         repo: 'generated-repo',
         filePath: 'src/kept.ts',
+        classification: 'source',
+        symbolIds: [createSymbolId(createFileId('generated-repo', 'src/kept.ts'), 'function', 'keepMe', 1)],
+        symbolNames: ['keepMe'],
+        imports: [],
+        exports: [
+          expect.objectContaining({
+            fileId: createFileId('generated-repo', 'src/kept.ts'),
+            kind: 'named',
+            exportedName: 'keepMe',
+            localName: 'keepMe',
+          }),
+        ],
+        importTokens: [],
       }),
     );
   });
@@ -173,6 +186,13 @@ describe('buildIndexedSymbols', () => {
         fileId,
         repo: 'identity-repo',
         filePath: 'src/duplicates.ts',
+        classification: 'source',
+        symbolIds: [
+          createSymbolId(fileId, 'function', 'repeat', 1),
+          createSymbolId(fileId, 'function', 'repeat', 2),
+          createSymbolId(fileId, 'class', 'repeat', 1),
+        ],
+        symbolNames: ['repeat'],
       }),
     );
     expect(repeatFunctions).toHaveLength(2);

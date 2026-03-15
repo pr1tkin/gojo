@@ -23,12 +23,41 @@ export interface IndexedSymbol {
   declarationFingerprint?: string;
 }
 
+export interface ImportBinding {
+  importedName: string | null;
+  localName: string;
+  kind: 'default' | 'named' | 'namespace';
+  isTypeOnly: boolean;
+}
+
+export interface ImportRecord {
+  fileId: string;
+  source: string;
+  bindings: ImportBinding[];
+  resolvedKind?: 'local-file' | 'package' | 'unknown';
+  resolvedTargetFileId?: string;
+}
+
+export interface ExportRecord {
+  fileId: string;
+  kind: 'named' | 'default' | 'reexport-all' | 'reexport-named';
+  exportedName?: string;
+  localName?: string;
+  source?: string;
+  isTypeOnly?: boolean;
+  symbolId?: string;
+}
+
 export interface FileRelation {
   fileId: string;
   repo: string;
   filePath: string;
-  symbols: string[];
-  imports: string[];
+  classification: FileClassification;
+  symbolIds: string[];
+  symbolNames: string[];
+  imports: ImportRecord[];
+  exports: ExportRecord[];
+  importTokens: string[];
 }
 
 export interface SymbolIndex {

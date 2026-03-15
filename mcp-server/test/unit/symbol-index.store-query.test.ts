@@ -54,12 +54,15 @@ describe('symbol-index store and query', () => {
     const loadedIndex = await loadSymbolIndex();
     const fileId = createFileId('query-repo', 'src/query.ts');
 
-    expect(loadedIndex.schemaVersion).toBe(2);
+    expect(loadedIndex.schemaVersion).toBe(3);
     expect(loadedIndex.byFile[fileId]).toEqual(
       expect.objectContaining({
         fileId,
         repo: 'query-repo',
         filePath: 'src/query.ts',
+        classification: 'source',
+        symbolNames: ['lookup'],
+        importTokens: ['./helper', 'helper'],
       }),
     );
     expect(loadedIndex.symbols).toEqual(
@@ -88,6 +91,9 @@ describe('symbol-index store and query', () => {
         fileId,
         repo: 'query-repo',
         filePath: 'src/query.ts',
+        classification: 'source',
+        symbolNames: ['lookup'],
+        importTokens: ['./helper', 'helper'],
       }),
     );
   });
@@ -145,12 +151,15 @@ describe('symbol-index store and query', () => {
     const loadedIndex = await loadSymbolIndex();
     const fileId = createFileId('legacy-repo', 'src/legacy.ts');
 
-    expect(loadedIndex.schemaVersion).toBe(2);
+    expect(loadedIndex.schemaVersion).toBe(3);
     expect(loadedIndex.byFile[fileId]).toEqual(
       expect.objectContaining({
         fileId,
         repo: 'legacy-repo',
         filePath: 'src/legacy.ts',
+        classification: 'source',
+        symbolNames: ['legacyLookup'],
+        importTokens: [],
       }),
     );
     expect(loadedIndex.byName.legacyLookup).toEqual([

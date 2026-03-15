@@ -24,20 +24,69 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
+function isImportBinding(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    (typeof value.importedName === 'string' || value.importedName === null) &&
+    typeof value.localName === 'string' &&
+    (value.kind === 'default' || value.kind === 'named' || value.kind === 'namespace') &&
+    typeof value.isTypeOnly === 'boolean'
+  );
+}
+
+function isImportRecord(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    typeof value.fileId === 'string' &&
+    typeof value.source === 'string' &&
+    Array.isArray(value.bindings) &&
+    value.bindings.every((binding) => isImportBinding(binding)) &&
+    (value.resolvedKind === undefined ||
+      value.resolvedKind === 'local-file' ||
+      value.resolvedKind === 'package' ||
+      value.resolvedKind === 'unknown') &&
+    (value.resolvedTargetFileId === undefined || typeof value.resolvedTargetFileId === 'string')
+  );
+}
+
+function isExportRecord(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    typeof value.fileId === 'string' &&
+    (value.kind === 'named' ||
+      value.kind === 'default' ||
+      value.kind === 'reexport-all' ||
+      value.kind === 'reexport-named') &&
+    (value.exportedName === undefined || typeof value.exportedName === 'string') &&
+    (value.localName === undefined || typeof value.localName === 'string') &&
+    (value.source === undefined || typeof value.source === 'string') &&
+    (value.isTypeOnly === undefined || typeof value.isTypeOnly === 'boolean') &&
+    (value.symbolId === undefined || typeof value.symbolId === 'string')
+  );
+}
+
 function isFileRelation(value: unknown): value is FileRelation {
   return (
     isObject(value) &&
     typeof value.fileId === 'string' &&
     typeof value.repo === 'string' &&
     typeof value.filePath === 'string' &&
-    isStringArray(value.symbols) &&
-    isStringArray(value.imports)
+    (value.classification === 'source' ||
+      value.classification === 'generated' ||
+      value.classification === 'unknown') &&
+    isStringArray(value.symbolIds) &&
+    isStringArray(value.symbolNames) &&
+    Array.isArray(value.imports) &&
+    value.imports.every((entry) => isImportRecord(entry)) &&
+    Array.isArray(value.exports) &&
+    value.exports.every((entry) => isExportRecord(entry)) &&
+    isStringArray(value.importTokens)
   );
 }
 
 function createEmptyIndex(): SymbolIndex {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     symbols: [],
     byName: Object.create(null) as SymbolIndex['byName'],
     byNameLower: Object.create(null) as SymbolIndex['byNameLower'],
@@ -156,8 +205,12 @@ function normalizeFileRelationTable(value: unknown): Record<string, FileRelation
         fileId,
         repo: relation.repo,
         filePath: relation.filePath,
-        symbols: relation.symbols,
-        imports: relation.imports,
+        classification: 'source',
+        symbolIds: [],
+        symbolNames: relation.symbols,
+        imports: [],
+        exports: [],
+        importTokens: relation.imports,
       };
     }
   }
@@ -179,7 +232,7 @@ function normalizeLoadedIndex(value: unknown): SymbolIndex {
     schemaVersion:
       typeof value.schemaVersion === 'number' && Number.isInteger(value.schemaVersion)
         ? value.schemaVersion
-        : 2,
+        : 3,
     symbols,
     byName,
     byNameLower,

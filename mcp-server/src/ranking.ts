@@ -89,8 +89,8 @@ export function rankFindReferenceResults(
   return [...results].sort((left, right) => {
     const leftRelation = relationsByKey[`${left.repo}/${left.filePath}`];
     const rightRelation = relationsByKey[`${right.repo}/${right.filePath}`];
-    const leftImportsSymbol = leftRelation?.imports.includes(symbol) ? 1 : 0;
-    const rightImportsSymbol = rightRelation?.imports.includes(symbol) ? 1 : 0;
+    const leftImportsSymbol = leftRelation?.importTokens.includes(symbol) ? 1 : 0;
+    const rightImportsSymbol = rightRelation?.importTokens.includes(symbol) ? 1 : 0;
 
     if (rightImportsSymbol !== leftImportsSymbol) {
       return rightImportsSymbol - leftImportsSymbol;
@@ -167,17 +167,17 @@ export function rankRelatedFiles(
 ): RelatedFileMatch[] {
   return candidates
     .map((candidate) => {
-      const sharedImports = countIntersection(target.imports, candidate.imports);
-      const sharedSymbols = countIntersection(target.symbols, candidate.symbols);
+      const sharedSymbols = countIntersection(target.symbolNames, candidate.symbolNames);
+      const sharedImportTokens = countIntersection(target.importTokens, candidate.importTokens);
       const sameRepo = candidate.repo === target.repo ? 1 : 0;
       const pathCloseness = computePathCloseness(target.filePath, candidate.filePath);
       const score =
-        sharedImports * 5 + sharedSymbols * 3 + sameRepo * 2 + pathCloseness;
+        sharedImportTokens * 5 + sharedSymbols * 3 + sameRepo * 2 + pathCloseness;
 
       return {
         candidate,
         score,
-        reason: determineReason(sharedImports, sharedSymbols, pathCloseness),
+        reason: determineReason(sharedImportTokens, sharedSymbols, pathCloseness),
       };
     })
     .filter((entry) => entry.score > 0)

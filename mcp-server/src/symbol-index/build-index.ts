@@ -5,6 +5,7 @@ import { listRepositories } from '../repositories.js';
 import { extractSymbolsFromSource } from '../symbols.js';
 import { isSupportedSymbolFile } from '../tree-sitter.js';
 import { classifyFile } from './file-classification.js';
+import { extractFileMetadata } from './file-metadata.js';
 import { createDeclarationFingerprint, createFileId, createSymbolId } from './ids.js';
 import type { FileRelation, IndexedSymbol, SymbolIndex } from './types.js';
 
@@ -105,7 +106,7 @@ function appendLookupEntry(
 
 function createEmptySymbolIndex(): SymbolIndex {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     symbols: [],
     byName: Object.create(null) as Record<string, IndexedSymbol[]>,
     byNameLower: Object.create(null) as Record<string, IndexedSymbol[]>,
@@ -117,103 +118,15 @@ function createFileRelationKey(repo: string, filePath: string): string {
   return createFileId(repo, filePath);
 }
 
-function extractImportedSymbolNames(source: string): string[] {
-  const importedSymbols = new Set<string>();
-  const namedImportPattern = /\bimport\s+([^'";]+?)\s+from\s+['"][^'"]+['"]/g;
-
-  for (const match of source.matchAll(namedImportPattern)) {
-    const clause = match[1]?.trim() ?? '';
-
-    if (!clause) {
-      continue;
-    }
-
-    if (clause.startsWith('{') && clause.endsWith('}')) {
-      const names = clause
-        .slice(1, -1)
-        .split(',')
-        .map((name) => name.trim())
-        .filter(Boolean)
-        .map((name) => name.split(/\s+as\s+/i)[0]?.trim())
-        .filter(Boolean) as string[];
-
-      for (const name of names) {
-        importedSymbols.add(name);
-      }
-
-      continue;
-    }
-
-    if (clause.includes('{')) {
-      const [defaultImport, namedImports] = clause.split('{', 2);
-      const defaultName = defaultImport.replace(/,$/, '').trim();
-
-      if (defaultName) {
-        importedSymbols.add(defaultName);
-      }
-
-      const namedSection = namedImports.replace('}', '');
-      const names = namedSection
-        .split(',')
-        .map((name) => name.trim())
-        .filter(Boolean)
-        .map((name) => name.split(/\s+as\s+/i)[0]?.trim())
-        .filter(Boolean) as string[];
-
-      for (const name of names) {
-        importedSymbols.add(name);
-      }
-
-      continue;
-    }
-
-    const namespaceMatch = clause.match(/^\*\s+as\s+([A-Za-z_$][\w$]*)$/);
-
-    if (namespaceMatch?.[1]) {
-      importedSymbols.add(namespaceMatch[1]);
-      continue;
-    }
-
-    if (/^[A-Za-z_$][\w$]*$/.test(clause)) {
-      importedSymbols.add(clause);
-    }
-  }
-
-  return Array.from(importedSymbols).sort((left, right) => left.localeCompare(right));
-}
-
-function extractImportedModulePaths(source: string): string[] {
-  const modulePaths = new Set<string>();
-  const modulePathPattern = /\b(?:import|export)\b(?:[\s\S]*?\bfrom\b\s+)?['"]([^'"]+)['"]/g;
-
-  for (const match of source.matchAll(modulePathPattern)) {
-    const modulePath = match[1]?.trim();
-
-    if (modulePath) {
-      modulePaths.add(modulePath);
-    }
-  }
-
-  return Array.from(modulePaths).sort((left, right) => left.localeCompare(right));
-}
-
 function createFileRelation(
+  fileId: string,
   repo: string,
   filePath: string,
+  classification: ReturnType<typeof classifyFile>['classification'],
   source: string,
   symbols: IndexedSymbol[],
 ): FileRelation {
-  return {
-    fileId: createFileId(repo, filePath),
-    repo,
-    filePath,
-    symbols: Array.from(new Set(symbols.map((symbol) => symbol.name))).sort((left, right) =>
-      left.localeCompare(right),
-    ),
-    imports: Array.from(
-      new Set([...extractImportedSymbolNames(source), ...extractImportedModulePaths(source)]),
-    ).sort((left, right) => left.localeCompare(right)),
-  };
+  return extractFileMetadata(fileId, repo, filePath, classification, source, symbols);
 }
 
 export async function buildIndexedSymbols(reposRoot: string): Promise<SymbolIndex> {
@@ -226,6 +139,8 @@ export async function buildIndexedSymbols(reposRoot: string): Promise<SymbolInde
     for (const filePath of files) {
       const absolutePath = path.join(repository.rootPath, filePath);
       const source = await fs.readFile(absolutePath, 'utf8');
+      const fileId = createFileId(repository.id, filePath);
+      const classification = classifyFile(repository.id, filePath);
       const repoScopedFilePath = `${repository.id}/${filePath}`;
       const symbols = extractSymbolsFromSource(source, repoScopedFilePath);
       const indexedSymbols = mapIndexedSymbols(repository.id, filePath, source, symbols);
@@ -237,8 +152,10 @@ export async function buildIndexedSymbols(reposRoot: string): Promise<SymbolInde
       }
 
       index.byFile[createFileRelationKey(repository.id, filePath)] = createFileRelation(
+        fileId,
         repository.id,
         filePath,
+        classification.classification,
         source,
         indexedSymbols,
       );
