@@ -28,6 +28,7 @@ export interface RelatedFileCandidate {
 }
 
 export interface RankedRelatedFile {
+  fileId: string;
   repo: string;
   filePath: string;
   reason: string;

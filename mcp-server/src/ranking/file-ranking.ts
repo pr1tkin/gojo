@@ -74,6 +74,7 @@ export function rankRelatedFileCandidates(
       }
 
       return {
+        fileId: candidate.relation.fileId,
         repo: candidate.relation.repo,
         filePath: candidate.relation.filePath,
         score,

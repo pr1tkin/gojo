@@ -79,6 +79,11 @@ export async function getFileRelation(filePath: string, repo?: string): Promise<
   return index.byFile[key];
 }
 
+export async function getFileRelationById(fileId: string): Promise<FileRelation | null> {
+  const index = await loadRequiredSymbolIndex();
+  return index.byFile[fileId] ?? null;
+}
+
 export async function listFileRelations(): Promise<FileRelation[]> {
   const index = await loadRequiredSymbolIndex();
   return Object.values(index.byFile);
