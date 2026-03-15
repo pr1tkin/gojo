@@ -5,7 +5,24 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildCodeGraph, buildCodeGraphFromSymbolIndex } from '../../src/graph/build-graph.js';
-import { getFileNode, getGraph, getIncomingEdges, getOutgoingEdges, getSymbolNode } from '../../src/graph/query.js';
+import {
+  getDefinedSymbols,
+  getExportedSymbols,
+  getFileNode,
+  getFileRepo,
+  getGraph,
+  getImportedFiles,
+  getImportingFiles,
+  getIncomingEdges,
+  getNeighboringFiles,
+  getOutgoingEdges,
+  getRelatedFiles,
+  getReexportedFiles,
+  getReexportingFiles,
+  getRepoFiles,
+  getSymbolFile,
+  getSymbolNode,
+} from '../../src/graph/query.js';
 import { loadCodeGraph, saveCodeGraph } from '../../src/graph/store.js';
 import { createFileId, createSymbolId } from '../../src/symbol-index/ids.js';
 import { buildIndexedSymbols } from '../../src/symbol-index/build-index.js';
@@ -174,5 +191,120 @@ describe('graph store and query', () => {
         }),
       ]),
     );
+  });
+
+  it('returns higher-level file and symbol graph relationships', async () => {
+    const tempRoot = await createTempDirectory();
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    const reposRoot = path.join(tempRoot, 'repos');
+    const repositoryRoot = path.join(reposRoot, 'query-graph-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'shared.ts'),
+      'export const shared = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'barrel.ts'),
+      "export { shared } from './shared';",
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { shared } from './shared';",
+        'export const consumer = shared;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    await saveSymbolIndex(index);
+    const graph = await buildCodeGraph();
+    await saveCodeGraph(graph);
+
+    const sharedFileId = createFileId('query-graph-repo', 'src/shared.ts');
+    const barrelFileId = createFileId('query-graph-repo', 'src/barrel.ts');
+    const consumerFileId = createFileId('query-graph-repo', 'src/consumer.ts');
+    const sharedSymbolId = createSymbolId(sharedFileId, 'variable', 'shared', 1);
+    const consumerSymbolId = createSymbolId(consumerFileId, 'variable', 'consumer', 1);
+
+    expect(await getImportedFiles(consumerFileId)).toEqual([
+      expect.objectContaining({ fileId: sharedFileId }),
+    ]);
+    expect(await getImportingFiles(sharedFileId)).toEqual([
+      expect.objectContaining({ fileId: consumerFileId }),
+    ]);
+    expect(await getReexportedFiles(barrelFileId)).toEqual([
+      expect.objectContaining({ fileId: sharedFileId }),
+    ]);
+    expect(await getReexportingFiles(sharedFileId)).toEqual([
+      expect.objectContaining({ fileId: barrelFileId }),
+    ]);
+    expect(await getNeighboringFiles(sharedFileId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fileId: consumerFileId }),
+        expect.objectContaining({ fileId: barrelFileId }),
+      ]),
+    );
+    expect(await getDefinedSymbols(sharedFileId)).toEqual([
+      expect.objectContaining({ symbolId: sharedSymbolId }),
+    ]);
+    expect(await getExportedSymbols(sharedFileId)).toEqual([
+      expect.objectContaining({ symbolId: sharedSymbolId }),
+    ]);
+    expect(await getDefinedSymbols(consumerFileId)).toEqual([
+      expect.objectContaining({ symbolId: consumerSymbolId }),
+    ]);
+    expect(await getExportedSymbols(consumerFileId)).toEqual([
+      expect.objectContaining({ symbolId: consumerSymbolId }),
+    ]);
+    expect(await getSymbolFile(sharedSymbolId)).toEqual(
+      expect.objectContaining({ fileId: sharedFileId }),
+    );
+    expect(await getRepoFiles('query-graph-repo')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ fileId: sharedFileId }),
+        expect.objectContaining({ fileId: barrelFileId }),
+        expect.objectContaining({ fileId: consumerFileId }),
+      ]),
+    );
+    expect(await getFileRepo(sharedFileId)).toEqual(
+      expect.objectContaining({ repoId: 'query-graph-repo' }),
+    );
+    expect(await getRelatedFiles(sharedFileId)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          file: expect.objectContaining({ fileId: consumerFileId }),
+          via: 'file_imports_file',
+        }),
+        expect.objectContaining({
+          file: expect.objectContaining({ fileId: barrelFileId }),
+          via: 'file_reexports_file',
+        }),
+      ]),
+    );
+  });
+
+  it('returns safe empty results for missing nodes', async () => {
+    const tempRoot = await createTempDirectory();
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+    await saveCodeGraph(await loadCodeGraph());
+
+    expect(await getImportedFiles('missing-file')).toEqual([]);
+    expect(await getImportingFiles('missing-file')).toEqual([]);
+    expect(await getReexportedFiles('missing-file')).toEqual([]);
+    expect(await getReexportingFiles('missing-file')).toEqual([]);
+    expect(await getNeighboringFiles('missing-file')).toEqual([]);
+    expect(await getDefinedSymbols('missing-file')).toEqual([]);
+    expect(await getExportedSymbols('missing-file')).toEqual([]);
+    expect(await getSymbolFile('missing-symbol')).toBeNull();
+    expect(await getRepoFiles('missing-repo')).toEqual([]);
+    expect(await getFileRepo('missing-file')).toBeNull();
+    expect(await getRelatedFiles('missing-file')).toEqual([]);
   });
 });
