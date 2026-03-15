@@ -413,4 +413,57 @@ describe('explore_component tool', () => {
       },
     });
   });
+
+  it('degrades safely when a repo filter removes all candidates', async () => {
+    getSymbolExplorationContextMock.mockResolvedValue({
+      query: 'Button',
+      repo: 'missing-repo',
+      kind: undefined,
+      primarySymbol: null,
+      primaryFile: null,
+      rankedSymbols: [],
+      relatedFiles: [],
+      exportedSymbols: [],
+      summary: {
+        candidateCount: 0,
+        relatedFileCount: 0,
+        exportedSymbolCount: 0,
+      },
+      rawContext: {},
+    });
+
+    const result = await runExploreComponentTool({
+      name: 'Button',
+      repo: 'missing-repo',
+    });
+    const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
+
+    expect(getSymbolExplorationContextMock).toHaveBeenCalledWith('Button', {
+      repo: 'missing-repo',
+      limit: 5,
+      relatedLimit: 10,
+    });
+    expect(getFileExplorationContextMock).not.toHaveBeenCalled();
+    expect(parsed).toEqual({
+      requestedName: 'Button',
+      requestedRepo: 'missing-repo',
+      resolution: {
+        status: 'missing',
+        candidateCount: 0,
+        ambiguityDetected: false,
+        selectedCandidate: null,
+        alternativeCandidates: [],
+      },
+      resolvedPrimarySymbol: null,
+      resolvedPrimaryFile: null,
+      relatedFiles: [],
+      definedSymbols: [],
+      exportedSymbols: [],
+      summary: {
+        relatedFileCount: 0,
+        definedSymbolCount: 0,
+        exportedSymbolCount: 0,
+      },
+    });
+  });
 });

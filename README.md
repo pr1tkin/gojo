@@ -1,38 +1,176 @@
 # RepoRadar
 
-Local code-search stack for AI-assisted development using Zoekt, Tree-sitter, and an MCP server.
+RepoRadar is a local code-intelligence engine that provides structured repository context for LLM agents and developers.
 
-## ✨ Features
+It combines:
 
-- Fast full-text search via Zoekt
-- Structural symbol extraction via Tree-sitter
-- MCP tool interface for AI agents
-- Local repository indexing
+- Zoekt full-text search
+- Tree-sitter symbol extraction
+- a persisted symbol index with stable `fileId` and `symbolId`
+- an import/export graph with conservative local resolution
+- ranking and context assembly layers
+- orchestrator flows
+- MCP tools, including `explore_component`
 
-## 🧠 Architecture
+## Project Overview
+
+RepoRadar helps agents work on real repositories where raw search alone is not enough.
+
+It turns local codebases into structured navigation and exploration data:
+
+- search finds candidate code quickly
+- symbol indexing identifies files and declarations
+- graph analysis connects imports and re-exports
+- ranking surfaces the most useful files and symbols first
+- orchestrator flows assemble agent-ready context bundles
+- MCP tools expose those flows to clients
+
+The current first high-level MCP tool is `explore_component`.
+
+## Why This Project Exists
+
+Large repositories are difficult for LLM agents because:
+
+- context windows are limited
+- search results are noisy
+- structural relationships are hidden behind imports, barrels, and project layout
+
+RepoRadar exists to provide structured repository intelligence instead of forcing agents to reconstruct architecture from raw text search.
+
+The goal is reliable agent workflows on real codebases:
+
+- code navigation
+- architecture discovery
+- component exploration
+- refactor planning
+- scoped implementation work
+
+## Architecture Overview
 
 ```text
-repos/
-   ↓
-zoekt-indexer
-   ↓
-zoekt
-   ↓
-mcp-server (stdio MCP)
+Agent / Copilot
+    |
+    v
+MCP Tools
+    |
+    v
+Orchestrator
+    |
+    +-------------------+-------------------+
+    |                   |                   |
+    v                   v                   v
+ Search              Graph              Symbols
+    |                   |                   |
+    v                   v                   v
+ Zoekt           Import/Export      Tree-sitter +
+                 Graph              Symbol Index
 ```
 
-- `repos/` holds local Git repositories or first-level symlinks to them.
-- `zoekt-indexer` builds and refreshes the search index automatically.
-- `zoekt` serves indexed full-text search on port `6070`.
-- `mcp-server` exposes the MCP tool surface over stdio.
+### Layer Roles
 
-## 🚀 Quickstart
+- `MCP Tools`
+  - public stdio tool surface for agents and developer clients
+  - includes low-level tools and the first high-level tool, `explore_component`
+- `Orchestrator`
+  - composes ranking, graph, and symbol context into practical flows
+- `Search`
+  - Zoekt-backed full-text retrieval
+- `Graph`
+  - file-level import and re-export relationships built from indexed metadata
+- `Symbols`
+  - Tree-sitter extraction plus persisted symbol and file relations
+
+## Runtime Architecture
+
+RepoRadar runs as three runtime services plus a shared repository mount:
+
+- `zoekt`
+  - serves indexed full-text search on port `6070`
+- `zoekt-indexer`
+  - scans `repos/` and refreshes Zoekt indexes
+- `mcp-server`
+  - serves MCP tools over stdio
+  - reads repositories from `/repos`
+  - persists MCP-side data in `mcp-server/.data`
+
+Key persisted artifacts:
+
+- `mcp-server/.data/symbol-index.json`
+- `mcp-server/.data/code-graph.json`
+
+## MCP Tools
+
+Current public MCP tools:
+
+- `search_code`
+- `open_file`
+- `list_symbols`
+- `find_symbol`
+- `find_references`
+- `find_related_files`
+- `explore_component`
+
+### `explore_component`
+
+`explore_component` explores the structure and context of a component or symbol inside a repository.
+
+It returns a structured bundle including:
+
+- resolved primary file
+- resolved primary symbol
+- related files
+- defined symbols
+- exported symbols
+- a concise exploration summary
+
+Why this matters:
+
+- LLM agents can start from a ranked, structured component context instead of raw search results
+- developers can inspect local architecture faster
+- refactor planning becomes easier because important neighbors are already surfaced
+
+## Example
+
+Example query:
+
+```text
+explore_component("ArticleContent", { "repo": "example-news-app" })
+```
+
+Example result summary:
+
+```text
+Primary file:
+src/app/articles/[id]/ArticleContent.tsx
+
+Related files:
+src/app/_components/articleHeaderText/ArticleHeaderText.tsx
+src/app/_components/text/Text.tsx
+src/app/articles/[id]/page.tsx
+src/app/_components/metadata/footer/Footer.tsx
+src/app/_components/metadata/podcast/Podcast.tsx
+
+Exported symbols:
+ArticleContent
+ArticleContentProps
+```
+
+An agent can use this to:
+
+- inspect the main component file
+- identify the most relevant collaborators immediately
+- understand the exported surface
+- start a targeted refactor or implementation change without manual graph reconstruction
+
+## Quick Start
+
+### Docker Compose
 
 ```bash
 git clone <repo-url> reporadar
 cd reporadar
 mkdir repos
-# add or link repositories under repos/
+# add or symlink repositories under repos/
 docker compose up -d --build
 ```
 
@@ -42,31 +180,48 @@ Example repository link:
 ln -s /path/to/my-project repos/my-project
 ```
 
-Indexing runs automatically through the `zoekt-indexer` service. You can also trigger a one-shot reindex with `scripts/index-repos.sh`.
+### Local MCP Server Build
 
-## 🔎 MCP Tools
+From `mcp-server/`:
 
-- `search_code`
-- `open_file`
-- `list_symbols`
-- `find_symbol`
-- `find_references`
-- `find_related_files`
+```bash
+npm install
+npm run build
+npm run test
+```
 
-## 📁 Project Structure
+## Repository Layout
 
-- `mcp-server` - TypeScript MCP server and symbol tooling
-- `zoekt` - Zoekt image and indexing entrypoint
-- `repos` - local repositories mounted into the stack
-- `docs` - architecture, operations, and testing notes
-- `scripts` - helper scripts such as manual reindexing
+- `mcp-server/`
+  - TypeScript MCP server, symbol index, graph, ranking, and orchestrator layers
+- `zoekt/`
+  - Zoekt image and indexing entrypoint
+- `repos/`
+  - local repositories mounted into the stack
+- `docs/`
+  - current architecture, operations, and testing docs
+- `scripts/`
+  - helper scripts such as one-shot indexing
 
-## 📚 Documentation
+## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md)
-- [`docs/operations.md`](docs/operations.md)
-- [`docs/testing.md`](docs/testing.md)
+Current docs:
 
-## 📄 License
+- [Architecture](./docs/architecture.md)
+- [Operations](./docs/operations.md)
+- [Testing](./docs/testing.md)
 
-No license file has been added yet.
+
+## Roadmap
+
+Next capabilities:
+
+- `analyze_symbol` tool
+- reference-analysis context
+- incremental index refresh
+- JSX indexing support
+- deeper cross-repo symbol graphs
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

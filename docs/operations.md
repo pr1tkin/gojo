@@ -1,10 +1,10 @@
-# Operations Guide
+# Operations
 
 ## Prerequisites
 
 - Docker with Compose support
 - one or more local Git repositories under [`repos/`](../repos)
-- Node.js and npm if you want to build or run the MCP server outside Docker
+- Node.js and npm if you want to run the MCP server outside Docker
 
 Optional:
 
@@ -14,21 +14,14 @@ Optional:
 
 ## Start The Stack
 
-Start everything:
-
 ```powershell
 docker compose up -d --build
 ```
 
-Validate the Compose configuration:
+Useful checks:
 
 ```powershell
 docker compose config
-```
-
-View service logs:
-
-```powershell
 docker compose logs zoekt
 docker compose logs zoekt-indexer
 docker compose logs mcp-server
@@ -36,9 +29,9 @@ docker compose logs mcp-server
 
 ## Repository Layout
 
-- Place repositories directly under `repos/`.
-- First-level symlinks are supported if they resolve correctly in your host and Docker runtime.
-- Only first-level entries are indexed.
+- place repositories directly under `repos/`
+- first-level symlinks are supported if they resolve correctly
+- only first-level entries are indexed
 
 Example:
 
@@ -49,12 +42,12 @@ ln -s /path/to/my-project repos/my-project
 
 ## Indexing
 
-Indexing is handled by `zoekt-indexer`.
+Zoekt indexing is handled by `zoekt-indexer`.
 
-- it runs automatically on startup
-- it repeats every `INDEX_INTERVAL_SECONDS`
-- the default interval is `300`
-- it skips broken symlinks, non-directories, and non-Git entries
+- runs automatically on startup
+- repeats every `INDEX_INTERVAL_SECONDS`
+- default interval is `300`
+- skips broken symlinks, non-directories, and non-Git entries
 
 Run a one-shot reindex:
 
@@ -62,9 +55,9 @@ Run a one-shot reindex:
 ./scripts/index-repos.sh
 ```
 
-The helper script builds `zoekt-indexer` and runs it once with `INDEX_ONCE=true`.
+The MCP-side symbol index and code graph are persisted under `mcp-server/.data/`.
 
-## MCP Runtime Options
+## MCP Runtime
 
 ### Compose-managed MCP server
 
@@ -76,7 +69,7 @@ If your IDE starts the MCP server with `docker run`, that container does not inh
 
 - a `/repos` mount
 - access to the Compose network if it should reach `http://zoekt:6070`
-- an optional `/app/.data` mount if you want symbol-index persistence
+- an optional `/app/.data` mount if you want symbol-index and graph persistence
 
 Example:
 
@@ -92,7 +85,7 @@ This matters because:
 
 - `search_code` needs Zoekt connectivity
 - `open_file` and `list_symbols` need `/repos`
-- `find_symbol`, `find_references`, and `find_related_files` work best when `/repos` and the symbol index are both available
+- `find_symbol`, `find_references`, `find_related_files`, and `explore_component` work best when `/repos` and `/app/.data` are both available
 
 ## Build And Test
 
@@ -112,9 +105,7 @@ cd mcp-server
 npm run start
 ```
 
-The MCP server does not expose an HTTP API.
-
-## Manual Symbol Index Build
+## Manual MCP-Side Index Build
 
 If you do not start the MCP server with `BUILD_SYMBOL_INDEX_ON_STARTUP=true`, build the symbol index manually:
 
@@ -123,7 +114,32 @@ cd mcp-server
 npx tsx src/symbol-index/indexer.ts
 ```
 
-In container-based setups, make sure the symbol index is built in the same environment that provides `/repos` and `/app/.data`.
+Then rebuild the code graph in the same environment:
+
+```powershell
+@'
+import { buildCodeGraph } from './dist/graph/build-graph.js';
+import { saveCodeGraph } from './dist/graph/store.js';
+const graph = await buildCodeGraph();
+await saveCodeGraph(graph);
+'@ | node --input-type=module -
+```
+
+In container-based setups, make sure indexing runs in the same environment that provides `/repos` and `/app/.data`.
+
+## Public MCP Tools
+
+Current public tools:
+
+- `search_code`
+- `open_file`
+- `list_symbols`
+- `find_symbol`
+- `find_references`
+- `find_related_files`
+- `explore_component`
+
+`explore_component` is the first high-level exploration tool. It returns a structured component or symbol context instead of a raw primitive lookup.
 
 ## Validation Checklist
 
@@ -133,37 +149,35 @@ In container-based setups, make sure the symbol index is built in the same envir
 4. Verify `open_file` can read a known file under `/repos/<repo-name>`.
 5. Verify `list_symbols` works on a known `.ts` or `.tsx` file.
 6. Verify `find_symbol`, `find_references`, and `find_related_files` after the symbol index exists.
+7. Verify `explore_component` returns a structured result for a known symbol such as `ArticleContent` or `Button`.
 
 ## Troubleshooting
 
 ### No search results
 
 - confirm the repository is a Git repository directly under `repos/`
-- confirm indexing has completed in `docker compose logs zoekt-indexer`
+- confirm indexing completed in `docker compose logs zoekt-indexer`
 - confirm Zoekt is reachable at `http://localhost:6070`
 
-### File tools fail but search works
+### File or symbol tools fail
 
 - confirm the MCP runtime has `/repos` mounted
 - this is common when an IDE starts a separate `docker run` container
 
-### Symbol tools fail
+### Context tools fail or return empty results
 
-- confirm the MCP runtime can read `/repos`
-- confirm the symbol index exists at `/app/.data/symbol-index.json` in container workflows
-- rebuild the symbol index if needed
+- confirm the symbol index exists at `/app/.data/symbol-index.json`
+- confirm the graph exists at `/app/.data/code-graph.json`
+- rebuild both if needed
 
-### Reindex after repository changes
+### `explore_component` returns no result
 
-- wait for the next polling interval
-- or run:
-
-```bash
-./scripts/index-repos.sh
-```
+- confirm the symbol exists in indexed `.ts` or `.tsx` files
+- add a `repo` filter if the name is ambiguous
+- rebuild the symbol index and graph after repository changes
 
 ### Windows note
 
 `scripts/index-repos.sh` is Bash-only. On Windows, run it through Git Bash, WSL, or another Bash-compatible shell.
 
-For runtime details, see [`architecture.md`](./architecture.md). For test scope, see [`testing.md`](./testing.md).
+For system structure, see [Architecture](./architecture.md). For test scope, see [Testing](./testing.md).

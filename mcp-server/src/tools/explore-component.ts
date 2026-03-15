@@ -8,7 +8,7 @@ const DEFAULT_RELATED_LIMIT = 10;
 export const exploreComponentToolDefinition = {
   name: 'explore_component',
   title: 'Explore Component',
-  description: 'Resolve a likely component symbol and return a concise exploration context.',
+  description: 'Explore the structure and context of a component or symbol in a repository.',
   inputSchema: exploreComponentInputSchema,
 };
 

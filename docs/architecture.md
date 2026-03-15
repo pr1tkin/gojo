@@ -1,8 +1,24 @@
 # Architecture
 
-RepoRadar is a local search stack built from three runtime services and one shared repository mount.
+## Overview
+
+RepoRadar is a local code-intelligence stack for repository exploration.
+
+It combines:
+
+- Zoekt for full-text search
+- Tree-sitter for TypeScript and TSX symbol extraction
+- a persisted symbol index with stable file and symbol identities
+- a file-level import/export graph
+- ranking and context assembly layers
+- orchestrator services
+- an MCP tool layer
+
+The current first high-level public MCP tool is `explore_component`.
 
 ## Runtime Services
+
+RepoRadar runs as three runtime services plus a shared repository mount:
 
 - `zoekt`
   - serves indexed full-text search over HTTP on port `6070`
@@ -13,42 +29,38 @@ RepoRadar is a local search stack built from three runtime services and one shar
   - uses `INDEX_INTERVAL_SECONDS`, default `300`
 - `mcp-server`
   - runs over stdio
-  - exposes MCP tools for search, file access, and symbol navigation
   - reads repositories from `/repos`
+  - persists local MCP-side data in `/app/.data`
+  - exposes MCP tools to clients
 
-## Repository And Index Storage
+## Layered Architecture
 
-- `./repos`
-  - host directory for local Git repositories
-  - first-level symlinks are supported if they resolve correctly in the runtime
-- `zoekt-index`
-  - Docker named volume shared by `zoekt` and `zoekt-indexer`
-- `mcp-server/.data/symbol-index.json`
-  - persisted MCP-side symbol index used by symbol and related-file tooling
+```text
+Agent / Copilot
+    |
+    v
+MCP Tools
+    |
+    v
+Orchestrator Services
+    |
+    +-------------------+-------------------+-------------------+
+    |                   |                   |                   |
+    v                   v                   v                   v
+ Search              Symbols             Graph              Ranking
+    |                   |                   |                   |
+    v                   v                   v                   v
+ Zoekt           Tree-sitter +        Import/Export       Context
+                 Symbol Index         Relationships       Selection
+```
 
-## Compose Layout
+## Layer Responsibilities
 
-The current `docker-compose.yml` defines:
+### MCP Tool Layer
 
-- `zoekt`
-  - build context `./zoekt`
-  - command `zoekt-webserver -listen :6070 -index /data/index`
-  - mounts `./repos:/repos:ro`
-  - mounts `zoekt-index:/data/index`
-  - publishes `6070:6070`
-- `zoekt-indexer`
-  - build context `./zoekt`
-  - command `/usr/local/bin/index-repos.sh`
-  - mounts `./repos:/repos:ro`
-  - mounts `zoekt-index:/data/index`
-- `mcp-server`
-  - build context `./mcp-server`
-  - mounts `./repos:/repos:ro`
-  - depends on `zoekt`
+The MCP tool layer is the public interface exposed over stdio.
 
-## Tool Surface
-
-`mcp-server/src/server.ts` currently registers:
+Current tools:
 
 - `search_code`
 - `open_file`
@@ -56,6 +68,87 @@ The current `docker-compose.yml` defines:
 - `find_symbol`
 - `find_references`
 - `find_related_files`
+- `explore_component`
+
+`explore_component` is the first public high-level tool. It returns structured component context rather than a low-level raw lookup result.
+
+### Orchestrator Services
+
+The orchestrator layer turns graph, symbol, and ranking data into useful exploration flows.
+
+Current public-facing internal services:
+
+- `getFileExplorationContext(...)`
+- `getSymbolExplorationContext(...)`
+
+These services feed the `explore_component` adapter.
+
+### Context Assembly Layer
+
+The context layer assembles:
+
+- ranked related files
+- neighboring files
+- defined symbols
+- exported symbols
+
+It does not perform indexing or graph construction directly. It composes existing graph and symbol data into agent-ready bundles.
+
+### Ranking Layer
+
+The ranking layer prioritizes:
+
+- symbol candidates
+- related files
+- reference candidates
+
+It keeps selection explainable by attaching scoring reasons.
+
+### Graph Layer
+
+The graph layer builds file-level relationships from indexed import/export metadata.
+
+Current graph capabilities:
+
+- deterministic file import edges
+- deterministic re-export edges
+- relative import resolution
+- deterministic `tsconfig` / `jsconfig` alias resolution
+- deterministic repo-root `baseUrl` local import resolution
+
+Edge creation stays conservative:
+
+- create an edge only when exactly one indexed local target resolves
+- prefer missing edges over incorrect guesses
+
+### Symbol Layer
+
+The symbol layer is built from Tree-sitter parsing plus persisted file metadata.
+
+Current symbol index data includes:
+
+- stable `fileId`
+- stable `symbolId`
+- symbol names and kinds
+- exported markers
+- file-level import/export metadata
+- aggregate symbol frequency statistics
+
+Persisted files:
+
+- `mcp-server/.data/symbol-index.json`
+- `mcp-server/.data/code-graph.json`
+
+### Search Layer
+
+Zoekt handles repository-scale full-text search.
+
+It is used for:
+
+- raw code search
+- fallback exploration paths where text retrieval is still useful
+
+Zoekt does not parse syntax and does not maintain symbol or graph relationships.
 
 ## Data Flow
 
@@ -63,55 +156,109 @@ The current `docker-compose.yml` defines:
 
 ```text
 repos/ -> zoekt-indexer -> zoekt-index volume -> zoekt
+repos/ -> mcp-server symbol indexing -> symbol-index.json -> code-graph.json
 ```
 
 1. Repositories are placed under `./repos`.
-2. `zoekt-indexer` scans the first-level entries under `/repos`.
-3. Valid Git repositories are indexed into `/data/index`.
-4. Zoekt serves those indexes over HTTP.
+2. `zoekt-indexer` scans and refreshes Zoekt indexes.
+3. The MCP server builds a persisted symbol index from repository files.
+4. The MCP server builds a code graph from the persisted symbol index.
 
-Indexing is automatic on startup and repeats on a polling interval. It is not watcher-based.
-
-### Search And Navigation
+### Exploration
 
 ```text
-MCP client -> mcp-server -> zoekt
-                    |
-                    +-> /repos
-                    +-> symbol-index.json
+MCP client -> explore_component
+                 |
+                 v
+         Orchestrator services
+                 |
+         +-------+-------+
+         |               |
+         v               v
+     Symbol context   File context
+         |               |
+         +-------+-------+
+                 |
+                 v
+      ranked related files + symbols
 ```
 
-- `search_code` queries Zoekt over HTTP.
-- `open_file` resolves repository-scoped paths safely under `/repos`.
-- `list_symbols` parses `.ts` and `.tsx` files with Tree-sitter.
-- `find_symbol`, `find_references`, and `find_related_files` use the persisted symbol index and may use TypeScript project context when available.
+## `explore_component`
 
-## Service Boundaries
+Purpose:
+
+- explore the structure and context of a component or symbol in a repository
+
+Current output shape includes:
+
+- resolved primary symbol
+- resolved primary file
+- related files
+- defined symbols
+- exported symbols
+- structured summary
+- ambiguity details when multiple candidates exist
+
+This matters because it gives agents a practical starting point for:
+
+- code navigation
+- architecture discovery
+- component understanding
+- refactor planning
+
+## Repository And Storage Layout
+
+- `./repos`
+  - host directory for local Git repositories
+  - first-level symlinks are supported if they resolve correctly
+- `zoekt-index`
+  - Docker named volume shared by `zoekt` and `zoekt-indexer`
+- `mcp-server/.data/symbol-index.json`
+  - persisted symbol index
+- `mcp-server/.data/code-graph.json`
+  - persisted import/export graph snapshot
+
+## Compose Layout
+
+The current `docker-compose.yml` defines:
+
+- `zoekt`
+  - serves Zoekt search over `6070`
+- `zoekt-indexer`
+  - performs periodic indexing of `/repos`
+- `mcp-server`
+  - runs the MCP server over stdio
+  - mounts `/repos`
+  - depends on `zoekt`
+
+## Boundaries
 
 ### Zoekt
 
-- Handles indexed full-text search only
-- Does not parse syntax trees
-- Does not manage repository discovery for MCP tools
-
-### Zoekt Indexer
-
-- Handles repository scanning and periodic indexing
-- Skips broken symlinks, non-directories, and non-Git entries
-- Does not expose a public network service
+- full-text search only
+- no syntax parsing
+- no symbol graph ownership
 
 ### MCP Server
 
-- Handles stdio MCP requests
-- Reads files and symbols from `/repos`
-- Calls Zoekt for full-text search
-- Does not expose an HTTP API in the current implementation
-- Does not maintain its own full-text search engine
+- stdio MCP protocol handling
+- symbol indexing
+- graph building
+- ranking
+- context assembly
+- orchestrator services
+- MCP tool exposure
 
-## Runtime Notes
+### Not In Scope Today
 
-- The main deployment model is Docker Compose.
-- An IDE can also start the MCP server separately with `docker run`, but that container must explicitly mount `/repos` and any desired `/app/.data` persistence.
-- End-to-end runtime validation is still mostly manual; unit coverage lives in the `mcp-server` test suite.
+- broad public tool-surface redesign
+- incremental refresh
+- `.jsx` symbol indexing
+- speculative package or workspace inference
+- deeper cross-repo symbol graph inference
 
-For setup and troubleshooting, see [`operations.md`](./operations.md). For test scope, see [`testing.md`](./testing.md).
+## Related Documents
+
+- [README](../README.md)
+- [Operations](./operations.md)
+- [Testing](./testing.md)

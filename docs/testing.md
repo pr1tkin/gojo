@@ -2,16 +2,20 @@
 
 ## Philosophy
 
-The project uses focused unit tests for the `mcp-server` codebase. The aim is to verify core navigation and safety logic directly, without depending on Docker, a live MCP client, or a running Zoekt instance.
+The project uses focused unit tests for the `mcp-server` codebase.
 
-The suite prioritizes:
+The aim is to verify:
 
-- repository discovery and symlink handling
-- safe file access and traversal protection
-- Zoekt request construction and result normalization
+- safe repository and file access
+- Zoekt request construction and result formatting
 - Tree-sitter parsing and symbol extraction
-- compiler-backed TypeScript precision behavior
-- thin public tool-handler contracts
+- symbol-index persistence and querying
+- graph construction and local-resolution behavior
+- ranking and context assembly
+- orchestrator services
+- MCP tool contracts, including `explore_component`
+
+The suite does not try to replace Docker integration tests or a live MCP client session.
 
 ## Running Tests
 
@@ -23,61 +27,103 @@ npm run test
 npm run test:coverage
 ```
 
-Vitest configuration lives in [`mcp-server/vitest.config.ts`](/C:/workspace/mcp-code-search/mcp-server/vitest.config.ts). Unit tests run from [`mcp-server/test/unit`](/C:/workspace/mcp-code-search/mcp-server/test/unit).
+Vitest configuration:
+
+- [`mcp-server/vitest.config.ts`](/C:/workspace/repo-radar/mcp-server/vitest.config.ts)
+
+Unit test directory:
+
+- [`mcp-server/test/unit`](/C:/workspace/repo-radar/mcp-server/test/unit)
 
 ## What Is Covered
 
 Current direct coverage includes:
 
-- `config.ts`
-- `files.ts`
-- `repositories.ts`
-- `zoekt-client.ts`
-- `formatters.ts`
-- `tree-sitter.ts`
-- `symbols.ts`
-- TypeScript precision modules:
-  - `tsconfig-discovery.ts`
-  - `project-loader.ts`
-  - `references.ts`
-  - fallback behavior for compiler precision
+- config and environment parsing
+- repository discovery
+- safe file reads
+- Zoekt client behavior
+- Tree-sitter parsing and symbol extraction
+- symbol-index build, persistence, and querying
+- TypeScript project helpers and compiler-backed fallback behavior
+- graph build, persistence, query helpers, and deterministic local resolution
+- ranking behavior for symbols, related files, and references
+- context assembly
+- orchestrator services
 - tool-layer behavior for:
   - `search_code`
   - `open_file`
   - `list_symbols`
-  - compiler-aware `find_symbol`
-  - compiler-aware `find_references` fallback behavior
+  - `find_symbol`
+  - `find_references`
+  - `find_related_files`
+  - `explore_component`
 
-Fixtures live under [`mcp-server/test/fixtures`](/C:/workspace/mcp-code-search/mcp-server/test/fixtures), including a small real TypeScript project for compiler-backed tests.
+Fixtures live under:
 
-## Coverage Overview
+- [`mcp-server/test/fixtures`](/C:/workspace/repo-radar/mcp-server/test/fixtures)
 
-The current suite was re-run during the final Phase 2 audit.
+## Tool-Level Coverage
 
-Useful highlights:
+The public MCP tools are intentionally tested as thin adapters.
 
-- `config.ts`: 100%
-- `files.ts`: 97.53%
-- `repositories.ts`: 96%
-- `zoekt-client.ts`: 100%
-- `formatters.ts`: 100%
-- `tree-sitter.ts`: 100%
-- `symbols.ts`: 95.23%
-- `tsconfig-discovery.ts`: 96.25%
-- `project-loader.ts`: 93.75%
-- `references.ts`: 91.27%
+That means the tests focus on:
 
-Some coverage totals remain lower than those individual modules suggest because the repo intentionally does not try to unit-test every thin entrypoint or every persisted-index helper in this phase.
+- public input schema acceptance
+- predictable structured output
+- safe degradation for missing or ambiguous results
+- delegation to existing internal layers rather than duplicated logic
 
-## Intentionally Out Of Scope
+For `explore_component`, the current tests cover:
 
-The suite still does not attempt to cover:
+- known component exploration
+- repo filtering
+- ambiguous names
+- missing names
+- repo filters that remove all candidates
+
+## What Is Intentionally Out Of Scope
+
+The unit suite does not attempt to cover:
 
 - Docker or Compose integration behavior
-- end-to-end MCP stdio client sessions
+- end-to-end MCP stdio sessions
 - live Zoekt indexing/search container integration
 - polling timing behavior for the indexer
-- complete cross-platform filesystem behavior for every symlink edge case
+- full cross-platform filesystem behavior for every symlink edge case
 - performance benchmarking
 
-`server.ts` remains intentionally outside the unit-test target because it is thin MCP SDK bootstrap code.
+`server.ts` remains lightly tested indirectly because it is mostly MCP SDK bootstrap and tool registration glue.
+
+## Suggested Validation Commands
+
+Targeted examples:
+
+```powershell
+npm run test -- graph.build.test.ts graph.store-query.test.ts
+npm run test -- orchestrator.service.test.ts
+npm run test -- explore-component.tool.test.ts
+```
+
+Full build verification:
+
+```powershell
+npm run build
+```
+
+## Current Validation Strategy
+
+Use unit tests for:
+
+- correctness of deterministic indexing and graph behavior
+- stable public tool contracts
+- safe failure modes
+
+Use manual runtime checks for:
+
+- Docker Compose startup
+- Zoekt availability
+- end-to-end MCP client integration
+- exploration quality on real repositories
+
+For runtime and environment setup, see [Operations](./operations.md). For the live system structure, see [Architecture](./architecture.md).
