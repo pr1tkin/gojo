@@ -136,3 +136,10 @@ export interface FindRelatedFilesInput {
   repo?: string;
   limit?: number;
 }
+
+export interface ExploreComponentInput {
+  name: string;
+  repo?: string;
+  limit?: number;
+  relatedLimit?: number;
+}

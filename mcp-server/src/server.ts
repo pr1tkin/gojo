@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
+import { exploreComponentToolDefinition, runExploreComponentTool } from './tools/explore-component.js';
 import { loadConfig } from './config.js';
 import { buildSymbolIndex } from './symbol-index/indexer.js';
 import { findRelatedFilesToolDefinition, runFindRelatedFilesTool } from './tools/find-related-files.js';
@@ -22,6 +23,16 @@ async function main(): Promise<void> {
     name: 'local-code-search',
     version: '0.1.0',
   });
+
+  server.registerTool(
+    exploreComponentToolDefinition.name,
+    {
+      title: exploreComponentToolDefinition.title,
+      description: exploreComponentToolDefinition.description,
+      inputSchema: exploreComponentToolDefinition.inputSchema,
+    },
+    async (input) => runExploreComponentTool(input),
+  );
 
   server.registerTool(
     searchCodeToolDefinition.name,

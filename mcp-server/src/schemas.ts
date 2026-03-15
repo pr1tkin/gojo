@@ -34,3 +34,10 @@ export const findRelatedFilesInputSchema = {
   repo: z.string().min(1).optional(),
   limit: z.number().int().min(1).max(50).optional(),
 };
+
+export const exploreComponentInputSchema = {
+  name: z.string().min(1),
+  repo: z.string().min(1).optional(),
+  limit: z.number().int().min(1).max(10).optional(),
+  relatedLimit: z.number().int().min(1).max(20).optional(),
+};
