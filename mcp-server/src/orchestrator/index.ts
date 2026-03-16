@@ -1,5 +1,6 @@
 export { getFileExplorationContext } from './file-service.js';
 export { analyzeSymbolImpact } from './impact-analysis-service.js';
+export { analyzeSymbolOwnership } from './symbol-ownership-service.js';
 export {
   getPatternMatchesForComponent,
   getPatternMatchesForFile,
@@ -29,6 +30,16 @@ export type {
   PublicSurfaceRisk,
   TransitiveImpact,
 } from './impact-analysis-types.js';
+export type {
+  AnalyzeSymbolOwnershipInput,
+  ApiBoundaryClassification,
+  OwnershipClassification,
+  OwnershipConfidence,
+  OwnershipSignal,
+  OwnershipSignalType,
+  SymbolOwnershipResult,
+  SymbolOwnershipTarget,
+} from './symbol-ownership-types.js';
 export type {
   FileExplorationContext,
   GetFileExplorationContextOptions,
