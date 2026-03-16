@@ -138,8 +138,11 @@ Current public tools:
 - `find_references`
 - `find_related_files`
 - `explore_component`
+- `search_patterns`
 
-`explore_component` is the first high-level exploration tool. It returns a structured component or symbol context instead of a raw primitive lookup.
+`explore_component` returns a structured component or symbol context instead of a raw primitive lookup.
+
+`search_patterns` returns heuristic precedent matches for a file, symbol, or component so agents can inspect similar implementations before generating or refactoring code.
 
 ## Validation Checklist
 
@@ -150,6 +153,7 @@ Current public tools:
 5. Verify `list_symbols` works on a known `.ts` or `.tsx` file.
 6. Verify `find_symbol`, `find_references`, and `find_related_files` after the symbol index exists.
 7. Verify `explore_component` returns a structured result for a known symbol such as `ArticleContent` or `Button`.
+8. Verify `search_patterns` returns explainable heuristic matches for a known symbol such as `Button` or `Layout`.
 
 ## Troubleshooting
 
@@ -175,6 +179,12 @@ Current public tools:
 - confirm the symbol exists in indexed `.ts` or `.tsx` files
 - add a `repo` filter if the name is ambiguous
 - rebuild the symbol index and graph after repository changes
+
+### `search_patterns` returns weak or empty matches
+
+- confirm the target file or symbol exists in indexed `.ts` or `.tsx` files
+- add a `repo` filter to keep the search inside the expected repository
+- remember that `search_patterns` is heuristic precedent search, not semantic similarity
 
 ### Windows note
 

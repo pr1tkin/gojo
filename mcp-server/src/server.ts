@@ -4,6 +4,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { exploreComponentToolDefinition, runExploreComponentTool } from './tools/explore-component.js';
 import { loadConfig } from './config.js';
 import { buildSymbolIndex } from './symbol-index/indexer.js';
+import { runSearchPatternsTool, searchPatternsToolDefinition } from './tools/search-patterns.js';
 import { findRelatedFilesToolDefinition, runFindRelatedFilesTool } from './tools/find-related-files.js';
 import { findSymbolToolDefinition, runFindSymbolTool } from './tools/find-symbol.js';
 import { findReferencesToolDefinition, runFindReferencesTool } from './tools/find-references.js';
@@ -32,6 +33,16 @@ async function main(): Promise<void> {
       inputSchema: exploreComponentToolDefinition.inputSchema,
     },
     async (input) => runExploreComponentTool(input),
+  );
+
+  server.registerTool(
+    searchPatternsToolDefinition.name,
+    {
+      title: searchPatternsToolDefinition.title,
+      description: searchPatternsToolDefinition.description,
+      inputSchema: searchPatternsToolDefinition.inputSchema,
+    },
+    async (input) => runSearchPatternsTool(input),
   );
 
   server.registerTool(

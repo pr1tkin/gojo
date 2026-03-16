@@ -13,7 +13,7 @@ The aim is to verify:
 - graph construction and local-resolution behavior
 - ranking and context assembly
 - orchestrator services
-- MCP tool contracts, including `explore_component`
+- MCP tool contracts, including `explore_component` and `search_patterns`
 
 The suite does not try to replace Docker integration tests or a live MCP client session.
 
@@ -58,6 +58,7 @@ Current direct coverage includes:
   - `find_references`
   - `find_related_files`
   - `explore_component`
+  - `search_patterns`
 
 Fixtures live under:
 
@@ -82,6 +83,14 @@ For `explore_component`, the current tests cover:
 - missing names
 - repo filters that remove all candidates
 
+For `search_patterns`, the current tests cover:
+
+- component-style pattern discovery
+- repo filtering
+- stable ranking
+- safe handling of missing targets
+- explainable ranking signals
+
 ## What Is Intentionally Out Of Scope
 
 The unit suite does not attempt to cover:
@@ -103,6 +112,7 @@ Targeted examples:
 npm run test -- graph.build.test.ts graph.store-query.test.ts
 npm run test -- orchestrator.service.test.ts
 npm run test -- explore-component.tool.test.ts
+npm run test -- pattern-service.test.ts search-patterns.tool.test.ts
 ```
 
 Full build verification:

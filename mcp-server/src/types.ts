@@ -143,3 +143,12 @@ export interface ExploreComponentInput {
   limit?: number;
   relatedLimit?: number;
 }
+
+export type SearchPatternsMode = 'component' | 'symbol' | 'file';
+
+export interface SearchPatternsInput {
+  name: string;
+  repo?: string;
+  limit?: number;
+  mode?: SearchPatternsMode;
+}

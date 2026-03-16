@@ -14,7 +14,7 @@ It combines:
 - orchestrator services
 - an MCP tool layer
 
-The current first high-level public MCP tool is `explore_component`.
+The current public high-level MCP tools are `explore_component` and `search_patterns`.
 
 ## Runtime Services
 
@@ -69,8 +69,9 @@ Current tools:
 - `find_references`
 - `find_related_files`
 - `explore_component`
+- `search_patterns`
 
-`explore_component` is the first public high-level tool. It returns structured component context rather than a low-level raw lookup result.
+`explore_component` and `search_patterns` are the current high-level public tools. They return structured exploration results rather than low-level raw lookup results.
 
 ### Orchestrator Services
 
@@ -80,8 +81,11 @@ Current public-facing internal services:
 
 - `getFileExplorationContext(...)`
 - `getSymbolExplorationContext(...)`
+- `getPatternMatchesForFile(...)`
+- `getPatternMatchesForSymbol(...)`
+- `getPatternMatchesForComponent(...)`
 
-These services feed the `explore_component` adapter.
+These services feed the `explore_component` and `search_patterns` adapters.
 
 ### Context Assembly Layer
 
@@ -101,6 +105,7 @@ The ranking layer prioritizes:
 - symbol candidates
 - related files
 - reference candidates
+- heuristic pattern matches
 
 It keeps selection explainable by attaching scoring reasons.
 
@@ -167,20 +172,20 @@ repos/ -> mcp-server symbol indexing -> symbol-index.json -> code-graph.json
 ### Exploration
 
 ```text
-MCP client -> explore_component
-                 |
-                 v
-         Orchestrator services
-                 |
-         +-------+-------+
-         |               |
-         v               v
-     Symbol context   File context
-         |               |
-         +-------+-------+
-                 |
-                 v
-      ranked related files + symbols
+MCP client -> explore_component / search_patterns
+                    |
+                    v
+            Orchestrator services
+                    |
+        +-----------+-----------+
+        |                       |
+        v                       v
+    Symbol context          File context
+        |                       |
+        +-----------+-----------+
+                    |
+                    v
+      ranked related files + heuristic pattern matches
 ```
 
 ## `explore_component`
@@ -205,6 +210,26 @@ This matters because it gives agents a practical starting point for:
 - architecture discovery
 - component understanding
 - refactor planning
+
+## `search_patterns`
+
+Purpose:
+
+- find similar implementations and repository precedents using heuristic pattern discovery
+
+Current output shape includes:
+
+- resolved primary target
+- ranked pattern matches
+- explainable scoring reasons
+- defined symbols for matched files
+- exported symbols for matched files
+
+This matters because it gives agents a practical way to:
+
+- inspect similar implementations before generating code
+- find repository-local precedent for refactors
+- compare file neighborhoods and export surfaces without claiming deep semantic understanding
 
 ## Repository And Storage Layout
 

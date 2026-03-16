@@ -10,7 +10,7 @@ It combines:
 - an import/export graph with conservative local resolution
 - ranking and context assembly layers
 - orchestrator flows
-- MCP tools, including `explore_component`
+- MCP tools, including `explore_component` and `search_patterns`
 
 ## Project Overview
 
@@ -25,7 +25,7 @@ It turns local codebases into structured navigation and exploration data:
 - orchestrator flows assemble agent-ready context bundles
 - MCP tools expose those flows to clients
 
-The current first high-level MCP tool is `explore_component`.
+The current high-level MCP tools are `explore_component` and `search_patterns`.
 
 ## Why This Project Exists
 
@@ -109,6 +109,7 @@ Current public MCP tools:
 - `find_references`
 - `find_related_files`
 - `explore_component`
+- `search_patterns`
 
 ### `explore_component`
 
@@ -128,6 +129,23 @@ Why this matters:
 - LLM agents can start from a ranked, structured component context instead of raw search results
 - developers can inspect local architecture faster
 - refactor planning becomes easier because important neighbors are already surfaced
+
+### `search_patterns`
+
+`search_patterns` finds similar implementations and repository precedents using heuristic pattern discovery.
+
+It returns a structured bundle including:
+
+- the resolved primary target
+- ranked pattern matches
+- file-level explanations for why each match was selected
+- defined and exported symbols for the matched files
+
+Why this matters:
+
+- agents can find examples to imitate before generating code
+- refactors can start from concrete precedent files instead of raw search results
+- teams can inspect how a repository usually structures similar features
 
 ## Example
 
