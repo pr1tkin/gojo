@@ -140,6 +140,8 @@ This layer remains heuristic and conservative. It is designed to improve practic
 
 RepoRadar also persists additive UI-structure signals from JSX and TSX component composition and prop usage. These signals capture parent-child rendering relationships plus coarse prop-surface data such as which prop names are passed at usage sites and what broad value kinds they use. They are stored separately and are not yet used to change impact-analysis, ownership-analysis, refactor-context, or change-planning behavior.
 
+Exploration-oriented workflows can aggregate these datasets into a lightweight UI hierarchy summary. This adds repository-understanding signals such as which components a target renders, which parents render it, and which prop names are commonly observed at usage sites. The hierarchy summary is informational only and does not feed current Phase 5 reasoning.
+
 ### Orchestrator Services
 
 The orchestrator layer turns indexed data into practical workflows.
@@ -234,6 +236,7 @@ Returns:
 - related files
 - defined symbols
 - exported symbols
+- optional UI hierarchy summary with rendered children, parent components, and observed prop names
 - a concise exploration summary
 
 ### `search_patterns`

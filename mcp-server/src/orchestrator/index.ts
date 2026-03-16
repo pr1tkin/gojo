@@ -3,6 +3,12 @@ export { analyzeSymbolImpact } from './impact-analysis-service.js';
 export { planSymbolChange } from './change-planning-service.js';
 export { analyzeSymbolOwnership } from './symbol-ownership-service.js';
 export {
+  getObservedPropNamesForComponent,
+  getUiChildrenForComponent,
+  getUiHierarchySummary,
+  getUiParentsForComponent,
+} from './ui-hierarchy-service.js';
+export {
   getPatternMatchesForComponent,
   getPatternMatchesForFile,
   getPatternMatchesForSymbol,
@@ -51,6 +57,12 @@ export type {
   SymbolOwnershipResult,
   SymbolOwnershipTarget,
 } from './symbol-ownership-types.js';
+export type {
+  GetUiHierarchyInput,
+  UiHierarchyComponentRef,
+  UiHierarchyObservedProp,
+  UiHierarchySummary,
+} from './ui-hierarchy-types.js';
 export type {
   FileExplorationContext,
   GetFileExplorationContextOptions,

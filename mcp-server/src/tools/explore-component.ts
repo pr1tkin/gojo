@@ -1,5 +1,9 @@
 import { exploreComponentInputSchema } from '../schemas.js';
-import { getFileExplorationContext, getSymbolExplorationContext } from '../orchestrator/index.js';
+import {
+  getFileExplorationContext,
+  getSymbolExplorationContext,
+  getUiHierarchySummary,
+} from '../orchestrator/index.js';
 import type { ExploreComponentInput } from '../types.js';
 
 const DEFAULT_CANDIDATE_LIMIT = 5;
@@ -45,6 +49,14 @@ export async function runExploreComponentTool(
     : null;
   const candidateSummaries = symbolContext.rankedSymbols.map(buildCandidateSummary);
   const ambiguityDetected = candidateSummaries.length > 1;
+  const uiHierarchy =
+    symbolContext.primarySymbol && (fileContext?.primaryFile ?? symbolContext.primaryFile)
+      ? await getUiHierarchySummary({
+          filePath: symbolContext.primarySymbol.filePath,
+          symbolId: symbolContext.primarySymbol.symbolId,
+          symbolName: symbolContext.primarySymbol.name,
+        })
+      : null;
 
   const result = {
     requestedName: input.name,
@@ -61,6 +73,7 @@ export async function runExploreComponentTool(
     relatedFiles: fileContext?.relatedFiles ?? symbolContext.relatedFiles,
     definedSymbols: fileContext?.definedSymbols ?? [],
     exportedSymbols: fileContext?.exportedSymbols ?? symbolContext.exportedSymbols,
+    ...(uiHierarchy ? { uiHierarchy } : {}),
     summary: {
       relatedFileCount: (fileContext?.relatedFiles ?? symbolContext.relatedFiles).length,
       definedSymbolCount: fileContext?.definedSymbols.length ?? 0,

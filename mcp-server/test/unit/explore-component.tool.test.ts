@@ -1,14 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-const { getFileExplorationContextMock, getSymbolExplorationContextMock } = vi.hoisted(() => ({
+const {
+  getFileExplorationContextMock,
+  getSymbolExplorationContextMock,
+  getUiHierarchySummaryMock,
+} = vi.hoisted(() => ({
   getFileExplorationContextMock: vi.fn(),
   getSymbolExplorationContextMock: vi.fn(),
+  getUiHierarchySummaryMock: vi.fn(),
 }));
 
 vi.mock('../../src/orchestrator/index.js', () => ({
   getFileExplorationContext: getFileExplorationContextMock,
   getSymbolExplorationContext: getSymbolExplorationContextMock,
+  getUiHierarchySummary: getUiHierarchySummaryMock,
 }));
 
 import { exploreComponentToolDefinition, runExploreComponentTool } from '../../src/tools/explore-component.js';
@@ -16,6 +22,7 @@ import { exploreComponentToolDefinition, runExploreComponentTool } from '../../s
 describe('explore_component tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getUiHierarchySummaryMock.mockResolvedValue(null);
   });
 
   it('accepts the narrow public input shape', () => {
@@ -171,6 +178,33 @@ describe('explore_component tool', () => {
       },
       rawContext: {},
     });
+    getUiHierarchySummaryMock.mockResolvedValue({
+      target: {
+        filePath: 'components/ui/Button.tsx',
+        symbolId: 'repo-gamma:components/ui/Button.tsx:function:Button:1',
+        symbolName: 'Button',
+      },
+      renders: [
+        {
+          componentName: 'Icon',
+          filePath: 'components/ui/Icon.tsx',
+          symbolId: 'repo-gamma:components/ui/Icon.tsx:function:Icon:1',
+          resolved: true,
+        },
+      ],
+      renderedBy: [
+        {
+          componentName: 'ContractList',
+          filePath: 'components/ContractList.tsx',
+          symbolId: 'repo-gamma:components/ContractList.tsx:function:ContractList:1',
+          resolved: true,
+        },
+      ],
+      observedProps: [
+        { propName: 'variant', count: 2 },
+        { propName: 'disabled', count: 1 },
+      ],
+    });
 
     const result = await runExploreComponentTool({
       name: 'Button',
@@ -186,6 +220,11 @@ describe('explore_component tool', () => {
     });
     expect(getFileExplorationContextMock).toHaveBeenCalledWith('repo-gamma:components/ui/Button.tsx', {
       relatedLimit: 8,
+    });
+    expect(getUiHierarchySummaryMock).toHaveBeenCalledWith({
+      filePath: 'components/ui/Button.tsx',
+      symbolId: 'repo-gamma:components/ui/Button.tsx:function:Button:1',
+      symbolName: 'Button',
     });
     expect(parsed).toEqual(
       expect.objectContaining({
@@ -216,6 +255,29 @@ describe('explore_component tool', () => {
         ],
         definedSymbols: [expect.objectContaining({ name: 'Button' })],
         exportedSymbols: [expect.objectContaining({ name: 'Button' })],
+        uiHierarchy: {
+          target: {
+            filePath: 'components/ui/Button.tsx',
+            symbolId: 'repo-gamma:components/ui/Button.tsx:function:Button:1',
+            symbolName: 'Button',
+          },
+          renders: [
+            expect.objectContaining({
+              componentName: 'Icon',
+              filePath: 'components/ui/Icon.tsx',
+            }),
+          ],
+          renderedBy: [
+            expect.objectContaining({
+              componentName: 'ContractList',
+              filePath: 'components/ContractList.tsx',
+            }),
+          ],
+          observedProps: [
+            { propName: 'variant', count: 2 },
+            { propName: 'disabled', count: 1 },
+          ],
+        },
         summary: {
           relatedFileCount: 2,
           definedSymbolCount: 1,
@@ -412,6 +474,7 @@ describe('explore_component tool', () => {
         exportedSymbolCount: 0,
       },
     });
+    expect(getUiHierarchySummaryMock).not.toHaveBeenCalled();
   });
 
   it('degrades safely when a repo filter removes all candidates', async () => {
@@ -465,5 +528,85 @@ describe('explore_component tool', () => {
         exportedSymbolCount: 0,
       },
     });
+    expect(getUiHierarchySummaryMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps explore_component unchanged when no UI hierarchy signals exist', async () => {
+    getSymbolExplorationContextMock.mockResolvedValue({
+      query: 'Card',
+      repo: 'repo-gamma',
+      kind: undefined,
+      primarySymbol: {
+        symbolId: 'repo-gamma:components/ui/Card.tsx:function:Card:1',
+        fileId: 'repo-gamma:components/ui/Card.tsx',
+        name: 'Card',
+        kind: 'function',
+        repo: 'repo-gamma',
+        filePath: 'components/ui/Card.tsx',
+        startLine: 1,
+        endLine: 12,
+        exported: true,
+      },
+      primaryFile: {
+        nodeType: 'file',
+        fileId: 'repo-gamma:components/ui/Card.tsx',
+        repoId: 'repo-gamma',
+        filePath: 'components/ui/Card.tsx',
+        classification: 'source',
+      },
+      rankedSymbols: [
+        {
+          item: {
+            symbolId: 'repo-gamma:components/ui/Card.tsx:function:Card:1',
+            fileId: 'repo-gamma:components/ui/Card.tsx',
+            name: 'Card',
+            kind: 'function',
+            repo: 'repo-gamma',
+            filePath: 'components/ui/Card.tsx',
+            startLine: 1,
+            endLine: 12,
+            exported: true,
+          },
+          score: 14,
+          reasons: [{ signal: 'exact_name', value: 10 }],
+        },
+      ],
+      relatedFiles: [],
+      exportedSymbols: [],
+      summary: {
+        candidateCount: 1,
+        relatedFileCount: 0,
+        exportedSymbolCount: 0,
+      },
+      rawContext: {},
+    });
+    getFileExplorationContextMock.mockResolvedValue({
+      fileId: 'repo-gamma:components/ui/Card.tsx',
+      primaryFile: {
+        nodeType: 'file',
+        fileId: 'repo-gamma:components/ui/Card.tsx',
+        repoId: 'repo-gamma',
+        filePath: 'components/ui/Card.tsx',
+        classification: 'source',
+      },
+      repo: 'repo-gamma',
+      relatedFiles: [],
+      neighboringFiles: [],
+      definedSymbols: [],
+      exportedSymbols: [],
+      summary: {
+        relatedFileCount: 0,
+        neighboringFileCount: 0,
+        definedSymbolCount: 0,
+        exportedSymbolCount: 0,
+      },
+      rawContext: {},
+    });
+    getUiHierarchySummaryMock.mockResolvedValue(null);
+
+    const result = await runExploreComponentTool({ name: 'Card', repo: 'repo-gamma' });
+    const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
+
+    expect(parsed).not.toHaveProperty('uiHierarchy');
   });
 });

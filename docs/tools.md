@@ -43,6 +43,10 @@ Output summary:
 - related files
 - defined symbols
 - exported symbols
+- optional `uiHierarchy` summary with:
+  - rendered child components
+  - parent components that render the target
+  - commonly observed prop names
 - concise exploration summary
 
 Example:
