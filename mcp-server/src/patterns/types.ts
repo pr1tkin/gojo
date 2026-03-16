@@ -17,13 +17,18 @@ export type PatternKind =
 export type PatternSignalType =
   | 'react-function-component'
   | 'uses-hooks'
+  | 'jsx-return'
+  | 'custom-hook'
   | 'async-function'
   | 'map-rendering'
   | 'conditional-render'
+  | 'error-handling'
   | 'error-boundary'
   | 'form-state'
   | 'api-request'
   | 'db-access'
+  | 'named-export'
+  | 'route-handler'
   | 'test-describe-block'
   | 'storybook-meta';
 

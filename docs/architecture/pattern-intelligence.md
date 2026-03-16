@@ -136,31 +136,102 @@ This keeps the substrate separate from the symbol index, code graph, and UI-stru
 
 ## Indexing Lifecycle
 
-The existing indexing pipeline now includes a placeholder pattern stage:
+The existing indexing pipeline now includes a deterministic pattern stage:
 
 - `runPatternExtractionStage(...)`
 
 Current behavior:
 
-- the stage exists
-- the stage is deterministic
-- the stage returns an empty pattern set
+- the stage runs after symbol extraction and import/export metadata collection
+- the stage inspects indexed files, symbols, and imports
+- the stage emits `PatternCandidate` records when rule-based detector evidence is strong
+- the stage persists results in `mcp-server/.data/pattern-candidates.json`
 
-This preserves the pipeline shape needed for later phases without changing any current analysis behavior.
+The stage remains conservative. Files without strong detector evidence simply emit no pattern candidates.
+
+## Deterministic Pattern Extraction
+
+Phase 7.2 activates the first rule-based extraction pass for TypeScript and TSX files.
+
+Initial detectors:
+
+- `ReactComponentDetector`
+- `CustomHookDetector`
+- `AsyncDataFlowDetector`
+- `ListRenderingDetector`
+- `ConditionalRenderingDetector`
+- `UtilityExportDetector`
+- `TestSuiteDetector`
+- `StorybookStoryDetector`
+- `ApiHandlerDetector`
+
+These detectors combine:
+
+- Tree-sitter node shape
+- indexed symbol metadata
+- file import/export metadata
+- path conventions where the signal is strong
+
+Example detector behavior:
+
+- React component detection requires a TSX file, an uppercase function-like symbol, and JSX return structure
+- custom hook detection requires a `useX` function name plus hook calls
+- async data flow detection requires async/await plus API-style request or explicit error handling
+- list and conditional rendering detection require JSX plus `map(...)`, ternary, or `&&` rendering
+- test and Storybook detection require known imports, filename conventions, or stable export shapes
+- API handler detection requires route-like file placement and handler naming conventions such as `GET` or `POST`
+
+## Signals And Fingerprints In Extraction
+
+Extracted candidates are supported by small structural signals such as:
+
+- `react-function-component`
+- `jsx-return`
+- `uses-hooks`
+- `custom-hook`
+- `async-function`
+- `api-request`
+- `error-handling`
+- `map-rendering`
+- `conditional-render`
+- `named-export`
+- `route-handler`
+- `test-describe-block`
+- `storybook-meta`
+
+Each emitted candidate also receives a normalized `PatternFingerprint` containing:
+
+- pattern kind
+- structural signal set
+- supporting import set
+- export shape
+- symbol role
+- optional UI and async signal subsets
+
+The fingerprint is designed for later similarity and precedent-retrieval work. Phase 7.2 only emits and stores it.
+
+## Emission And Deduplication
+
+Each detector emits at most one pattern candidate per symbol and pattern-kind combination.
+
+Deduplication uses:
+
+- `symbolId` when available, otherwise `fileId`
+- `PatternKind`
+- normalized structural signal set
+
+This keeps extraction deterministic and compatible with future incremental indexing work.
 
 ## Planned Follow-Up Phases
-
-Phase 7.2 will add pattern extraction.
 
 Phase 7.3 will add pattern similarity scoring.
 
 Phase 7.4 will add precedent discovery and retrieval workflows.
 
-## Non-Goals In Step 7.1
+## Non-Goals In Step 7.2
 
 This step does not implement:
 
-- pattern extraction logic
 - pattern similarity
 - clustering
 - pattern search

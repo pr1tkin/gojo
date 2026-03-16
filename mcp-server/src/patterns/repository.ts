@@ -20,6 +20,15 @@ function comparePatterns(left: PatternCandidate, right: PatternCandidate): numbe
   );
 }
 
+export function createEmptyPatternIndex(sourceSymbolIndexSchemaVersion: number = 0, generatedAt: string = ''): PatternIndex {
+  return {
+    schemaVersion: 1,
+    sourceSymbolIndexSchemaVersion,
+    generatedAt,
+    patterns: [],
+  };
+}
+
 function dedupeStrings(values: string[]): string[] {
   return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
 }
@@ -85,9 +94,13 @@ export function createPatternCandidate(input: RegisterPatternCandidateInput): Pa
   });
 }
 
-function upsertPattern(index: PatternIndex, candidate: PatternCandidate): PatternIndex {
+export function registerPatternCandidateInIndex(index: PatternIndex, candidate: PatternCandidate): PatternIndex {
   const normalized = normalizePatternCandidate(candidate);
-  const existing = index.patterns.filter((entry) => entry.patternId !== normalized.patternId);
+  const dedupeKey = `${normalized.symbolId ?? normalized.fileId}:${normalized.kind}:${normalized.fingerprint.structuralSignals.join('|')}`;
+  const existing = index.patterns.filter((entry) => {
+    const entryKey = `${entry.symbolId ?? entry.fileId}:${entry.kind}:${entry.fingerprint.structuralSignals.join('|')}`;
+    return entry.patternId !== normalized.patternId && entryKey !== dedupeKey;
+  });
   existing.push(normalized);
   existing.sort(comparePatterns);
 
@@ -99,7 +112,7 @@ function upsertPattern(index: PatternIndex, candidate: PatternCandidate): Patter
 
 export async function registerPatternCandidate(candidate: PatternCandidate): Promise<PatternCandidate> {
   const index = await loadPatternIndex();
-  const nextIndex = upsertPattern(index, candidate);
+  const nextIndex = registerPatternCandidateInIndex(index, candidate);
   await savePatternIndex(nextIndex);
   return normalizePatternCandidate(candidate);
 }

@@ -84,7 +84,7 @@ Current symbol data includes:
 - symbol names and kinds
 - export markers
 - file-level import/export metadata
-- placeholder pattern-candidate substrate for future pattern intelligence
+- deterministic pattern-candidate extraction for TypeScript and TSX files
 - additive JSX / TSX UI composition signals
 - additive JSX / TSX prop surface signals
 - aggregate symbol frequency statistics
@@ -126,7 +126,7 @@ They provide:
 - explainable scoring reasons
 - concise structured summaries for tools
 
-Phase 7 also introduces an internal pattern-intelligence substrate. At this stage the substrate only defines stable pattern models, fingerprints, and storage boundaries plus a placeholder extraction stage. It does not yet extract, compare, or expose pattern candidates.
+Phase 7 also introduces an internal pattern-intelligence layer. It now extracts deterministic TypeScript and TSX pattern candidates such as components, hooks, async data-flow helpers, utility exports, test suites, Storybook stories, and API handlers. These candidates are stored internally with structural signals and fingerprints. The layer does not yet compare patterns, rank similarities, or expose precedent retrieval workflows.
 
 This layer does not index files or build the graph. It composes data from the search, symbol, and graph layers into agent-ready results.
 

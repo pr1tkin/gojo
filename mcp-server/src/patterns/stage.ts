@@ -1,11 +1,7 @@
 import type { SymbolIndex } from '../symbol-index/types.js';
-import { PATTERN_INDEX_SCHEMA_VERSION, type PatternIndex } from './types.js';
+import type { PatternIndex } from './types.js';
+import { buildPatternIndex } from './build-index.js';
 
-export async function runPatternExtractionStage(_reposRoot: string, index: SymbolIndex): Promise<PatternIndex> {
-  return {
-    schemaVersion: PATTERN_INDEX_SCHEMA_VERSION,
-    sourceSymbolIndexSchemaVersion: index.schemaVersion,
-    generatedAt: new Date().toISOString(),
-    patterns: [],
-  };
+export async function runPatternExtractionStage(reposRoot: string, index: SymbolIndex): Promise<PatternIndex> {
+  return buildPatternIndex(reposRoot, index);
 }
