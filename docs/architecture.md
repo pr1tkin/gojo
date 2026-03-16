@@ -14,7 +14,7 @@ It combines:
 - orchestrator services
 - an MCP tool layer
 
-The current public high-level MCP tools are `explore_component` and `search_patterns`.
+The current public high-level MCP tools are `explore_component`, `search_patterns`, and `collect_refactor_context`.
 
 ## Runtime Services
 
@@ -70,8 +70,9 @@ Current tools:
 - `find_related_files`
 - `explore_component`
 - `search_patterns`
+- `collect_refactor_context`
 
-`explore_component` and `search_patterns` are the current high-level public tools. They return structured exploration results rather than low-level raw lookup results.
+`explore_component`, `search_patterns`, and `collect_refactor_context` are the current high-level public tools. They return structured exploration or refactor results rather than low-level raw lookup results.
 
 ### Orchestrator Services
 
@@ -84,8 +85,11 @@ Current public-facing internal services:
 - `getPatternMatchesForFile(...)`
 - `getPatternMatchesForSymbol(...)`
 - `getPatternMatchesForComponent(...)`
+- `getRefactorContextForFile(...)`
+- `getRefactorContextForSymbol(...)`
+- `getRefactorContextForComponent(...)`
 
-These services feed the `explore_component` and `search_patterns` adapters.
+These services feed the `explore_component`, `search_patterns`, and `collect_refactor_context` adapters.
 
 ### Context Assembly Layer
 
@@ -172,20 +176,20 @@ repos/ -> mcp-server symbol indexing -> symbol-index.json -> code-graph.json
 ### Exploration
 
 ```text
-MCP client -> explore_component / search_patterns
+MCP client -> high-level MCP tools
                     |
                     v
             Orchestrator services
                     |
-        +-----------+-----------+
-        |                       |
-        v                       v
-    Symbol context          File context
-        |                       |
-        +-----------+-----------+
+        +-----------+-----------+-----------+
+        |                       |           |
+        v                       v           v
+    Symbol context          File context   Refactor context
+        |                       |           |
+        +-----------+-----------+-----------+
                     |
                     v
-      ranked related files + heuristic pattern matches
+      ranked related files + heuristic pattern matches + impact surface
 ```
 
 ## `explore_component`
@@ -230,6 +234,29 @@ This matters because it gives agents a practical way to:
 - inspect similar implementations before generating code
 - find repository-local precedent for refactors
 - compare file neighborhoods and export surfaces without claiming deep semantic understanding
+
+## `collect_refactor_context`
+
+Purpose:
+
+- assemble refactor impact context for a file, component, or symbol
+
+Current output shape includes:
+
+- resolved primary file
+- exported symbols
+- importing files
+- imported files
+- graph neighbors
+- ranked related files
+- nearby directory or bundle-family files
+- ambiguity notes when symbol resolution is not unique
+
+This matters because it gives agents a practical way to:
+
+- estimate what surrounding code must be understood before a change
+- identify direct dependents and local impact surface
+- plan scoped refactors without claiming full semantic impact analysis
 
 ## Repository And Storage Layout
 

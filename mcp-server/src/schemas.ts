@@ -48,3 +48,10 @@ export const searchPatternsInputSchema = {
   limit: z.number().int().min(1).max(10).optional(),
   mode: z.enum(['component', 'symbol', 'file']).optional(),
 };
+
+export const collectRefactorContextInputSchema = {
+  name: z.string().min(1),
+  repo: z.string().min(1).optional(),
+  mode: z.enum(['component', 'symbol', 'file']).optional(),
+  limit: z.number().int().min(1).max(20).optional(),
+};

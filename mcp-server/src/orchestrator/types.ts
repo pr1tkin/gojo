@@ -3,7 +3,7 @@ import type { FileNode, SymbolNode } from '../graph/types.js';
 import type { RankedSymbolCandidate } from '../ranking/index.js';
 import type { RankingReason } from '../ranking/index.js';
 import type { IndexedSymbol } from '../symbol-index/types.js';
-import type { SearchPatternsMode, SymbolKind } from '../types.js';
+import type { RefactorContextMode, SearchPatternsMode, SymbolKind } from '../types.js';
 
 export interface FileExplorationContext {
   fileId: string;
@@ -111,5 +111,58 @@ export interface PatternMatchContext {
   summary: {
     matchCount: number;
     strongMatchCount: number;
+  };
+}
+
+export interface RefactorTargetSummary {
+  requestedName: string;
+  requestedMode: RefactorContextMode;
+  repo?: string;
+  file: FileNode | null;
+  symbol: IndexedSymbol | null;
+}
+
+export interface RefactorSymbolCandidate {
+  symbolId: string;
+  fileId: string;
+  repo: string;
+  filePath: string;
+  name: string;
+  kind: SymbolKind;
+  exported: boolean;
+  score: number;
+  reasons: RankingReason[];
+}
+
+export interface RefactorNearbyFile {
+  file: FileNode;
+  category: 'same_directory' | 'bundle_family';
+}
+
+export interface RefactorContext {
+  target: RefactorTargetSummary;
+  primaryFile: FileNode | null;
+  exportedSymbols: SymbolNode[];
+  importingFiles: FileNode[];
+  importedFiles: FileNode[];
+  reexportingFiles: FileNode[];
+  reexportedFiles: FileNode[];
+  graphNeighbors: FileNode[];
+  relatedFiles: RankedFileContextItem[];
+  nearbyFiles: RefactorNearbyFile[];
+  definedSymbols: SymbolNode[];
+  symbolCandidates: RefactorSymbolCandidate[];
+  summary: {
+    importingFileCount: number;
+    importedFileCount: number;
+    reexportingFileCount: number;
+    reexportedFileCount: number;
+    graphNeighborCount: number;
+    relatedFileCount: number;
+    nearbyFileCount: number;
+    exportedSymbolCount: number;
+    definedSymbolCount: number;
+    ambiguityDetected: boolean;
+    notes: string[];
   };
 }

@@ -1,6 +1,10 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
+import {
+  collectRefactorContextToolDefinition,
+  runCollectRefactorContextTool,
+} from './tools/collect-refactor-context.js';
 import { exploreComponentToolDefinition, runExploreComponentTool } from './tools/explore-component.js';
 import { loadConfig } from './config.js';
 import { buildSymbolIndex } from './symbol-index/indexer.js';
@@ -33,6 +37,16 @@ async function main(): Promise<void> {
       inputSchema: exploreComponentToolDefinition.inputSchema,
     },
     async (input) => runExploreComponentTool(input),
+  );
+
+  server.registerTool(
+    collectRefactorContextToolDefinition.name,
+    {
+      title: collectRefactorContextToolDefinition.title,
+      description: collectRefactorContextToolDefinition.description,
+      inputSchema: collectRefactorContextToolDefinition.inputSchema,
+    },
+    async (input) => runCollectRefactorContextTool(input),
   );
 
   server.registerTool(

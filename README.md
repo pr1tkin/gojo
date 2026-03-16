@@ -10,7 +10,7 @@ It combines:
 - an import/export graph with conservative local resolution
 - ranking and context assembly layers
 - orchestrator flows
-- MCP tools, including `explore_component` and `search_patterns`
+- MCP tools, including `explore_component`, `search_patterns`, and `collect_refactor_context`
 
 ## Project Overview
 
@@ -25,7 +25,7 @@ It turns local codebases into structured navigation and exploration data:
 - orchestrator flows assemble agent-ready context bundles
 - MCP tools expose those flows to clients
 
-The current high-level MCP tools are `explore_component` and `search_patterns`.
+The current high-level MCP tools are `explore_component`, `search_patterns`, and `collect_refactor_context`.
 
 ## Why This Project Exists
 
@@ -110,6 +110,7 @@ Current public MCP tools:
 - `find_related_files`
 - `explore_component`
 - `search_patterns`
+- `collect_refactor_context`
 
 ### `explore_component`
 
@@ -146,6 +147,25 @@ Why this matters:
 - agents can find examples to imitate before generating code
 - refactors can start from concrete precedent files instead of raw search results
 - teams can inspect how a repository usually structures similar features
+
+### `collect_refactor_context`
+
+`collect_refactor_context` assembles refactor impact context for a file, component, or symbol.
+
+It returns a structured bundle including:
+
+- the resolved primary file
+- exported and defined symbols
+- importing and imported files
+- graph neighbors
+- ranked related files
+- nearby directory or bundle-family files
+
+Why this matters:
+
+- agents can see likely impact surface before changing code
+- developers can identify direct dependents and supporting files quickly
+- refactor planning becomes more reliable without requiring deep semantic analysis
 
 ## Example
 

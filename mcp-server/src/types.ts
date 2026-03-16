@@ -152,3 +152,12 @@ export interface SearchPatternsInput {
   limit?: number;
   mode?: SearchPatternsMode;
 }
+
+export type RefactorContextMode = 'file' | 'symbol' | 'component';
+
+export interface CollectRefactorContextInput {
+  name: string;
+  repo?: string;
+  mode?: RefactorContextMode;
+  limit?: number;
+}
