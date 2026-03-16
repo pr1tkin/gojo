@@ -57,12 +57,19 @@ function getPathSignals(filePath: string): {
   signals: OwnershipSignal[];
   boundaryKind: 'internal' | 'feature' | 'shared' | 'public' | 'infrastructure' | 'unknown';
   pathHasInternalMarkers: boolean;
+  frameworkEntryLike: boolean;
 } {
   const normalized = normalizePath(filePath);
   const internalPattern = /(^|\/)(internal|private|impl|implementation|helpers?|__tests__|tests?|fixtures?)\//i;
   const publicPattern = /(^|\/)(public|api|exports?)\//i;
   const featurePattern = /^(src\/)?(features?|app|pages)\//i;
   const infraPattern = /(^|\/)(infra|infrastructure|platform|core)\//i;
+  const frameworkEntryPattern =
+    /^(src\/)?app\/layout\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^(src\/)?app\/.+\/page\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^(src\/)?app\/page\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^(src\/)?app\/api\/.+\/route\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^pages\/.+\/index\.(tsx?|jsx?)$/i.test(normalized);
 
   if (internalPattern.test(normalized)) {
     return {
@@ -73,18 +80,27 @@ function getPathSignals(filePath: string): {
       }],
       boundaryKind: 'internal',
       pathHasInternalMarkers: true,
+      frameworkEntryLike: false,
     };
   }
 
-  if (publicPattern.test(normalized) || /^src\/index\.(tsx?|jsx?)$/i.test(normalized) || /^index\.(tsx?|jsx?)$/i.test(normalized)) {
+  if (
+    frameworkEntryPattern ||
+    publicPattern.test(normalized) ||
+    /^src\/index\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^index\.(tsx?|jsx?)$/i.test(normalized)
+  ) {
     return {
       signals: [{
         type: 'path-boundary',
-        strength: 'strong',
-        note: `path "${normalized}" matches a public or entry-surface convention`,
+        strength: frameworkEntryPattern ? 'strong' : 'strong',
+        note: frameworkEntryPattern
+          ? `path "${normalized}" matches a framework entry-surface convention`
+          : `path "${normalized}" matches a public or entry-surface convention`,
       }],
-      boundaryKind: 'public',
+      boundaryKind: frameworkEntryPattern ? 'feature' : 'public',
       pathHasInternalMarkers: false,
+      frameworkEntryLike: frameworkEntryPattern,
     };
   }
 
@@ -101,10 +117,15 @@ function getPathSignals(filePath: string): {
       }],
       boundaryKind: 'shared',
       pathHasInternalMarkers: false,
+      frameworkEntryLike: false,
     };
   }
 
-  if (featurePattern.test(normalized)) {
+  if (
+    featurePattern.test(normalized) ||
+    /^(src\/)?components\/(admin|settings|project|bucket|translation|workspace)\//i.test(normalized) ||
+    /^components\/(admin|settings|project|bucket|translation|workspace)\//i.test(normalized)
+  ) {
     return {
       signals: [{
         type: 'path-boundary',
@@ -113,6 +134,7 @@ function getPathSignals(filePath: string): {
       }],
       boundaryKind: 'feature',
       pathHasInternalMarkers: false,
+      frameworkEntryLike: false,
     };
   }
 
@@ -125,6 +147,7 @@ function getPathSignals(filePath: string): {
       }],
       boundaryKind: 'infrastructure',
       pathHasInternalMarkers: false,
+      frameworkEntryLike: false,
     };
   }
 
@@ -136,6 +159,7 @@ function getPathSignals(filePath: string): {
     }],
     boundaryKind: 'unknown',
     pathHasInternalMarkers: false,
+    frameworkEntryLike: false,
   };
 }
 
@@ -275,6 +299,36 @@ function getUsageSignals(targetFilePath: string, importers: FileNode[]): {
     usageKind: 'cross-feature',
     importerCount: importers.length,
     distinctFeatureAreas: importerFeatures.size,
+  };
+}
+
+function calibrateUsageForSymbol(
+  symbol: IndexedSymbol | null,
+  usage: ReturnType<typeof getUsageSignals>,
+): ReturnType<typeof getUsageSignals> {
+  if (!symbol || symbol.exported) {
+    return usage;
+  }
+
+  if (usage.usageKind === 'none' || usage.usageKind === 'local-only') {
+    return usage;
+  }
+
+  return {
+    ...usage,
+    usageKind: 'local-only',
+    signals: [
+      {
+        type: 'usage-fanout',
+        strength: 'weak',
+        note: 'only file-level importer fan-out was observed; non-exported symbols are treated as local unless cross-file symbol evidence exists',
+      },
+      {
+        type: 'local-only-usage',
+        strength: 'strong',
+        note: 'non-exported symbol has no direct cross-file ownership signal and is treated as implementation-local',
+      },
+    ],
   };
 }
 
@@ -481,9 +535,14 @@ function classifyOwnership(
     participatesInEntrySurface: boolean;
     pathBoundary: 'internal' | 'feature' | 'shared' | 'public' | 'infrastructure' | 'unknown';
     pathHasInternalMarkers: boolean;
+    frameworkEntryLike: boolean;
     usageKind: 'none' | 'local-only' | 'feature-local' | 'cross-feature' | 'repo-wide';
   },
 ): OwnershipClassification {
+  if (!facts.exportedFromFile && (facts.usageKind === 'none' || facts.usageKind === 'local-only')) {
+    return 'internal-local';
+  }
+
   if (
     facts.exportedFromFile &&
     facts.participatesInEntrySurface &&
@@ -504,6 +563,16 @@ function classifyOwnership(
   }
 
   if (
+    facts.exportedFromFile &&
+    facts.frameworkEntryLike &&
+    facts.participatesInEntrySurface &&
+    facts.usageKind !== 'cross-feature' &&
+    !facts.pathHasInternalMarkers
+  ) {
+    return 'shared-surface';
+  }
+
+  if (
     (facts.pathBoundary === 'shared' || facts.pathBoundary === 'infrastructure' || facts.usageKind === 'cross-feature' || facts.usageKind === 'repo-wide') &&
     !facts.reexportedThroughBarrel &&
     !facts.participatesInEntrySurface
@@ -513,7 +582,7 @@ function classifyOwnership(
 
   if (
     facts.usageKind === 'feature-local' &&
-    (facts.pathBoundary === 'feature' || facts.pathBoundary === 'internal' || !facts.exportedFromFile) &&
+    (facts.pathBoundary === 'feature' || facts.pathBoundary === 'internal' || facts.pathBoundary === 'unknown' || !facts.exportedFromFile) &&
     !facts.reexportedThroughBarrel
   ) {
     return 'feature-internal';
@@ -547,6 +616,7 @@ function classifyApiBoundary(
     exportedFromFile: boolean;
     participatesInEntrySurface: boolean;
     pathBoundary: 'internal' | 'feature' | 'shared' | 'public' | 'infrastructure' | 'unknown';
+    frameworkEntryLike: boolean;
     usageKind: 'none' | 'local-only' | 'feature-local' | 'cross-feature' | 'repo-wide';
   },
 ): ApiBoundaryClassification {
@@ -579,12 +649,12 @@ function classifyApiBoundary(
     return 'feature-boundary';
   }
 
-  if (facts.exportedFromFile || facts.usageKind === 'local-only') {
-    return 'local-boundary';
-  }
-
   if (ownership === 'internal-local') {
     return 'not-api-like';
+  }
+
+  if (facts.exportedFromFile || facts.usageKind === 'local-only') {
+    return 'local-boundary';
   }
 
   return 'unknown';
@@ -681,9 +751,15 @@ function buildSummary(
         ? `${role} with broad importer fan-out but no stable entry-surface signal`
         : `${role} reused across feature areas without stable entry-surface exposure`;
     case 'shared-surface':
-      return facts.reexportedThroughBarrel
-        ? `${role} exposed through barrel export and used across multiple feature areas`
-        : `${role} exposed on a shared entry surface with cross-feature usage`;
+      if (facts.reexportedThroughBarrel) {
+        return `${role} exposed through barrel export and used across multiple feature areas`;
+      }
+
+      if (facts.participatesInEntrySurface && (facts.usageKind === 'none' || facts.usageKind === 'local-only' || facts.usageKind === 'feature-local')) {
+        return `${role} exposed on a framework entry surface`;
+      }
+
+      return `${role} exposed on a shared entry surface with cross-feature usage`;
     case 'public-surface':
       return `${role} exposed on a stable entry surface with broad repo usage`;
     case 'unknown': {
@@ -718,7 +794,7 @@ export async function analyzeSymbolOwnership(input: AnalyzeSymbolOwnershipInput)
 
   const exportSurface = getExportSurfaceSignals(target.symbol, target.relation, filePath);
   const pathBoundary = getPathSignals(filePath);
-  const usage = getUsageSignals(filePath, importers);
+  const usage = calibrateUsageForSymbol(target.symbol, getUsageSignals(filePath, importers));
   const barrel = await getBarrelSignals(target.symbol, target.file, target.relation);
   const signals = [
     ...exportSurface.signals,
@@ -732,12 +808,14 @@ export async function analyzeSymbolOwnership(input: AnalyzeSymbolOwnershipInput)
     participatesInEntrySurface: barrel.participatesInEntrySurface || exportSurface.entrySurfaceExport,
     pathBoundary: pathBoundary.boundaryKind,
     pathHasInternalMarkers: pathBoundary.pathHasInternalMarkers,
+    frameworkEntryLike: pathBoundary.frameworkEntryLike,
     usageKind: usage.usageKind,
   });
   const apiBoundary = classifyApiBoundary(ownership, {
     exportedFromFile: exportSurface.exportedFromFile,
     participatesInEntrySurface: barrel.participatesInEntrySurface || exportSurface.entrySurfaceExport,
     pathBoundary: pathBoundary.boundaryKind,
+    frameworkEntryLike: pathBoundary.frameworkEntryLike,
     usageKind: usage.usageKind,
   });
   const confidence = classifyConfidence(ownership, signals);

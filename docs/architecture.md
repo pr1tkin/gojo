@@ -141,6 +141,8 @@ The internal impact-analysis service now also adds result summarization for larg
 
 The internal ownership-analysis service adds heuristic symbol ownership and API-boundary approximation. It reuses the existing symbol index, import/export metadata, and graph relationships, and returns conservative classifications backed by explicit export-surface, path-boundary, usage-fanout, and barrel-entry signals.
 
+Recent refinement work improved ownership classification calibration for local helpers, feature-local exports, and framework entry surfaces while keeping the same explainable heuristic signal model.
+
 ### MCP Tool Layer
 
 The MCP tool layer is the public interface exposed over stdio.

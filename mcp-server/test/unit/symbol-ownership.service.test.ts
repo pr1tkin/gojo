@@ -164,6 +164,86 @@ describe('symbol ownership service', () => {
     ]));
   });
 
+  it('keeps a non-exported helper inside a widely imported file as internal-local', async () => {
+    const symbol = symbolNode(
+      'parse-date',
+      'repo-a:src/app/_components/audioSimple/AudioSimple.tsx',
+      'repo-a',
+      'src/app/_components/audioSimple/AudioSimple.tsx',
+      'parseDate',
+      'function',
+      false,
+    );
+    const relation = {
+      fileId: symbol.fileId,
+      repo: symbol.repo,
+      filePath: symbol.filePath,
+      classification: 'source' as const,
+      symbolIds: [symbol.symbolId],
+      symbolNames: [symbol.name],
+      imports: [],
+      exports: [{
+        fileId: symbol.fileId,
+        kind: 'default' as const,
+        exportedName: 'default',
+        localName: 'AudioSimple',
+        symbolId: 'audio-simple',
+      }],
+      importTokens: [],
+    };
+    seedTarget(symbol, relation);
+    getImportingFilesMock.mockResolvedValue([
+      fileNode('repo-a:src/app/audio/page.tsx', 'repo-a', 'src/app/audio/page.tsx'),
+      fileNode('repo-a:src/app/podcast/page.tsx', 'repo-a', 'src/app/podcast/page.tsx'),
+      fileNode('repo-a:src/app/audio/AudioSimple.stories.tsx', 'repo-a', 'src/app/audio/AudioSimple.stories.tsx'),
+    ]);
+
+    const result = await analyzeSymbolOwnership({ symbolId: symbol.symbolId });
+
+    expect(result.ownership).toBe('internal-local');
+    expect(result.apiBoundary).toBe('not-api-like');
+    expect(result.summary).toBe('function with no shared surface signals');
+    expectHeuristicSignals(result);
+    expect(result.signals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'local-only-usage', strength: 'strong' }),
+      expect.objectContaining({
+        type: 'usage-fanout',
+        strength: 'weak',
+        note: expect.stringContaining('only file-level importer fan-out was observed'),
+      }),
+    ]));
+  });
+
+  it('promotes a feature-local exported hook from unknown to feature-internal', async () => {
+    const symbol = symbolNode(
+      'admin-cleanup-store',
+      'repo-a:components/admin/cleanup/store/admin-cleanup-context.ts',
+      'repo-a',
+      'components/admin/cleanup/store/admin-cleanup-context.ts',
+      'useAdminCleanupStore',
+      'variable',
+      true,
+    );
+    const relation = fileRelation(symbol.fileId, symbol.repo, symbol.filePath, symbol.symbolId, symbol.name, true);
+    seedTarget(symbol, relation);
+    getImportingFilesMock.mockResolvedValue([
+      fileNode('repo-a:components/admin/cleanup/table.tsx', 'repo-a', 'components/admin/cleanup/table.tsx'),
+      fileNode('repo-a:components/admin/cleanup/table-row.tsx', 'repo-a', 'components/admin/cleanup/table-row.tsx'),
+    ]);
+
+    const result = await analyzeSymbolOwnership({ symbolId: symbol.symbolId });
+
+    expect(result.ownership).toBe('feature-internal');
+    expect(result.apiBoundary).toBe('feature-boundary');
+    expect(result.confidence).toBe('medium');
+    expect(result.summary).toContain('used within one feature area');
+    expectHeuristicSignals(result);
+    expect(result.signals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'path-boundary', strength: 'moderate' }),
+      expect.objectContaining({ type: 'feature-local-usage', strength: 'strong' }),
+    ]));
+  });
+
   it('classifies a shared utility reused across features as shared-internal', async () => {
     const symbol = symbolNode(
       'format-date',
@@ -281,6 +361,37 @@ describe('symbol ownership service', () => {
     expectHeuristicSignals(result);
     expect(result.signals).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'repo-wide-usage', strength: 'strong' }),
+    ]));
+  });
+
+  it('recognizes a framework entrypoint as a shared boundary surface even without importer fan-out', async () => {
+    const symbol = symbolNode(
+      'root-layout',
+      'repo-a:src/app/layout.tsx',
+      'repo-a',
+      'src/app/layout.tsx',
+      'RootLayout',
+      'function',
+      true,
+    );
+    const relation = fileRelation(symbol.fileId, symbol.repo, symbol.filePath, symbol.symbolId, symbol.name, true, 'default');
+    seedTarget(symbol, relation);
+    getImportingFilesMock.mockResolvedValue([]);
+
+    const result = await analyzeSymbolOwnership({ symbolId: symbol.symbolId });
+
+    expect(result.ownership).toBe('shared-surface');
+    expect(result.apiBoundary).toBe('shared-boundary');
+    expect(result.confidence).toBe('medium');
+    expect(result.summary).toBe('function exposed on a framework entry surface');
+    expectHeuristicSignals(result);
+    expect(result.signals).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'path-boundary',
+        strength: 'strong',
+        note: expect.stringContaining('framework entry-surface convention'),
+      }),
+      expect.objectContaining({ type: 'barrel-participation', strength: 'moderate' }),
     ]));
   });
 
