@@ -1,5 +1,6 @@
 export { getFileExplorationContext } from './file-service.js';
 export { analyzeSymbolImpact } from './impact-analysis-service.js';
+export { planSymbolChange } from './change-planning-service.js';
 export { analyzeSymbolOwnership } from './symbol-ownership-service.js';
 export {
   getPatternMatchesForComponent,
@@ -14,6 +15,16 @@ export {
 } from './refactor-service.js';
 export { getAnalyzeSymbolContext } from './symbol-analysis-service.js';
 export { getSymbolExplorationContext } from './symbol-service.js';
+export type {
+  AnalyzeSymbolChangePlanInput,
+  ChangePlanStep,
+  ChangePlanningSignal,
+  ChangePlanningSignalType,
+  ChangeRiskLevel,
+  ChangeScope,
+  PlannedFileRole,
+  SymbolChangePlanResult,
+} from './change-planning-types.js';
 export type {
   AnalyzeSymbolImpactInput,
   ImpactAnalysisMode,
