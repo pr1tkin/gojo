@@ -2,19 +2,20 @@
 
 ## Overview
 
-RepoRadar is a local code-intelligence stack for repository exploration.
+RepoRadar is a local code-intelligence stack for AI coding agents and developers.
 
 It combines:
 
-- Zoekt for full-text search
+- Zoekt for repository-scale code search
 - Tree-sitter for TypeScript and TSX symbol extraction
-- a persisted symbol index with stable file and symbol identities
-- a file-level import/export graph
+- a persisted symbol index with stable `fileId` and `symbolId`
+- structured import/export metadata and symbol frequency statistics
+- a deterministic file-level code graph
 - ranking and context assembly layers
 - orchestrator services
-- an MCP tool layer
+- MCP tools for high-level agent workflows
 
-The current public high-level MCP tools are `explore_component`, `search_patterns`, `collect_refactor_context`, and `analyze_symbol`.
+RepoRadar does not attempt full semantic program understanding. It provides practical, graph-aware code navigation and structured context retrieval for real repositories.
 
 ## Runtime Services
 
@@ -30,31 +31,110 @@ RepoRadar runs as three runtime services plus a shared repository mount:
 - `mcp-server`
   - runs over stdio
   - reads repositories from `/repos`
-  - persists local MCP-side data in `/app/.data`
+  - persists MCP-side data in `/app/.data`
   - exposes MCP tools to clients
 
 ## Layered Architecture
 
 ```text
-Agent / Copilot
-    |
-    v
-MCP Tools
-    |
-    v
+Agent / MCP Client
+        |
+        v
+    MCP Tools
+        |
+        v
 Orchestrator Services
-    |
-    +-------------------+-------------------+-------------------+
-    |                   |                   |                   |
-    v                   v                   v                   v
- Search              Symbols             Graph              Ranking
-    |                   |                   |                   |
-    v                   v                   v                   v
- Zoekt           Tree-sitter +        Import/Export       Context
-                 Symbol Index         Relationships       Selection
+        |
+        +-------------------+-------------------+-------------------+
+        |                   |                   |                   |
+        v                   v                   v                   v
+   Search Layer        Symbol Layer        Graph Layer       Ranking + Context
+        |                   |                   |                   |
+        v                   v                   v                   v
+      Zoekt         Tree-sitter +        Import / Export      Candidate ordering,
+                    Symbol Index         Relationships        related files, summaries
 ```
 
 ## Layer Responsibilities
+
+### Search Layer
+
+The search layer is Zoekt-backed full-text retrieval.
+
+It is used for:
+
+- fast repository-wide search
+- candidate discovery when exact file or symbol context is not yet known
+- low-level search-oriented MCP tools
+
+Zoekt does not parse syntax and does not own symbol or graph relationships.
+
+### Symbol Layer
+
+The symbol layer is built from Tree-sitter parsing plus persisted file metadata.
+
+Current symbol data includes:
+
+- stable `fileId`
+- stable `symbolId`
+- symbol names and kinds
+- export markers
+- file-level import/export metadata
+- aggregate symbol frequency statistics
+
+Persisted files:
+
+- `mcp-server/.data/symbol-index.json`
+- `mcp-server/.data/code-graph.json`
+
+### Graph Layer
+
+The graph layer builds file-level relationships from indexed import/export metadata.
+
+Current graph capabilities:
+
+- deterministic file import edges
+- deterministic re-export edges
+- relative import resolution
+- deterministic `tsconfig` and `jsconfig` alias resolution
+- deterministic repo-root `baseUrl` local import resolution
+
+Edge creation stays conservative:
+
+- create an edge only when exactly one indexed local target resolves
+- prefer missing edges over incorrect guesses
+
+### Ranking And Context Layer
+
+The ranking and context layers prioritize and assemble repository context.
+
+They provide:
+
+- symbol candidate ordering
+- related-file selection
+- heuristic pattern matching signals
+- explainable scoring reasons
+- concise structured summaries for tools
+
+This layer does not index files or build the graph. It composes data from the search, symbol, and graph layers into agent-ready results.
+
+### Orchestrator Services
+
+The orchestrator layer turns indexed data into practical workflows.
+
+Current internal services include:
+
+- `getFileExplorationContext(...)`
+- `getSymbolExplorationContext(...)`
+- `getPatternMatchesForFile(...)`
+- `getPatternMatchesForSymbol(...)`
+- `getPatternMatchesForComponent(...)`
+- `getRefactorContextForFile(...)`
+- `getRefactorContextForSymbol(...)`
+- `getRefactorContextForComponent(...)`
+- `getAnalyzeSymbolContext(...)`
+
+These services compose the underlying layers rather than reimplementing them.
 
 ### MCP Tool Layer
 
@@ -73,93 +153,102 @@ Current tools:
 - `collect_refactor_context`
 - `analyze_symbol`
 
-`explore_component`, `search_patterns`, `collect_refactor_context`, and `analyze_symbol` are the current high-level public tools. They return structured exploration, refactor, or symbol-analysis results rather than low-level raw lookup results.
+The higher-level tools are built on top of the orchestrator layer and return structured results rather than raw primitives.
 
-### Orchestrator Services
+## How The Public Tools Build On The Stack
 
-The orchestrator layer turns graph, symbol, and ranking data into useful exploration flows.
+### `explore_component`
 
-Current public-facing internal services:
+Purpose:
 
-- `getFileExplorationContext(...)`
-- `getSymbolExplorationContext(...)`
-- `getPatternMatchesForFile(...)`
-- `getPatternMatchesForSymbol(...)`
-- `getPatternMatchesForComponent(...)`
-- `getRefactorContextForFile(...)`
-- `getRefactorContextForSymbol(...)`
-- `getRefactorContextForComponent(...)`
-- `getAnalyzeSymbolContext(...)`
+- understand the structure and context of a component or symbol in a repository
 
-These services feed the `explore_component`, `search_patterns`, `collect_refactor_context`, and `analyze_symbol` adapters.
+Builds on:
 
-### Context Assembly Layer
+- symbol resolution
+- graph-derived neighboring files
+- ranking of related files
+- file-level defined and exported symbols
 
-The context layer assembles:
+Returns:
 
-- ranked related files
-- neighboring files
+- resolved primary symbol and file
+- related files
 - defined symbols
 - exported symbols
+- a concise exploration summary
 
-It does not perform indexing or graph construction directly. It composes existing graph and symbol data into agent-ready bundles.
+### `search_patterns`
 
-### Ranking Layer
+Purpose:
 
-The ranking layer prioritizes:
+- discover repository precedents and structurally similar implementations
 
-- symbol candidates
+Builds on:
+
+- symbol and file resolution
+- graph neighbor signals
+- naming and file-family heuristics
+- explainable ranking signals
+
+Returns:
+
+- resolved target
+- ranked matches
+- reasons for each match
+- symbol and export summaries for the matched files
+
+This is heuristic pattern discovery, not deep semantic similarity.
+
+### `collect_refactor_context`
+
+Purpose:
+
+- assemble a bounded refactor impact surface for a file, component, or symbol
+
+Builds on:
+
+- direct importers and imports
+- direct re-export chains
+- graph neighbors
+- related-file ranking
+- nearby same-directory or bundle-family files
+
+Returns:
+
+- the primary file
+- importing and imported files
+- graph neighbors
 - related files
-- reference candidates
-- heuristic pattern matches
+- nearby files
+- summary counts that help estimate local impact
 
-It keeps selection explainable by attaching scoring reasons.
+This is refactor context assembly, not full impact analysis.
 
-### Graph Layer
+### `analyze_symbol`
 
-The graph layer builds file-level relationships from indexed import/export metadata.
+Purpose:
 
-Current graph capabilities:
+- explain a symbol's identity, role, and surrounding usage context
 
-- deterministic file import edges
-- deterministic re-export edges
-- relative import resolution
-- deterministic `tsconfig` / `jsconfig` alias resolution
-- deterministic repo-root `baseUrl` local import resolution
+Builds on:
 
-Edge creation stays conservative:
+- symbol resolution
+- export status and symbol kind
+- file-level graph relationships
+- related-file ranking
+- nearby and sibling symbols in the defining file
 
-- create an edge only when exactly one indexed local target resolves
-- prefer missing edges over incorrect guesses
+Returns:
 
-### Symbol Layer
+- the primary symbol and file
+- symbol kind and export status
+- a grounded role summary
+- nearby and sibling symbols
+- importer and import context
+- usage summary fields that distinguish file-level proxy usage from verified symbol-level references when reference data is unavailable
 
-The symbol layer is built from Tree-sitter parsing plus persisted file metadata.
-
-Current symbol index data includes:
-
-- stable `fileId`
-- stable `symbolId`
-- symbol names and kinds
-- exported markers
-- file-level import/export metadata
-- aggregate symbol frequency statistics
-
-Persisted files:
-
-- `mcp-server/.data/symbol-index.json`
-- `mcp-server/.data/code-graph.json`
-
-### Search Layer
-
-Zoekt handles repository-scale full-text search.
-
-It is used for:
-
-- raw code search
-- fallback exploration paths where text retrieval is still useful
-
-Zoekt does not parse syntax and does not maintain symbol or graph relationships.
+This is structured symbol analysis, not full reference completeness or call-graph understanding.
 
 ## Data Flow
 
@@ -175,114 +264,21 @@ repos/ -> mcp-server symbol indexing -> symbol-index.json -> code-graph.json
 3. The MCP server builds a persisted symbol index from repository files.
 4. The MCP server builds a code graph from the persisted symbol index.
 
-### Exploration
+### Retrieval And Analysis
 
 ```text
-MCP client -> high-level MCP tools
-                    |
-                    v
-            Orchestrator services
-                    |
-        +-----------+-----------+-----------+
-        |                       |           |
-        v                       v           v
-    Symbol context          File context   Refactor context
-        |                       |           |
-        +-----------+-----------+-----------+
-                    |
-                    v
-      ranked related files + heuristic pattern matches + impact surface
+MCP client -> MCP tools -> orchestrator services
+                                  |
+                  +---------------+---------------+
+                  |                               |
+                  v                               v
+             symbol / graph                  ranking / context
+                  |                               |
+                  +---------------+---------------+
+                                  |
+                                  v
+                      structured agent-ready result
 ```
-
-## `explore_component`
-
-Purpose:
-
-- explore the structure and context of a component or symbol in a repository
-
-Current output shape includes:
-
-- resolved primary symbol
-- resolved primary file
-- related files
-- defined symbols
-- exported symbols
-- structured summary
-- ambiguity details when multiple candidates exist
-
-This matters because it gives agents a practical starting point for:
-
-- code navigation
-- architecture discovery
-- component understanding
-- refactor planning
-
-## `search_patterns`
-
-Purpose:
-
-- find similar implementations and repository precedents using heuristic pattern discovery
-
-Current output shape includes:
-
-- resolved primary target
-- ranked pattern matches
-- explainable scoring reasons
-- defined symbols for matched files
-- exported symbols for matched files
-
-This matters because it gives agents a practical way to:
-
-- inspect similar implementations before generating code
-- find repository-local precedent for refactors
-- compare file neighborhoods and export surfaces without claiming deep semantic understanding
-
-## `collect_refactor_context`
-
-Purpose:
-
-- assemble refactor impact context for a file, component, or symbol
-
-Current output shape includes:
-
-- resolved primary file
-- exported symbols
-- importing files
-- imported files
-- graph neighbors
-- ranked related files
-- nearby directory or bundle-family files
-- ambiguity notes when symbol resolution is not unique
-
-This matters because it gives agents a practical way to:
-
-- estimate what surrounding code must be understood before a change
-- identify direct dependents and local impact surface
-- plan scoped refactors without claiming full semantic impact analysis
-
-## `analyze_symbol`
-
-Purpose:
-
-- assemble structured symbol analysis for a file-level or exported symbol
-
-Current output shape includes:
-
-- resolved primary symbol and file
-- symbol kind and exported status
-- a grounded role summary
-- importing and imported files
-- graph neighbors
-- ranked related files
-- nearby and sibling symbols from the defining file
-- usage summary fields that distinguish file-level proxy usage from verified symbol-level references when references are unavailable
-
-This matters because it gives agents a practical way to:
-
-- identify what a symbol is in repository context
-- understand whether it is local, feature-level, or part of a broader boundary
-- gather nearby files and symbols without claiming full semantic program understanding
-- interpret importer counts safely as file-level proxy usage when symbol-level references are not available
 
 ## Repository And Storage Layout
 
@@ -311,32 +307,27 @@ The current `docker-compose.yml` defines:
 
 ## Boundaries
 
-### Zoekt
+### In Scope Today
 
-- full-text search only
-- no syntax parsing
-- no symbol graph ownership
-
-### MCP Server
-
-- stdio MCP protocol handling
-- symbol indexing
-- graph building
-- ranking
-- context assembly
-- orchestrator services
-- MCP tool exposure
+- code search
+- symbol extraction and persisted symbol metadata
+- deterministic local graph construction
+- explainable ranking and context assembly
+- public MCP tools for component exploration, precedent search, refactor context, and symbol analysis
 
 ### Not In Scope Today
 
-- broad public tool-surface redesign
+- full semantic program analysis
+- full reference completeness
+- call-graph analysis
+- broad speculative package or workspace inference
 - incremental refresh
 - `.jsx` symbol indexing
-- speculative package or workspace inference
-- deeper cross-repo symbol graph inference
+- deeper cross-repo graph inference
 
 ## Related Documents
 
 - [README](../README.md)
+- [Tools](./tools.md)
 - [Operations](./operations.md)
 - [Testing](./testing.md)

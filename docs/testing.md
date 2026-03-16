@@ -2,20 +2,20 @@
 
 ## Philosophy
 
-The project uses focused unit tests for the `mcp-server` codebase.
+RepoRadar uses focused unit tests for the `mcp-server` codebase.
 
-The aim is to verify:
+The goal is to verify the deterministic parts of the code-intelligence stack:
 
 - safe repository and file access
 - Zoekt request construction and result formatting
 - Tree-sitter parsing and symbol extraction
 - symbol-index persistence and querying
-- graph construction and local-resolution behavior
+- graph construction and deterministic local resolution
 - ranking and context assembly
 - orchestrator services
-- MCP tool contracts, including `explore_component`, `search_patterns`, `collect_refactor_context`, and `analyze_symbol`
+- MCP tool contracts for the public workflows
 
-The suite does not try to replace Docker integration tests or a live MCP client session.
+The test suite does not try to simulate a full end-to-end MCP client session or full Docker integration.
 
 ## Running Tests
 
@@ -25,6 +25,7 @@ From `mcp-server/`:
 npm install
 npm run test
 npm run test:coverage
+npm run build
 ```
 
 Vitest configuration:
@@ -47,7 +48,7 @@ Current direct coverage includes:
 - symbol-index build, persistence, and querying
 - TypeScript project helpers and compiler-backed fallback behavior
 - graph build, persistence, query helpers, and deterministic local resolution
-- ranking behavior for symbols, related files, and references
+- ranking behavior for symbols, related files, references, and heuristic pattern matches
 - context assembly
 - orchestrator services
 - tool-layer behavior for:
@@ -70,14 +71,16 @@ Fixtures live under:
 
 The public MCP tools are intentionally tested as thin adapters.
 
-That means the tests focus on:
+That means tool tests focus on:
 
 - public input schema acceptance
 - predictable structured output
-- safe degradation for missing or ambiguous results
+- safe degradation for missing or ambiguous inputs
 - delegation to existing internal layers rather than duplicated logic
 
-For `explore_component`, the current tests cover:
+### `explore_component`
+
+Current tests cover:
 
 - known component exploration
 - repo filtering
@@ -85,7 +88,9 @@ For `explore_component`, the current tests cover:
 - missing names
 - repo filters that remove all candidates
 
-For `search_patterns`, the current tests cover:
+### `search_patterns`
+
+Current tests cover:
 
 - component-style pattern discovery
 - repo filtering
@@ -93,7 +98,9 @@ For `search_patterns`, the current tests cover:
 - safe handling of missing targets
 - explainable ranking signals
 
-For `collect_refactor_context`, the current tests cover:
+### `collect_refactor_context`
+
+Current tests cover:
 
 - component refactor context assembly
 - file-based refactor context assembly
@@ -101,14 +108,16 @@ For `collect_refactor_context`, the current tests cover:
 - safe handling of unresolved targets
 - stable ordering of nearby and related files
 
-For `analyze_symbol`, the current tests cover:
+### `analyze_symbol`
+
+Current tests cover:
 
 - exported symbol analysis
 - local helper analysis
 - file-filtered ambiguity resolution
 - safe handling of missing symbols
 - grounded role summary generation
-- safer usage summary fields for file-level proxy counts
+- safer usage summary fields for file-level proxy counts versus verified symbol-level references when reference data is unavailable
 
 ## What Is Intentionally Out Of Scope
 
@@ -116,10 +125,11 @@ The unit suite does not attempt to cover:
 
 - Docker or Compose integration behavior
 - end-to-end MCP stdio sessions
-- live Zoekt indexing/search container integration
+- live Zoekt indexing and search container integration
 - polling timing behavior for the indexer
 - full cross-platform filesystem behavior for every symlink edge case
 - performance benchmarking
+- full semantic or reference-complete program analysis
 
 `server.ts` remains lightly tested indirectly because it is mostly MCP SDK bootstrap and tool registration glue.
 
@@ -142,19 +152,20 @@ Full build verification:
 npm run build
 ```
 
-## Current Validation Strategy
+## Validation Strategy
 
 Use unit tests for:
 
-- correctness of deterministic indexing and graph behavior
-- stable public tool contracts
+- deterministic indexing and graph correctness
+- stable public MCP tool contracts
+- explainable ranking behavior
 - safe failure modes
 
 Use manual runtime checks for:
 
 - Docker Compose startup
 - Zoekt availability
-- end-to-end MCP client integration
+- MCP client integration
 - exploration quality on real repositories
 
-For runtime and environment setup, see [Operations](./operations.md). For the live system structure, see [Architecture](./architecture.md).
+For runtime setup, see [Operations](./operations.md). For system structure, see [Architecture](./architecture.md).
