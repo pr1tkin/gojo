@@ -1,4 +1,5 @@
 import type { SymbolKind } from '../types.js';
+import { getImportedFiles, getRepoFiles } from '../graph/query.js';
 import { analyzeSymbolImpact } from './impact-analysis-service.js';
 import type {
   ImpactAnalysisResult,
@@ -38,6 +39,15 @@ interface FilePlanCandidate {
   reason: string;
   confidence: 'high' | 'medium' | 'low';
   bucket: 'primary' | 'secondary' | 'surface' | 'review' | 'test';
+}
+
+interface PlanningFacts {
+  ownership: OwnershipClassification;
+  apiBoundary: ApiBoundaryClassification;
+  usageKind: UsageKind;
+  frameworkEntry: boolean;
+  barrelSurface: boolean;
+  repoWide: boolean;
 }
 
 function normalizePath(filePath: string): string {
@@ -80,12 +90,53 @@ function isEntrySurfacePath(filePath: string): boolean {
   );
 }
 
+function isFrameworkEntryPath(filePath: string): boolean {
+  const normalized = normalizePath(filePath);
+  return (
+    /^(src\/)?app\/layout\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^(src\/)?app\/page\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^(src\/)?app\/.+\/page\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^(src\/)?app\/api\/.+\/route\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^pages\/.+\/index\.(tsx?|jsx?)$/i.test(normalized)
+  );
+}
+
 function isTestOrStoryPath(filePath: string): boolean {
   const normalized = normalizePath(filePath);
   return (
     /(^|\/)__tests__\//i.test(normalized) ||
     /(^|\/)(tests?|fixtures?)\//i.test(normalized) ||
     /\.(test|spec|stories|story)\.(tsx?|jsx?)$/i.test(normalized)
+  );
+}
+
+function pathSegments(filePath: string): string[] {
+  return normalizePath(filePath).split('/').filter(Boolean);
+}
+
+function isWithinDirectorySubtree(filePath: string, directoryPath: string): boolean {
+  const normalizedFile = normalizePath(filePath);
+  const normalizedDirectory = normalizePath(directoryPath).replace(/\/+$/, '');
+  return normalizedFile.startsWith(`${normalizedDirectory}/`);
+}
+
+function getDirectoryPath(filePath: string): string {
+  const normalized = normalizePath(filePath);
+  const lastSlash = normalized.lastIndexOf('/');
+  return lastSlash === -1 ? normalized : normalized.slice(0, lastSlash);
+}
+
+function isStructuralConsumerPath(filePath: string): boolean {
+  const normalized = normalizePath(filePath);
+  return /(^|\/)(services?|providers?|contexts?|store|stores|adapter|adapters|hooks?|models?)\//i.test(normalized);
+}
+
+function isSimpleUsagePath(filePath: string): boolean {
+  const normalized = normalizePath(filePath);
+  return (
+    /(^|\/)(components?|ui)\//i.test(normalized) ||
+    /(^|\/)app\//i.test(normalized) ||
+    /(^|\/)pages\//i.test(normalized)
   );
 }
 
@@ -220,6 +271,17 @@ function toPlanningSignals(ownership: SymbolOwnershipResult, impact: ImpactAnaly
   return signals;
 }
 
+function getPlanningFacts(ownership: SymbolOwnershipResult, signals: ChangePlanningSignal[]): PlanningFacts {
+  return {
+    ownership: ownership.ownership,
+    apiBoundary: ownership.apiBoundary,
+    usageKind: getUsageKind(ownership.signals),
+    frameworkEntry: signals.some((entry) => entry.type === 'framework-entry'),
+    barrelSurface: signals.some((entry) => entry.type === 'barrel-surface'),
+    repoWide: signals.some((entry) => entry.type === 'repo-wide'),
+  };
+}
+
 function collectImpactedPaths(impact: ImpactAnalysisResult, targetFilePath: string): string[] {
   const filePaths = new Set<string>();
 
@@ -339,31 +401,48 @@ function evidenceHasReason(evidence: ImpactEvidence[], reason: string): boolean 
   return evidence.some((entry) => entry.reason === reason);
 }
 
-function getRoleBucket(role: PlannedFileRole): FilePlanCandidate['bucket'] {
-  switch (role) {
-    case 'edit-primary':
-      return 'primary';
-    case 'edit-secondary':
-    case 'dependent-consumer':
-      return 'secondary';
-    case 'entry-surface':
-      return 'surface';
-    case 'test-or-story':
-      return 'test';
-    case 'review-only':
-    case 'unknown':
-      return 'review';
+function shouldPromoteToEditSecondary(
+  filePath: string,
+  targetFilePath: string,
+  scope: ChangeScope,
+  facts: PlanningFacts,
+): boolean {
+  const targetDirectory = getDirectoryPath(targetFilePath);
+  const sameSubtree = isWithinDirectorySubtree(filePath, targetDirectory);
+  const sameFeature = getFeatureAreaKey(filePath) === getFeatureAreaKey(targetFilePath);
+
+  if (sameSubtree) {
+    return true;
   }
+
+  if (scope === 'feature-bounded' && sameFeature && !isEntrySurfacePath(filePath)) {
+    return true;
+  }
+
+  if ((scope === 'shared-internal' || scope === 'broad-shared') && isStructuralConsumerPath(filePath)) {
+    return true;
+  }
+
+  if (facts.barrelSurface && sameFeature && isStructuralConsumerPath(filePath)) {
+    return true;
+  }
+
+  return false;
 }
 
 function toCandidateFromDirectFile(
   entry: ImpactedFile,
   scope: ChangeScope,
   targetFilePath: string,
+  facts: PlanningFacts,
 ): FilePlanCandidate | null {
   const filePath = normalizePath(entry.filePath);
 
   if (!filePath || filePath === normalizePath(targetFilePath)) {
+    return null;
+  }
+
+  if (scope === 'local-file' && !isTestOrStoryPath(filePath)) {
     return null;
   }
 
@@ -381,18 +460,32 @@ function toCandidateFromDirectFile(
     return {
       filePath,
       role: 'entry-surface',
-      reason: 'entry surface or barrel file should be checked alongside the defining file',
+      reason: evidenceHasReason(entry.evidence, 'reexports-target')
+        ? 'barrel file or export surface should be checked alongside the defining file'
+        : 'entry surface should be reviewed after structural consumers',
       confidence: planningConfidenceFromImpact(entry.confidence),
       bucket: 'surface',
     };
   }
 
+  if (shouldPromoteToEditSecondary(filePath, targetFilePath, scope, facts)) {
+    return {
+      filePath,
+      role: 'edit-secondary',
+      reason: 'structural consumer likely needs a follow-up edit after the defining file',
+      confidence: planningConfidenceFromImpact(entry.confidence),
+      bucket: 'secondary',
+    };
+  }
+
   return {
     filePath,
-    role: scope === 'local-file' ? 'review-only' : 'edit-secondary',
-    reason: 'direct importer likely needs an edit or targeted review',
+    role: 'review-only',
+    reason: isSimpleUsagePath(filePath)
+      ? 'direct usage site should be reviewed after structural consumers'
+      : 'direct importer should be reviewed after the defining file',
     confidence: planningConfidenceFromImpact(entry.confidence),
-    bucket: scope === 'local-file' ? 'review' : 'secondary',
+    bucket: 'review',
   };
 }
 
@@ -400,10 +493,15 @@ function toCandidateFromDirectSymbol(
   entry: ImpactedSymbol,
   scope: ChangeScope,
   targetFilePath: string,
+  facts: PlanningFacts,
 ): FilePlanCandidate | null {
   const filePath = normalizePath(entry.filePath);
 
   if (!filePath || filePath === normalizePath(targetFilePath)) {
+    return null;
+  }
+
+  if (scope === 'local-file' && !isTestOrStoryPath(filePath)) {
     return null;
   }
 
@@ -421,25 +519,41 @@ function toCandidateFromDirectSymbol(
     return {
       filePath,
       role: 'entry-surface',
-      reason: `entry or barrel symbol "${entry.symbolName}" references the target`,
+      reason: evidenceHasReason(entry.evidence, 'reexports-target')
+        ? `barrel symbol "${entry.symbolName}" references the target`
+        : `entry-surface symbol "${entry.symbolName}" should be reviewed`,
       confidence: planningConfidenceFromImpact(entry.confidence),
       bucket: 'surface',
     };
   }
 
+  if (shouldPromoteToEditSecondary(filePath, targetFilePath, scope, facts)) {
+    return {
+      filePath,
+      role: 'dependent-consumer',
+      reason: `structural consumer symbol "${entry.symbolName}" should be inspected after the defining file`,
+      confidence: planningConfidenceFromImpact(entry.confidence),
+      bucket: 'secondary',
+    };
+  }
+
   return {
     filePath,
-    role: scope === 'local-file' ? 'review-only' : 'dependent-consumer',
-    reason: `consumer symbol "${entry.symbolName}" should be inspected after the defining file`,
+    role: 'review-only',
+    reason: `consumer symbol "${entry.symbolName}" should be reviewed after structural consumers`,
     confidence: planningConfidenceFromImpact(entry.confidence),
-    bucket: scope === 'local-file' ? 'review' : 'secondary',
+    bucket: 'review',
   };
 }
 
-function toCandidateFromTransitive(entry: TransitiveImpact, targetFilePath: string): FilePlanCandidate | null {
+function toCandidateFromTransitive(entry: TransitiveImpact, targetFilePath: string, scope: ChangeScope): FilePlanCandidate | null {
   const filePath = normalizePath(entry.file?.filePath ?? entry.symbol?.filePath ?? '');
 
   if (!filePath || filePath === normalizePath(targetFilePath)) {
+    return null;
+  }
+
+  if (scope === 'local-file' && !isTestOrStoryPath(filePath)) {
     return null;
   }
 
@@ -490,7 +604,77 @@ function mergeCandidate(current: FilePlanCandidate | undefined, incoming: FilePl
   return confidenceWeight(incoming.confidence) > confidenceWeight(current.confidence) ? incoming : current;
 }
 
-function toOrderedPlan(targetFilePath: string, impact: ImpactAnalysisResult, scope: ChangeScope): ChangePlanStep[] {
+async function getFrameworkSurfaceCandidates(targetFileId: string | undefined, repoId: string | undefined, targetFilePath: string): Promise<FilePlanCandidate[]> {
+  if (!targetFileId || !repoId || !isFrameworkEntryPath(targetFilePath)) {
+    return [];
+  }
+
+  const candidates: FilePlanCandidate[] = [];
+  const seen = new Set<string>();
+  const importedFiles = await getImportedFiles(targetFileId);
+
+  for (const file of importedFiles) {
+    const filePath = normalizePath(file.filePath);
+
+    if (filePath === normalizePath(targetFilePath) || isTestOrStoryPath(filePath) || seen.has(filePath)) {
+      continue;
+    }
+
+    seen.add(filePath);
+    candidates.push({
+      filePath,
+      role: isEntrySurfacePath(filePath) ? 'entry-surface' : 'review-only',
+      reason: /provider/i.test(filePath)
+        ? 'top-level provider should be reviewed alongside the framework entry file'
+        : 'layout-adjacent imported module should be reviewed with the framework entry file',
+      confidence: 'medium',
+      bucket: isEntrySurfacePath(filePath) ? 'surface' : 'review',
+    });
+  }
+
+  const repoFiles = await getRepoFiles(repoId);
+  const targetSegments = pathSegments(targetFilePath);
+  const appRoot = targetSegments[0] === 'src' && targetSegments[1] === 'app'
+    ? 'src/app'
+    : targetSegments[0] === 'app'
+      ? 'app'
+      : '';
+
+  for (const file of repoFiles) {
+    const filePath = normalizePath(file.filePath);
+
+    if (!filePath || filePath === normalizePath(targetFilePath) || seen.has(filePath) || isTestOrStoryPath(filePath)) {
+      continue;
+    }
+
+    const isSiblingPage = appRoot !== '' && filePath === `${appRoot}/page.tsx`;
+    const isProviderLike = appRoot !== '' && filePath.startsWith(`${appRoot}/`) && /(^|\/)(providers?|contexts?)\//i.test(filePath);
+
+    if (!isSiblingPage && !isProviderLike) {
+      continue;
+    }
+
+    seen.add(filePath);
+    candidates.push({
+      filePath,
+      role: isEntrySurfacePath(filePath) ? 'entry-surface' : 'review-only',
+      reason: isSiblingPage
+        ? 'top-level page module should be reviewed for framework entry changes'
+        : 'high-level provider module should be reviewed for framework entry changes',
+      confidence: 'low',
+      bucket: isEntrySurfacePath(filePath) ? 'surface' : 'review',
+    });
+  }
+
+  return candidates;
+}
+
+async function toOrderedPlan(
+  targetFilePath: string,
+  impact: ImpactAnalysisResult,
+  scope: ChangeScope,
+  facts: PlanningFacts,
+): Promise<ChangePlanStep[]> {
   const candidates = new Map<string, FilePlanCandidate>();
   const normalizedTargetFilePath = normalizePath(targetFilePath);
 
@@ -503,7 +687,7 @@ function toOrderedPlan(targetFilePath: string, impact: ImpactAnalysisResult, sco
   });
 
   for (const entry of impact.directlyImpactedSymbols) {
-    const candidate = toCandidateFromDirectSymbol(entry, scope, normalizedTargetFilePath);
+    const candidate = toCandidateFromDirectSymbol(entry, scope, normalizedTargetFilePath, facts);
 
     if (!candidate) {
       continue;
@@ -513,7 +697,7 @@ function toOrderedPlan(targetFilePath: string, impact: ImpactAnalysisResult, sco
   }
 
   for (const entry of impact.directlyImpactedFiles) {
-    const candidate = toCandidateFromDirectFile(entry, scope, normalizedTargetFilePath);
+    const candidate = toCandidateFromDirectFile(entry, scope, normalizedTargetFilePath, facts);
 
     if (!candidate) {
       continue;
@@ -523,13 +707,25 @@ function toOrderedPlan(targetFilePath: string, impact: ImpactAnalysisResult, sco
   }
 
   for (const entry of impact.transitiveImpacts) {
-    const candidate = toCandidateFromTransitive(entry, normalizedTargetFilePath);
+    const candidate = toCandidateFromTransitive(entry, normalizedTargetFilePath, scope);
 
     if (!candidate) {
       continue;
     }
 
     candidates.set(candidate.filePath, mergeCandidate(candidates.get(candidate.filePath), candidate));
+  }
+
+  if (facts.frameworkEntry) {
+    const frameworkCandidates = await getFrameworkSurfaceCandidates(
+      impact.target.file?.fileId,
+      impact.target.repoId ?? impact.target.file?.repoId,
+      normalizedTargetFilePath,
+    );
+
+    for (const candidate of frameworkCandidates) {
+      candidates.set(candidate.filePath, mergeCandidate(candidates.get(candidate.filePath), candidate));
+    }
   }
 
   const bucketOrder: FilePlanCandidate['bucket'][] = ['primary', 'secondary', 'surface', 'review', 'test'];
@@ -701,9 +897,10 @@ export async function planSymbolChange(input: AnalyzeSymbolChangePlanInput): Pro
   }
 
   const signals = toPlanningSignals(ownership, impact);
+  const facts = getPlanningFacts(ownership, signals);
   const scope = classifyScope(ownership, impact, signals);
   const risk = classifyRisk(scope, ownership, impact, signals);
-  const orderedPlan = toOrderedPlan(filePath, impact, scope);
+  const orderedPlan = await toOrderedPlan(filePath, impact, scope, facts);
   const fileLists = classifyLists(orderedPlan);
   const notes = collectNotes(ownership, impact, scope);
 

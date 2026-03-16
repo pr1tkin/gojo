@@ -148,6 +148,8 @@ The latest refinement improves ownership conflict resolution for barrel-exported
 
 The internal change-planning service adds ownership-aware refactor safety estimation. It combines existing impact analysis and ownership analysis to produce conservative scope and risk classification plus an ordered edit/review plan for agent workflows. It does not generate patches or claim semantic refactor completeness.
 
+Recent refinement work improved edit vs review separation and plan precision for local helpers and framework entry surfaces while keeping the same ownership-aware planning architecture.
+
 ### MCP Tool Layer
 
 The MCP tool layer is the public interface exposed over stdio.

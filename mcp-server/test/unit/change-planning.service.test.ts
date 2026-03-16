@@ -3,9 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   analyzeSymbolImpactMock,
   analyzeSymbolOwnershipMock,
+  getImportedFilesMock,
+  getRepoFilesMock,
 } = vi.hoisted(() => ({
   analyzeSymbolImpactMock: vi.fn(),
   analyzeSymbolOwnershipMock: vi.fn(),
+  getImportedFilesMock: vi.fn(),
+  getRepoFilesMock: vi.fn(),
 }));
 
 vi.mock('../../src/orchestrator/impact-analysis-service.js', () => ({
@@ -14,6 +18,11 @@ vi.mock('../../src/orchestrator/impact-analysis-service.js', () => ({
 
 vi.mock('../../src/orchestrator/symbol-ownership-service.js', () => ({
   analyzeSymbolOwnership: analyzeSymbolOwnershipMock,
+}));
+
+vi.mock('../../src/graph/query.js', () => ({
+  getImportedFiles: getImportedFilesMock,
+  getRepoFiles: getRepoFilesMock,
 }));
 
 import { planSymbolChange } from '../../src/orchestrator/change-planning-service.js';
@@ -191,6 +200,8 @@ function transitiveFile(filePath: string, confidence: 'medium' | 'low' = 'medium
 describe('change planning service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getImportedFilesMock.mockResolvedValue([]);
+    getRepoFilesMock.mockResolvedValue([]);
   });
 
   it('classifies a local helper as local-file with a defining-file-first plan', async () => {
@@ -226,6 +237,70 @@ describe('change planning service', () => {
         order: 1,
         filePath: 'src/app/_components/audioSimple/AudioSimple.tsx',
         role: 'edit-primary',
+      }),
+    ]);
+  });
+
+  it('suppresses non-test downstream files for local-file plans', async () => {
+    analyzeSymbolOwnershipMock.mockResolvedValue(ownershipResult(
+      'src/app/_components/audioSimple/AudioSimple.tsx',
+      'parseDate',
+      'function',
+      {
+        ownership: 'internal-local',
+        apiBoundary: 'not-api-like',
+        confidence: 'medium',
+        signals: [
+          { type: 'export-surface', strength: 'weak', note: 'not exported' },
+          { type: 'local-only-usage', strength: 'strong', note: 'local only' },
+        ],
+        summary: 'function with no shared surface signals',
+      },
+    ));
+    analyzeSymbolImpactMock.mockResolvedValue(impactResult(
+      'src/app/_components/audioSimple/AudioSimple.tsx',
+      'parseDate',
+      'function',
+      {
+        directlyImpactedFiles: [
+          directFile('src/app/audio/[sophoraId]/page.tsx'),
+          directFile('src/app/_components/audioSimple/AudioSimple.stories.tsx'),
+        ],
+        transitiveImpacts: [transitiveFile('src/app/audio/[sophoraId]/AudioContent.tsx')],
+        summary: {
+          directFileCount: 2,
+          directSymbolCount: 0,
+          transitiveFileCount: 1,
+          transitiveSymbolCount: 0,
+          highConfidenceImpactCount: 1,
+          mediumConfidenceImpactCount: 2,
+          lowConfidenceImpactCount: 0,
+          symbolDirectImpactCount: 0,
+          fileDirectImpactCount: 2,
+          proxyImpactCount: 1,
+          localSymbolImpactCount: 0,
+          overview: '',
+          ambiguityDetected: false,
+          notes: [],
+        },
+      },
+    ));
+
+    const result = await planSymbolChange({ symbolId: 'parse-date-leak' });
+
+    expect(result.scope).toBe('local-file');
+    expect(result.secondaryEditFiles).toEqual([]);
+    expect(result.reviewFiles).toEqual(['src/app/_components/audioSimple/AudioSimple.stories.tsx']);
+    expect(result.orderedPlan).toEqual([
+      expect.objectContaining({
+        order: 1,
+        filePath: 'src/app/_components/audioSimple/AudioSimple.tsx',
+        role: 'edit-primary',
+      }),
+      expect.objectContaining({
+        order: 2,
+        filePath: 'src/app/_components/audioSimple/AudioSimple.stories.tsx',
+        role: 'test-or-story',
       }),
     ]);
   });
@@ -352,9 +427,10 @@ describe('change planning service', () => {
       }),
       expect.objectContaining({
         filePath: 'src/app/_components/metadata/podcast/Podcast.tsx',
-        role: 'edit-secondary',
+        role: 'review-only',
       }),
     ]));
+    expect(result.secondaryEditFiles).toEqual(['src/app/_components/button/index.ts']);
   });
 
   it('classifies a broadly reused utility as broad-shared and high-risk', async () => {
@@ -418,10 +494,47 @@ describe('change planning service', () => {
       expect.objectContaining({ type: 'repo-wide', strength: 'strong' }),
       expect.objectContaining({ type: 'high-fanout', strength: 'strong' }),
     ]));
+    expect(result.secondaryEditFiles).toEqual([]);
+    expect(result.reviewFiles).toEqual(expect.arrayContaining([
+      'components/ui/Button.tsx',
+      'app/layout.tsx',
+    ]));
     expect(result.reviewFiles).toContain('app/layout.tsx');
   });
 
   it('keeps framework entry surfaces conservative while highlighting the entry file first', async () => {
+    getImportedFilesMock.mockResolvedValue([
+      {
+        nodeType: 'file',
+        fileId: 'repo-a:src/app/providers/AppProviders.tsx',
+        repoId: 'repo-a',
+        filePath: 'src/app/providers/AppProviders.tsx',
+        classification: 'source',
+      },
+      {
+        nodeType: 'file',
+        fileId: 'repo-a:src/app/_components/navbar/Navbar.tsx',
+        repoId: 'repo-a',
+        filePath: 'src/app/_components/navbar/Navbar.tsx',
+        classification: 'source',
+      },
+    ]);
+    getRepoFilesMock.mockResolvedValue([
+      {
+        nodeType: 'file',
+        fileId: 'repo-a:src/app/page.tsx',
+        repoId: 'repo-a',
+        filePath: 'src/app/page.tsx',
+        classification: 'source',
+      },
+      {
+        nodeType: 'file',
+        fileId: 'repo-a:src/app/providers/AppProviders.tsx',
+        repoId: 'repo-a',
+        filePath: 'src/app/providers/AppProviders.tsx',
+        classification: 'source',
+      },
+    ]);
     analyzeSymbolOwnershipMock.mockResolvedValue(ownershipResult(
       'src/app/layout.tsx',
       'RootLayout',
@@ -449,6 +562,21 @@ describe('change planning service', () => {
     expect(result.risk).toBe('medium');
     expect(result.summary).toContain('framework entry surface');
     expect(result.primaryEditFiles).toEqual(['src/app/layout.tsx']);
+    expect(result.reviewFiles).toEqual(expect.arrayContaining([
+      'src/app/page.tsx',
+      'src/app/providers/AppProviders.tsx',
+      'src/app/_components/navbar/Navbar.tsx',
+    ]));
+    expect(result.orderedPlan).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        filePath: 'src/app/page.tsx',
+        role: 'entry-surface',
+      }),
+      expect.objectContaining({
+        filePath: 'src/app/providers/AppProviders.tsx',
+        role: 'review-only',
+      }),
+    ]));
   });
 
   it('treats repo-wide infrastructure utilities as broad-shared high-risk changes', async () => {
@@ -513,6 +641,6 @@ describe('change planning service', () => {
       filePath: 'src/infrastructure/config/runtimeConfig.ts',
       role: 'edit-primary',
     }));
-    expect(result.secondaryEditFiles).toContain('src/features/orders/OrderPage.tsx');
+    expect(result.reviewFiles).toContain('src/features/orders/OrderPage.tsx');
   });
 });
