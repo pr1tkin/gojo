@@ -142,36 +142,33 @@ function classifyArea(filePath: string): string {
 
 function summarizeRole(
   symbol: IndexedSymbol,
-  importerCount: number,
+  fileImporterCount: number,
   nearbyFileCount: number,
   exportedStatus: 'exported' | 'local',
 ): string {
   const area = classifyArea(symbol.filePath);
   const normalizedPath = normalizePath(symbol.filePath);
   const stem = getBundleStem(normalizedPath);
-  const baseRole = exportedStatus === 'exported' ? 'exported' : 'local';
+  const noun = `${area} ${symbol.kind}`.replace('repo-local ', '');
 
-  if (normalizedPath.includes('/app/api/') && (symbol.name === 'GET' || symbol.name === 'POST' || symbol.name === 'PUT' || symbol.name === 'PATCH' || symbol.name === 'DELETE')) {
-    return `${baseRole} route handler symbol in ${stem} with ${importerCount} direct importers`;
-  }
-
-  if (area === 'shared UI') {
-    return `${baseRole} shared UI ${symbol.kind} in ${stem} with ${importerCount} direct importers`;
-  }
-
-  if (area === 'shared context') {
-    return `${baseRole} shared context ${symbol.kind} in ${stem} with ${importerCount} direct importers`;
-  }
-
-  if (area === 'shared helper') {
-    return `${baseRole} shared helper ${symbol.kind} in ${stem} with ${importerCount} direct importers`;
+  if (
+    (normalizedPath.startsWith('app/api/') || normalizedPath.includes('/app/api/')) &&
+    (symbol.name === 'GET' || symbol.name === 'POST' || symbol.name === 'PUT' || symbol.name === 'PATCH' || symbol.name === 'DELETE')
+  ) {
+    return exportedStatus === 'exported'
+      ? `exported route handler symbol in ${stem}; defining file has ${fileImporterCount} importing files`
+      : `local route handler helper in ${stem}; defining file has ${fileImporterCount} importing files`;
   }
 
   if (exportedStatus === 'local') {
-    return `local ${symbol.kind} defined in ${stem} with ${nearbyFileCount} nearby file signals`;
+    if (nearbyFileCount > 0) {
+      return `local ${noun} inside ${stem} implementation with ${nearbyFileCount} nearby file signals`;
+    }
+
+    return `local ${noun} inside ${stem} implementation`;
   }
 
-  return `${baseRole} ${area} ${symbol.kind} in ${stem} with ${importerCount} direct importers`;
+  return `exported ${noun} in ${stem}; defining file imported in ${fileImporterCount} locations`;
 }
 
 function buildMissingAnalysis(input: AnalyzeSymbolInput, candidates: SymbolAnalysisCandidate[] = []): SymbolAnalysis {
@@ -211,8 +208,11 @@ function buildMissingAnalysis(input: AnalyzeSymbolInput, candidates: SymbolAnaly
     symbolCandidates: candidates,
     usageSummary: {
       importerCount: 0,
+      fileImporters: 0,
       importCount: 0,
       relatedFileCount: 0,
+      symbolReferences: null,
+      usageScope: 'unknown',
       exportedStatus: 'local',
       ambiguityDetected: candidates.length > 1,
       notes,
@@ -300,6 +300,7 @@ export async function getAnalyzeSymbolContext(input: AnalyzeSymbolInput): Promis
     })
     .slice(0, limit);
   const exportedStatus = primarySymbol.exported ? 'exported' : 'local';
+  const usageScope: 'symbol-level' | 'file-level proxy' | 'unknown' = 'file-level proxy';
   const roleSummary = summarizeRole(primarySymbol, importingFiles.length, refactorContext.nearbyFiles.length, exportedStatus);
   const notes: string[] = [];
 
@@ -314,7 +315,7 @@ export async function getAnalyzeSymbolContext(input: AnalyzeSymbolInput): Promis
   }
 
   if (importingFiles.length > 0) {
-    notes.push('direct file importers indicate the strongest observed repository usage');
+    notes.push('importer counts reflect file-level usage, not verified symbol-level references');
   }
 
   if (refactorContext.nearbyFiles.some((entry) => entry.category === 'bundle_family')) {
@@ -351,8 +352,11 @@ export async function getAnalyzeSymbolContext(input: AnalyzeSymbolInput): Promis
     symbolCandidates: rankedCandidates,
     usageSummary: {
       importerCount: importingFiles.length,
+      fileImporters: importingFiles.length,
       importCount: importedFiles.length,
       relatedFileCount: fileContext.relatedFiles.length,
+      symbolReferences: null,
+      usageScope,
       exportedStatus,
       ambiguityDetected: rankedCandidates.length > 1,
       notes,

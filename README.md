@@ -180,12 +180,13 @@ It returns a structured bundle including:
 - importing and imported files
 - graph neighbors and ranked related files
 - nearby and sibling symbols in the defining file
+- a usage summary that distinguishes file-level proxy counts from verified symbol-level references
 
 Why this matters:
 
 - agents can identify what a symbol is and where it sits in repository structure
 - developers can inspect whether a symbol is local, feature-level, or part of a broader boundary
-- symbol understanding becomes faster without claiming full semantic program analysis
+- symbol understanding becomes faster without claiming full semantic program analysis or full reference completeness
 
 ## Example
 
@@ -274,7 +275,6 @@ Current docs:
 
 Next capabilities:
 
-- `analyze_symbol` tool
 - reference-analysis context
 - incremental index refresh
 - JSX indexing support

@@ -218,8 +218,11 @@ export interface SymbolAnalysis {
   symbolCandidates: SymbolAnalysisCandidate[];
   usageSummary: {
     importerCount: number;
+    fileImporters: number;
     importCount: number;
     relatedFileCount: number;
+    symbolReferences?: number | null;
+    usageScope: 'symbol-level' | 'file-level proxy' | 'unknown';
     exportedStatus: 'exported' | 'local';
     ambiguityDetected: boolean;
     notes: string[];

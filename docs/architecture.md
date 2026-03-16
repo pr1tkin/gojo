@@ -275,12 +275,14 @@ Current output shape includes:
 - graph neighbors
 - ranked related files
 - nearby and sibling symbols from the defining file
+- usage summary fields that distinguish file-level proxy usage from verified symbol-level references when references are unavailable
 
 This matters because it gives agents a practical way to:
 
 - identify what a symbol is in repository context
 - understand whether it is local, feature-level, or part of a broader boundary
 - gather nearby files and symbols without claiming full semantic program understanding
+- interpret importer counts safely as file-level proxy usage when symbol-level references are not available
 
 ## Repository And Storage Layout
 

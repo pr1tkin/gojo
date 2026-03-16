@@ -108,6 +108,7 @@ For `analyze_symbol`, the current tests cover:
 - file-filtered ambiguity resolution
 - safe handling of missing symbols
 - grounded role summary generation
+- safer usage summary fields for file-level proxy counts
 
 ## What Is Intentionally Out Of Scope
 

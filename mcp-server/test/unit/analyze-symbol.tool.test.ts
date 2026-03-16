@@ -47,7 +47,7 @@ describe('analyze_symbol tool', () => {
       primaryFile: { fileId: 'example-saas-dashboard:components/ui/Button.tsx' },
       kind: 'function',
       exported: true,
-      roleSummary: 'exported shared UI function in Button with 2 direct importers',
+      roleSummary: 'exported shared UI function in Button; defining file imported in 2 locations',
       definedInFile: { fileId: 'example-saas-dashboard:components/ui/Button.tsx' },
       exportedFromFile: { fileId: 'example-saas-dashboard:components/ui/Button.tsx' },
       importingFiles: [{ fileId: 'example-saas-dashboard:app/page.tsx' }],
@@ -63,8 +63,11 @@ describe('analyze_symbol tool', () => {
       symbolCandidates: [{ symbolId: 'button-symbol', filePath: 'components/ui/Button.tsx', score: 16 }],
       usageSummary: {
         importerCount: 1,
+        fileImporters: 1,
         importCount: 1,
         relatedFileCount: 1,
+        symbolReferences: null,
+        usageScope: 'file-level proxy',
         exportedStatus: 'exported',
         ambiguityDetected: false,
         notes: ['symbol is exported from its defining file'],
@@ -76,8 +79,13 @@ describe('analyze_symbol tool', () => {
 
     expect(getAnalyzeSymbolContextMock).toHaveBeenCalledWith({ name: 'Button', repo: 'example-saas-dashboard' });
     expect(parsed).toEqual(expect.objectContaining({
-      roleSummary: 'exported shared UI function in Button with 2 direct importers',
-      usageSummary: expect.objectContaining({ importerCount: 1, exportedStatus: 'exported' }),
+      roleSummary: 'exported shared UI function in Button; defining file imported in 2 locations',
+      usageSummary: expect.objectContaining({
+        importerCount: 1,
+        fileImporters: 1,
+        usageScope: 'file-level proxy',
+        exportedStatus: 'exported',
+      }),
     }));
   });
 
@@ -112,8 +120,11 @@ describe('analyze_symbol tool', () => {
       symbolCandidates: [],
       usageSummary: {
         importerCount: 0,
+        fileImporters: 0,
         importCount: 0,
         relatedFileCount: 0,
+        symbolReferences: null,
+        usageScope: 'unknown',
         exportedStatus: 'local',
         ambiguityDetected: false,
         notes: ['symbol could not be resolved from the current symbol index'],

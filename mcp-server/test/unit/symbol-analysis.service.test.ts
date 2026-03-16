@@ -180,7 +180,7 @@ describe('symbol analysis service', () => {
     });
 
     expect(result.primarySymbol).toEqual(expect.objectContaining({ symbolId: primarySymbol.symbolId }));
-    expect(result.roleSummary).toBe('exported shared UI function in Button with 2 direct importers');
+    expect(result.roleSummary).toBe('exported shared UI function in Button; defining file imported in 2 locations');
     expect(result.importingFiles).toEqual([
       expect.objectContaining({ filePath: 'app/forms/page.tsx' }),
       expect.objectContaining({ filePath: 'app/page.tsx' }),
@@ -192,15 +192,18 @@ describe('symbol analysis service', () => {
     expect(result.nearbySymbols[0]).toEqual(expect.objectContaining({ name: 'ButtonProps' }));
     expect(result.usageSummary).toEqual(expect.objectContaining({
       importerCount: 2,
+      fileImporters: 2,
       importCount: 1,
       relatedFileCount: 1,
+      symbolReferences: null,
+      usageScope: 'file-level proxy',
       exportedStatus: 'exported',
       ambiguityDetected: true,
     }));
     expect(result.usageSummary.notes).toEqual(expect.arrayContaining([
       'multiple symbol candidates matched; the strongest ranked candidate was selected',
       'symbol is exported from its defining file',
-      'direct file importers indicate the strongest observed repository usage',
+      'importer counts reflect file-level usage, not verified symbol-level references',
     ]));
   });
 
@@ -233,6 +236,9 @@ describe('symbol analysis service', () => {
       symbolCandidates: [],
       usageSummary: expect.objectContaining({
         importerCount: 0,
+        fileImporters: 0,
+        symbolReferences: null,
+        usageScope: 'unknown',
         ambiguityDetected: false,
       }),
     }));
@@ -284,7 +290,73 @@ describe('symbol analysis service', () => {
     const result = await getAnalyzeSymbolContext({ name: 'buildCleanupPayload', repo: 'repo-a' });
 
     expect(result.exported).toBe(false);
-    expect(result.roleSummary).toBe('local function defined in helpers with 0 nearby file signals');
+    expect(result.roleSummary).toBe('local function inside helpers implementation');
     expect(result.usageSummary.notes).toContain('symbol is not exported from its defining file');
+    expect(result.usageSummary).toEqual(expect.objectContaining({
+      fileImporters: 0,
+      symbolReferences: null,
+      usageScope: 'file-level proxy',
+    }));
+  });
+
+  it('keeps local interface summaries from overstating file import counts', async () => {
+    const localInterface = {
+      symbolId: 'repo-a:components/ui/Button.tsx:interface:ButtonProps:1',
+      fileId: 'repo-a:components/ui/Button.tsx',
+      name: 'ButtonProps',
+      kind: 'interface' as const,
+      repo: 'repo-a',
+      filePath: 'components/ui/Button.tsx',
+      startLine: 20,
+      endLine: 34,
+      exported: false,
+    };
+    loadRequiredSymbolIndexMock.mockResolvedValueOnce({ symbols: [localInterface], stats: { globalByName: {} } });
+    rankSymbolCandidatesMock.mockReturnValueOnce([
+      {
+        item: localInterface,
+        score: 14,
+        reasons: [{ signal: 'exact_name', value: 10 }],
+      },
+    ]);
+    getFileNodeMock.mockResolvedValueOnce(fileNode(localInterface.fileId, 'repo-a', localInterface.filePath));
+    getDefinedSymbolsMock.mockResolvedValueOnce([
+      symbolNode(localInterface.symbolId, localInterface.fileId, 'repo-a', localInterface.filePath, 'ButtonProps', 'interface', false, 20, 34),
+      symbolNode('button-symbol', localInterface.fileId, 'repo-a', localInterface.filePath, 'Button', 'function', true, 40, 64),
+    ]);
+    getExportedSymbolsMock.mockResolvedValueOnce([
+      symbolNode('button-symbol', localInterface.fileId, 'repo-a', localInterface.filePath, 'Button', 'function', true, 40, 64),
+    ]);
+    getImportingFilesMock.mockResolvedValueOnce([
+      fileNode('repo-a:app/page.tsx', 'repo-a', 'app/page.tsx'),
+      fileNode('repo-a:app/forms/page.tsx', 'repo-a', 'app/forms/page.tsx'),
+    ]);
+    getImportedFilesMock.mockResolvedValueOnce([fileNode('repo-a:lib/utils.ts', 'repo-a', 'lib/utils.ts')]);
+    getReexportingFilesMock.mockResolvedValueOnce([]);
+    getReexportedFilesMock.mockResolvedValueOnce([]);
+    getNeighboringFilesMock.mockResolvedValueOnce([fileNode('repo-a:lib/utils.ts', 'repo-a', 'lib/utils.ts')]);
+    getFileExplorationContextMock.mockResolvedValueOnce({
+      fileId: localInterface.fileId,
+      primaryFile: fileNode(localInterface.fileId, 'repo-a', localInterface.filePath),
+      repo: 'repo-a',
+      relatedFiles: [],
+      neighboringFiles: [],
+      definedSymbols: [],
+      exportedSymbols: [],
+      summary: { relatedFileCount: 0, neighboringFileCount: 0, definedSymbolCount: 0, exportedSymbolCount: 0 },
+      rawContext: {},
+    });
+    getRefactorContextForFileMock.mockResolvedValueOnce({ nearbyFiles: [] });
+
+    const result = await getAnalyzeSymbolContext({ name: 'ButtonProps', repo: 'repo-a' });
+
+    expect(result.roleSummary).toBe('local shared UI interface inside Button implementation');
+    expect(result.usageSummary).toEqual(expect.objectContaining({
+      importerCount: 2,
+      fileImporters: 2,
+      symbolReferences: null,
+      usageScope: 'file-level proxy',
+    }));
+    expect(result.usageSummary.notes).toContain('importer counts reflect file-level usage, not verified symbol-level references');
   });
 });
