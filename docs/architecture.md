@@ -84,6 +84,7 @@ Current symbol data includes:
 - symbol names and kinds
 - export markers
 - file-level import/export metadata
+- placeholder pattern-candidate substrate for future pattern intelligence
 - additive JSX / TSX UI composition signals
 - additive JSX / TSX prop surface signals
 - aggregate symbol frequency statistics
@@ -92,6 +93,7 @@ Persisted files:
 
 - `mcp-server/.data/symbol-index.json`
 - `mcp-server/.data/code-graph.json`
+- `mcp-server/.data/pattern-candidates.json`
 - `mcp-server/.data/ui-composition.json`
 - `mcp-server/.data/ui-props.json`
 
@@ -123,6 +125,8 @@ They provide:
 - heuristic pattern matching signals
 - explainable scoring reasons
 - concise structured summaries for tools
+
+Phase 7 also introduces an internal pattern-intelligence substrate. At this stage the substrate only defines stable pattern models, fingerprints, and storage boundaries plus a placeholder extraction stage. It does not yet extract, compare, or expose pattern candidates.
 
 This layer does not index files or build the graph. It composes data from the search, symbol, and graph layers into agent-ready results.
 
