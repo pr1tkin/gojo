@@ -7,6 +7,7 @@ import {
   runCollectRefactorContextTool,
 } from './tools/collect-refactor-context.js';
 import { exploreComponentToolDefinition, runExploreComponentTool } from './tools/explore-component.js';
+import { planChangeToolDefinition, runPlanChangeTool } from './tools/plan-change.js';
 import { loadConfig } from './config.js';
 import { buildSymbolIndex } from './symbol-index/indexer.js';
 import { runSearchPatternsTool, searchPatternsToolDefinition } from './tools/search-patterns.js';
@@ -48,6 +49,16 @@ async function main(): Promise<void> {
       inputSchema: analyzeSymbolToolDefinition.inputSchema,
     },
     async (input) => runAnalyzeSymbolTool(input),
+  );
+
+  server.registerTool(
+    planChangeToolDefinition.name,
+    {
+      title: planChangeToolDefinition.title,
+      description: planChangeToolDefinition.description,
+      inputSchema: planChangeToolDefinition.inputSchema,
+    },
+    async (input) => runPlanChangeTool(input),
   );
 
   server.registerTool(

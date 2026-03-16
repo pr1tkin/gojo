@@ -166,8 +166,11 @@ Current tools:
 - `search_patterns`
 - `collect_refactor_context`
 - `analyze_symbol`
+- `plan_change`
 
 The higher-level tools are built on top of the orchestrator layer and return structured results rather than raw primitives.
+
+RepoRadar now also supports agent-facing change planning workflows that estimate safe refactor scope and ordered edit/review plans based on impact analysis and API-boundary detection. These plans remain conservative and explainable; they do not claim automatic safe refactors or semantic rename support.
 
 ## How The Public Tools Build On The Stack
 

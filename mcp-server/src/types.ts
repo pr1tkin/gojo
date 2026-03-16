@@ -168,3 +168,12 @@ export interface AnalyzeSymbolInput {
   file?: string;
   limit?: number;
 }
+
+export type PlanChangeMode = 'safe' | 'exploratory';
+
+export interface PlanChangeInput {
+  symbol: string;
+  filePath?: string;
+  repo?: string;
+  mode?: PlanChangeMode;
+}

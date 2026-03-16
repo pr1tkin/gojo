@@ -62,3 +62,10 @@ export const analyzeSymbolInputSchema = {
   file: z.string().min(1).optional(),
   limit: z.number().int().min(1).max(20).optional(),
 };
+
+export const planChangeInputSchema = {
+  symbol: z.string().min(1),
+  filePath: z.string().min(1).optional(),
+  repo: z.string().min(1).optional(),
+  mode: z.enum(['safe', 'exploratory']).optional(),
+};
