@@ -85,6 +85,7 @@ Current symbol data includes:
 - export markers
 - file-level import/export metadata
 - additive JSX / TSX UI composition signals
+- additive JSX / TSX prop surface signals
 - aggregate symbol frequency statistics
 
 Persisted files:
@@ -92,6 +93,7 @@ Persisted files:
 - `mcp-server/.data/symbol-index.json`
 - `mcp-server/.data/code-graph.json`
 - `mcp-server/.data/ui-composition.json`
+- `mcp-server/.data/ui-props.json`
 
 ### Graph Layer
 
@@ -136,7 +138,7 @@ It currently provides:
 
 This layer remains heuristic and conservative. It is designed to improve practical agent workflows, not to provide full semantic guarantees.
 
-RepoRadar also persists additive UI-structure signals from JSX and TSX component composition. These signals capture parent-child rendering relationships such as page, layout, and reusable component composition. They are stored separately and are not yet used to change impact-analysis, ownership-analysis, refactor-context, or change-planning behavior.
+RepoRadar also persists additive UI-structure signals from JSX and TSX component composition and prop usage. These signals capture parent-child rendering relationships plus coarse prop-surface data such as which prop names are passed at usage sites and what broad value kinds they use. They are stored separately and are not yet used to change impact-analysis, ownership-analysis, refactor-context, or change-planning behavior.
 
 ### Orchestrator Services
 
