@@ -97,6 +97,13 @@ function computeNameSimilarity(leftName: string, rightName: string): number {
   return jaccard(tokenizeName(leftName), tokenizeName(rightName));
 }
 
+function computeResponsibilityOverlap(left: PatternCandidate, right: PatternCandidate): number {
+  return jaccard(
+    left.fingerprint.responsibilitySignals ?? [],
+    right.fingerprint.responsibilitySignals ?? [],
+  );
+}
+
 function comparePatterns(left: PatternCandidate, right: PatternCandidate): number {
   const priorityDifference =
     (PATTERN_KIND_PRIORITY[right.kind] ?? 0) - (PATTERN_KIND_PRIORITY[left.kind] ?? 0);
@@ -254,6 +261,10 @@ export class PrecedentDiscoveryService {
       reasons.push('shared-imports');
     }
 
+    if (computeResponsibilityOverlap(target, candidate.pattern) > 0) {
+      reasons.push('responsibility-match');
+    }
+
     if (candidate.exported) {
       reasons.push('exported-symbol');
     }
@@ -293,6 +304,7 @@ export class PrecedentDiscoveryService {
     match: SimilarPatternMatch,
   ): number {
     const pathSimilarity = computePathSimilarity(target.fileId, candidate.pattern.fileId);
+    const responsibilityOverlap = computeResponsibilityOverlap(target, candidate.pattern);
     const graphReach = candidate.importerCount + candidate.reexporterCount;
     let score = match.similarityScore * 0.82;
 
@@ -313,6 +325,7 @@ export class PrecedentDiscoveryService {
     }
 
     score += pathSimilarity * 0.04;
+    score += Math.min(0.05, responsibilityOverlap * 0.05);
 
     return clampScore(score);
   }

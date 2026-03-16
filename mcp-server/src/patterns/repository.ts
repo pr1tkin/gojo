@@ -44,6 +44,9 @@ function normalizePatternCandidate(candidate: PatternCandidate): PatternCandidat
       importSet: dedupeStrings(candidate.fingerprint.importSet),
       ...(candidate.fingerprint.uiSignals ? { uiSignals: dedupeStrings(candidate.fingerprint.uiSignals) } : {}),
       ...(candidate.fingerprint.asyncSignals ? { asyncSignals: dedupeStrings(candidate.fingerprint.asyncSignals) } : {}),
+      ...(candidate.fingerprint.responsibilitySignals
+        ? { responsibilitySignals: dedupeStrings(candidate.fingerprint.responsibilitySignals) }
+        : {}),
     },
     signals: [...candidate.signals].sort((left, right) => left.type.localeCompare(right.type) || left.strength.localeCompare(right.strength)),
   };

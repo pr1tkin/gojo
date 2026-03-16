@@ -298,6 +298,7 @@ function makeFingerprint(
   extra: {
     uiSignals?: string[];
     asyncSignals?: string[];
+    responsibilitySignals?: string[];
   } = {},
 ): PatternFingerprint {
   return {
@@ -312,7 +313,136 @@ function makeFingerprint(
     ...(extra.asyncSignals && extra.asyncSignals.length > 0
       ? { asyncSignals: [...new Set(extra.asyncSignals)].sort((left, right) => left.localeCompare(right)) }
       : {}),
+    ...(extra.responsibilitySignals && extra.responsibilitySignals.length > 0
+      ? {
+          responsibilitySignals: [...new Set(extra.responsibilitySignals)].sort((left, right) =>
+            left.localeCompare(right),
+          ),
+        }
+      : {}),
   };
+}
+
+function hasJsxTagNames(node: Parser.SyntaxNode, source: string, tagNames: string[]): boolean {
+  const normalizedTagNames = new Set(tagNames.map((entry) => entry.toLowerCase()));
+
+  return hasDescendant(node, (child) => {
+    if (
+      child.type !== 'jsx_element' &&
+      child.type !== 'jsx_self_closing_element' &&
+      child.type !== 'jsx_opening_element'
+    ) {
+      return false;
+    }
+
+    const openingNode =
+      child.type === 'jsx_element'
+        ? child.namedChildren.find((entry) => entry.type === 'jsx_opening_element') ?? null
+        : child;
+    const nameNode = openingNode?.childForFieldName('name') ?? openingNode?.namedChildren[0] ?? null;
+
+    if (!nameNode) {
+      return false;
+    }
+
+    return normalizedTagNames.has(getNodeText(nameNode, source).trim().toLowerCase());
+  });
+}
+
+function collectComponentResponsibilitySignals(
+  relation: FileRelation,
+  match: SymbolNodeMatch,
+  source: string,
+): string[] {
+  const signals: string[] = [];
+  const normalizedName = match.symbol.name.toLowerCase();
+  const normalizedImports = relation.imports.map((entry) => entry.source.toLowerCase());
+  const functionLike = getFunctionLikeValueNode(match.node, source);
+  const hasLayoutName = /(^rootlayout$|layout$|^page$|page$)/i.test(match.symbol.name);
+  const hasLayoutMarkup = hasJsxTagNames(functionLike ?? match.node, source, ['main', 'section', 'header', 'footer']);
+  const hasPageLevelImports = normalizedImports.some(
+    (entry) => /^next\//.test(entry) || /routing|router|navigation|metadata/.test(entry),
+  );
+
+  if (hasLayoutName || (hasLayoutMarkup && hasPageLevelImports)) {
+    signals.push('layout-component');
+  }
+
+  if (/(button|input|textarea|checkbox|radio|toggle|switch|field|control)/i.test(match.symbol.name)) {
+    signals.push('ui-control');
+  }
+
+  if (/(select)/i.test(match.symbol.name) || normalizedImports.some((entry) => /react-select/.test(entry))) {
+    signals.push('ui-select');
+  }
+
+  if (/(modal|dialog|drawer)/i.test(match.symbol.name)) {
+    signals.push('ui-modal');
+  }
+
+  return signals;
+}
+
+function collectHookResponsibilitySignals(relation: FileRelation, match: SymbolNodeMatch): string[] {
+  const signals: string[] = [];
+  const normalizedImports = relation.imports.map((entry) => entry.source.toLowerCase());
+
+  if (
+    /^use(Get|Fetch|Load)/.test(match.symbol.name) ||
+    normalizedImports.some((entry) => /react-query|@tanstack\/react-query|swr/.test(entry))
+  ) {
+    signals.push('query-hook');
+  }
+
+  if (
+    /^use[A-Za-z0-9]*Store$/.test(match.symbol.name) ||
+    /^useStore/.test(match.symbol.name) ||
+    normalizedImports.some((entry) => /zustand|store|context/.test(entry))
+  ) {
+    signals.push('store-hook');
+  }
+
+  if (
+    /^use(Position|Overlay|Measure|Resize|Popover|Scroll|Viewport)/.test(match.symbol.name) ||
+    /(overlay|measure|resize|position|popover)/i.test(match.symbol.name)
+  ) {
+    signals.push('dom-hook');
+  }
+
+  return signals;
+}
+
+function collectAsyncResponsibilitySignals(match: SymbolNodeMatch): string[] {
+  const signals: string[] = [];
+
+  if (/^(fetch|get|load)/i.test(match.symbol.name)) {
+    signals.push('fetch-helper');
+  }
+
+  if (/^(create|update|delete|remove|save|patch|upsert|add)/i.test(match.symbol.name)) {
+    signals.push('service-crud');
+  }
+
+  return signals;
+}
+
+function collectTestResponsibilitySignals(relation: FileRelation): string[] {
+  const signals: string[] = [];
+  const baseName = path.posix.basename(relation.filePath).replace(/\.[^.]+$/g, '');
+  const normalizedImports = relation.imports.map((entry) => entry.source.toLowerCase());
+
+  if (/^use[A-Z]/.test(baseName)) {
+    signals.push('test-hook');
+  } else if (/service|services|api|fetch|client/i.test(relation.filePath)) {
+    signals.push('test-service');
+  } else if (
+    relation.filePath.endsWith('.test.tsx') ||
+    normalizedImports.some((entry) => /testing-library\/react/.test(entry))
+  ) {
+    signals.push('test-component');
+  }
+
+  return signals;
 }
 
 function isHookName(name: string): boolean {
@@ -568,6 +698,8 @@ function detectReactComponent(
     signals.push({ type: 'uses-hooks', strength: 'moderate', note: 'component body contains hook calls' });
   }
 
+  const responsibilitySignals = collectComponentResponsibilitySignals(relation, match, source);
+
   return createPatternCandidate({
     kind: 'component',
     repoId: relation.repo,
@@ -580,6 +712,7 @@ function detectReactComponent(
     signals,
     fingerprint: makeFingerprint('component', signals, relation, match.symbol, {
       uiSignals: ['jsx-return', ...(signals.some((entry) => entry.type === 'uses-hooks') ? ['uses-hooks'] : [])],
+      responsibilitySignals,
     }),
     supportingImports: getSupportingImports(relation),
     relatedSymbolIds: [],
@@ -606,6 +739,7 @@ function detectCustomHook(
     { type: 'custom-hook', strength: 'strong', note: 'function-like symbol follows the custom hook naming convention' },
     { type: 'uses-hooks', strength: 'strong', note: 'hook body contains hook calls' },
   ];
+  const responsibilitySignals = collectHookResponsibilitySignals(relation, match);
 
   return createPatternCandidate({
     kind: 'hook',
@@ -619,6 +753,7 @@ function detectCustomHook(
     signals,
     fingerprint: makeFingerprint('hook', signals, relation, match.symbol, {
       uiSignals: ['uses-hooks'],
+      responsibilitySignals,
     }),
     supportingImports: getSupportingImports(relation),
     relatedSymbolIds: [],
@@ -652,6 +787,7 @@ function detectAsyncDataFlow(
   if (!signals.some((entry) => entry.type === 'api-request' || entry.type === 'error-handling')) {
     return null;
   }
+  const responsibilitySignals = collectAsyncResponsibilitySignals(match);
 
   return createPatternCandidate({
     kind: 'async-data-flow',
@@ -665,6 +801,7 @@ function detectAsyncDataFlow(
     signals,
     fingerprint: makeFingerprint('async-data-flow', signals, relation, match.symbol, {
       asyncSignals: signals.map((entry) => entry.type),
+      responsibilitySignals,
     }),
     supportingImports: getSupportingImports(relation),
     relatedSymbolIds: [],
@@ -774,7 +911,9 @@ function detectUtilityExport(
     startLine: match.symbol.startLine,
     endLine: match.symbol.endLine,
     signals,
-    fingerprint: makeFingerprint('utility-export', signals, relation, match.symbol),
+    fingerprint: makeFingerprint('utility-export', signals, relation, match.symbol, {
+      responsibilitySignals: collectAsyncResponsibilitySignals(match),
+    }),
     supportingImports: getSupportingImports(relation),
     relatedSymbolIds: [],
     confidence: 'high',
@@ -830,6 +969,7 @@ function detectApiHandler(
       asyncSignals: signals
         .filter((entry) => entry.type === 'async-function' || entry.type === 'api-request')
         .map((entry) => entry.type),
+      responsibilitySignals: collectAsyncResponsibilitySignals(match),
     }),
     supportingImports: getSupportingImports(relation),
     relatedSymbolIds: [],
@@ -851,6 +991,7 @@ function detectTestSuite(
   const signals: PatternSignal[] = [
     { type: 'test-describe-block', strength: 'strong', note: 'test framework imports and describe/it usage were found' },
   ];
+  const responsibilitySignals = collectTestResponsibilitySignals(relation);
 
   return createPatternCandidate({
     kind: 'test-suite',
@@ -861,7 +1002,9 @@ function detectTestSuite(
     startLine: 1,
     endLine: tree.rootNode.endPosition.row + 1,
     signals,
-    fingerprint: makeFingerprint('test-suite', signals, relation, undefined),
+    fingerprint: makeFingerprint('test-suite', signals, relation, undefined, {
+      responsibilitySignals,
+    }),
     supportingImports: getSupportingImports(relation),
     relatedSymbolIds: relation.symbolIds,
     confidence: 'high',

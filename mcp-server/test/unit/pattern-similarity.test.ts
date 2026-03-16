@@ -289,6 +289,7 @@ describe('pattern similarity', () => {
         exportShape: 'named',
         symbolRole: 'hook',
         uiSignals: ['uses-hooks'],
+        responsibilitySignals: ['query-hook'],
       },
     });
     const sameFamily = makePattern({
@@ -307,6 +308,7 @@ describe('pattern similarity', () => {
         exportShape: 'named',
         symbolRole: 'hook',
         uiSignals: ['uses-hooks'],
+        responsibilitySignals: ['query-hook'],
       },
     });
     const genericHook = makePattern({
@@ -325,6 +327,7 @@ describe('pattern similarity', () => {
         exportShape: 'named',
         symbolRole: 'hook',
         uiSignals: ['uses-hooks'],
+        responsibilitySignals: ['dom-hook'],
       },
     });
 
@@ -333,6 +336,72 @@ describe('pattern similarity', () => {
     const genericScore = service.computeSimilarityScore(queryHook, genericHook);
 
     expect(sameFamilyScore).toBeGreaterThan(genericScore);
+  });
+
+  it('uses responsibility signals to separate broad component families', () => {
+    const rootLayout = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/app/layout.tsx',
+      symbolId: 'root-layout-symbol',
+      name: 'RootLayout',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 40,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['react', 'next/font/google'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+        responsibilitySignals: ['layout-component'],
+      },
+    });
+    const loginLayout = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/LoginLayout.tsx',
+      symbolId: 'login-layout-symbol',
+      name: 'LoginLayout',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 30,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['react', 'next/font/google'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+        responsibilitySignals: ['layout-component'],
+      },
+    });
+    const button = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/Button.tsx',
+      symbolId: 'button-symbol',
+      name: 'Button',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['react'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+        responsibilitySignals: ['ui-control'],
+      },
+    });
+
+    const service = createPatternSimilarityService(buildIndex([rootLayout, loginLayout, button]));
+    const layoutScore = service.computeSimilarityScore(rootLayout, loginLayout);
+    const controlScore = service.computeSimilarityScore(rootLayout, button);
+
+    expect(layoutScore).toBeGreaterThan(controlScore);
   });
 
   it('uses symbol-name similarity to favor natural same-family component neighbors', () => {

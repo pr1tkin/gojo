@@ -557,6 +557,7 @@ describe('precedent discovery service', () => {
         exportShape: 'named',
         symbolRole: 'hook',
         uiSignals: ['uses-hooks'],
+        responsibilitySignals: ['query-hook'],
       },
     });
     const notificationsPattern = makePattern({
@@ -575,6 +576,7 @@ describe('precedent discovery service', () => {
         exportShape: 'named',
         symbolRole: 'hook',
         uiSignals: ['uses-hooks'],
+        responsibilitySignals: ['query-hook'],
       },
     });
     const screenStatePattern = makePattern({
@@ -593,6 +595,7 @@ describe('precedent discovery service', () => {
         exportShape: 'named',
         symbolRole: 'hook',
         uiSignals: ['uses-hooks'],
+        responsibilitySignals: ['store-hook'],
       },
     });
 
@@ -619,6 +622,7 @@ describe('precedent discovery service', () => {
         symbolName: 'useGetNotifications',
       }),
     );
+    expect(byPattern.candidates[0].reasonSignals).toContain('responsibility-match');
     expect(byFile.candidates.map((candidate) => candidate.symbolId)).toEqual(
       byPattern.candidates.map((candidate) => candidate.symbolId),
     );

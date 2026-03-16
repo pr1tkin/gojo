@@ -46,6 +46,7 @@ export interface PatternFingerprint {
   symbolRole: 'module' | 'component' | 'hook' | 'handler' | 'utility' | 'test' | 'story' | 'unknown';
   uiSignals?: string[];
   asyncSignals?: string[];
+  responsibilitySignals?: string[];
 }
 
 export interface PatternCandidate {

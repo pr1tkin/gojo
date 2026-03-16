@@ -202,12 +202,14 @@ function getSignalSets(pattern: PatternCandidate): {
   importSet: Set<string>;
   uiSignals: Set<string>;
   asyncSignals: Set<string>;
+  responsibilitySignals: Set<string>;
 } {
   return {
     structuralSignals: toSet(pattern.fingerprint.structuralSignals),
     importSet: toSet(pattern.fingerprint.importSet),
     uiSignals: toSet(pattern.fingerprint.uiSignals),
     asyncSignals: toSet(pattern.fingerprint.asyncSignals),
+    responsibilitySignals: toSet(pattern.fingerprint.responsibilitySignals),
   };
 }
 
@@ -241,6 +243,12 @@ function applyPairAdjustments(
   const nameSimilarity = NAME_AWARE_PATTERN_KINDS.has(left.kind)
     ? computeSymbolNameSimilarity(left.name, right.name)
     : 0;
+  const responsibilityOverlap = jaccardSimilarity(
+    toSet(left.fingerprint.responsibilitySignals),
+    toSet(right.fingerprint.responsibilitySignals),
+  );
+  const leftHasResponsibility = (left.fingerprint.responsibilitySignals?.length ?? 0) > 0;
+  const rightHasResponsibility = (right.fingerprint.responsibilitySignals?.length ?? 0) > 0;
 
   if (BROAD_PATTERN_KINDS.has(left.kind) && structuralOverlap < 0.5) {
     adjustedScore = Math.min(adjustedScore, 0.6);
@@ -263,6 +271,12 @@ function applyPairAdjustments(
 
   if (nameSimilarity > 0.6) {
     adjustedScore *= 1.05;
+  }
+
+  if (responsibilityOverlap > 0) {
+    adjustedScore *= 1 + Math.min(0.08, responsibilityOverlap * 0.08);
+  } else if (leftHasResponsibility && rightHasResponsibility) {
+    adjustedScore *= 0.88;
   }
 
   return Math.max(0, Math.min(1, adjustedScore));
@@ -299,6 +313,13 @@ function computeSimilarityScoreInternal(left: PatternCandidate, right: PatternCa
     dimensions.push({ score: jaccardSimilarity(leftSets.asyncSignals, rightSets.asyncSignals), weight: 0.05 });
   }
 
+  if (leftSets.responsibilitySignals.size > 0 || rightSets.responsibilitySignals.size > 0) {
+    dimensions.push({
+      score: jaccardSimilarity(leftSets.responsibilitySignals, rightSets.responsibilitySignals),
+      weight: 0.1,
+    });
+  }
+
   const totalWeight = dimensions.reduce((sum, entry) => sum + entry.weight, 0);
   let score = dimensions.reduce((sum, entry) => sum + entry.score * entry.weight, 0) / totalWeight;
 
@@ -330,6 +351,10 @@ function passesClusteringGate(
   const importOverlap = contextualOverlap(toSet(left.fingerprint.importSet), toSet(right.fingerprint.importSet));
   const uiOverlap = contextualOverlap(toSet(left.fingerprint.uiSignals), toSet(right.fingerprint.uiSignals));
   const asyncOverlap = contextualOverlap(toSet(left.fingerprint.asyncSignals), toSet(right.fingerprint.asyncSignals));
+  const responsibilityOverlap = contextualOverlap(
+    toSet(left.fingerprint.responsibilitySignals),
+    toSet(right.fingerprint.responsibilitySignals),
+  );
   const nameSimilarity = NAME_AWARE_PATTERN_KINDS.has(left.kind)
     ? computeSymbolNameSimilarity(left.name, right.name)
     : 0;
@@ -359,7 +384,13 @@ function passesClusteringGate(
     return false;
   }
 
-  return importOverlap >= 0.35 || uiOverlap > 0 || asyncOverlap > 0 || nameSimilarity >= 0.35;
+  return (
+    importOverlap >= 0.35 ||
+    uiOverlap > 0 ||
+    asyncOverlap > 0 ||
+    responsibilityOverlap > 0 ||
+    nameSimilarity >= 0.35
+  );
 }
 
 function collectDominantSignals(patterns: PatternCandidate[]): string[] {

@@ -307,6 +307,43 @@ change the stored fingerprint schema.
 Pattern similarity and clustering remain internal services. There is no MCP exposure
 yet.
 
+### Responsibility Signals
+
+The next refinement adds lightweight `responsibilitySignals` to pattern
+fingerprints so broad structural kinds can be separated by approximate role as
+well as shape.
+
+Current examples include:
+
+- components:
+  - `layout-component`
+  - `ui-control`
+  - `ui-select`
+  - `ui-modal`
+- hooks:
+  - `query-hook`
+  - `store-hook`
+  - `dom-hook`
+- async and service helpers:
+  - `fetch-helper`
+  - `service-crud`
+- tests:
+  - `test-component`
+  - `test-hook`
+  - `test-service`
+
+These signals are detected with deterministic naming, import, path, and JSX
+heuristics. They do not use NLP, runtime analysis, or ML classification.
+
+Current use:
+
+- similarity gives additional weight to responsibility overlap
+- broad kinds are penalized slightly when responsibilities clearly diverge
+- precedent ranking adds a small bonus when responsibility signals align
+
+Responsibility signals remain additive metadata. They refine ranking and
+precedent quality without changing the core pattern taxonomy.
+
 ## Planned Follow-Up Phases
 
 Phase 7.4 adds precedent discovery and retrieval workflows on top of the stored

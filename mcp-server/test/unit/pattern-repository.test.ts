@@ -59,6 +59,7 @@ describe('pattern repository', () => {
         exportShape: 'default',
         symbolRole: 'component',
         uiSignals: ['renders-jsx'],
+        responsibilitySignals: ['ui-control'],
       },
       supportingImports: ['react', './Button.css'],
       relatedSymbolIds: ['repo-a:src/components/Button.tsx:typeAlias:ButtonProps:1'],
@@ -348,6 +349,7 @@ describe('pattern repository', () => {
         fingerprint: expect.objectContaining({
           patternKind: 'component',
           structuralSignals: ['jsx-return', 'react-function-component', 'uses-hooks'],
+          responsibilitySignals: ['ui-control'],
         }),
       }),
       expect.objectContaining({
@@ -376,6 +378,7 @@ describe('pattern repository', () => {
         fingerprint: expect.objectContaining({
           patternKind: 'async-data-flow',
           structuralSignals: ['api-request', 'async-function', 'error-handling'],
+          responsibilitySignals: ['fetch-helper'],
         }),
       }),
     ]);
@@ -420,6 +423,9 @@ describe('pattern repository', () => {
       expect.objectContaining({
         name: 'Button.test',
         relatedSymbolIds: symbolIndex.byFile[Object.keys(symbolIndex.byFile).find((key) => symbolIndex.byFile[key].filePath === 'src/__tests__/Button.test.tsx') as string].symbolIds,
+        fingerprint: expect.objectContaining({
+          responsibilitySignals: ['test-component'],
+        }),
       }),
     ]);
     expect(storyPatterns).toEqual([
