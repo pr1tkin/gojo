@@ -45,15 +45,19 @@ Agent / MCP Client
         v
 Orchestrator Services
         |
-        +-------------------+-------------------+-------------------+
-        |                   |                   |                   |
-        v                   v                   v                   v
-   Search Layer        Symbol Layer        Graph Layer       Ranking + Context
-        |                   |                   |                   |
-        v                   v                   v                   v
-      Zoekt         Tree-sitter +        Import / Export      Candidate ordering,
-                    Symbol Index         Relationships        related files, summaries
+        +-------------------+-------------------+-------------------+-------------------+
+        |                   |                   |                   |                   |
+        v                   v                   v                   v                   v
+   Search Layer        Symbol Layer        Graph Layer        Analysis Layer     Ranking + Context
+        |                   |                   |                   |                   |
+        v                   v                   v                   v                   v
+      Zoekt         Tree-sitter +        Import / Export    Impact / Ownership   Candidate ordering,
+                    Symbol Index         Relationships      / Change Planning     related files, summaries
 ```
+
+RepoRadar is easiest to think about as a progressive stack:
+
+`Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
 
 ## Layer Responsibilities
 
@@ -118,6 +122,18 @@ They provide:
 
 This layer does not index files or build the graph. It composes data from the search, symbol, and graph layers into agent-ready results.
 
+### Analysis Layer
+
+The analysis layer derives higher-level change understanding from the indexed graph.
+
+It currently provides:
+
+- impact analysis
+- ownership and API-boundary approximation
+- change planning and refactor safety estimation
+
+This layer remains heuristic and conservative. It is designed to improve practical agent workflows, not to provide full semantic guarantees.
+
 ### Orchestrator Services
 
 The orchestrator layer turns indexed data into practical workflows.
@@ -140,13 +156,32 @@ These services compose the underlying layers rather than reimplementing them.
 
 The internal impact-analysis service now also adds result summarization for large blast-radius cases. This summary is derived from the existing direct and transitive impact sets and does not change impact detection or traversal depth.
 
+Impact analysis is used to answer:
+
+- which files or symbols are directly connected to a change
+- whether the blast radius stays local or expands across features
+- which entry surfaces or feature clusters appear in the downstream path
+
 The internal ownership-analysis service adds heuristic symbol ownership and API-boundary approximation. It reuses the existing symbol index, import/export metadata, and graph relationships, and returns conservative classifications backed by explicit export-surface, path-boundary, usage-fanout, and barrel-entry signals.
+
+Ownership analysis is used to answer:
+
+- whether a symbol looks internal, feature-bounded, shared, or surface-like
+- whether a file acts like an API or framework entry boundary
+- whether a change likely touches implementation details or shared surfaces
 
 Recent refinement work improved ownership classification calibration for local helpers, feature-local exports, and framework entry surfaces while keeping the same explainable heuristic signal model.
 
 The latest refinement improves ownership conflict resolution for barrel-exported shared surfaces so reusable symbols exposed through index-style entry files are less likely to collapse to unknown while local helper protection stays intact.
 
 The internal change-planning service adds ownership-aware refactor safety estimation. It combines existing impact analysis and ownership analysis to produce conservative scope and risk classification plus an ordered edit/review plan for agent workflows. It does not generate patches or claim semantic refactor completeness.
+
+Change planning is used to answer:
+
+- what is the safest expected scope of a change
+- which files should be edited first
+- which files are likely review-only
+- whether a change should be treated as local, feature-bounded, shared-surface, or broad-shared
 
 Recent refinement work improved edit vs review separation and plan precision for local helpers and framework entry surfaces while keeping the same ownership-aware planning architecture.
 
@@ -267,6 +302,31 @@ Returns:
 
 This is structured symbol analysis, not full reference completeness or call-graph understanding.
 
+### `plan_change`
+
+Purpose:
+
+- expose safe-change planning as an agent-facing workflow
+
+Builds on:
+
+- impact analysis
+- ownership and API-boundary analysis
+- graph-derived dependency ordering
+- existing orchestrator composition
+
+Returns:
+
+- conservative change scope
+- conservative risk level
+- explicit planning signals
+- primary edit files
+- secondary edit files
+- review files
+- ordered edit/review steps
+
+This is planning support, not automatic refactoring or patch generation.
+
 ## Data Flow
 
 ### Indexing
@@ -286,15 +346,25 @@ repos/ -> mcp-server symbol indexing -> symbol-index.json -> code-graph.json
 ```text
 MCP client -> MCP tools -> orchestrator services
                                   |
-                  +---------------+---------------+
-                  |                               |
-                  v                               v
-             symbol / graph                  ranking / context
-                  |                               |
-                  +---------------+---------------+
+                  +---------------+---------------+-------------------+
+                  |                               |                   |
+                  v                               v                   v
+             symbol / graph                  ranking / context    analysis services
+                  |                               |                   |
+                  +---------------+---------------+-------------------+
                                   |
                                   v
                       structured agent-ready result
+```
+
+For planning-oriented workflows, the internal flow is:
+
+```text
+target resolution
+  -> impact analysis
+  -> ownership analysis
+  -> change planning
+  -> MCP result
 ```
 
 ## Repository And Storage Layout
@@ -330,7 +400,10 @@ The current `docker-compose.yml` defines:
 - symbol extraction and persisted symbol metadata
 - deterministic local graph construction
 - explainable ranking and context assembly
-- public MCP tools for component exploration, precedent search, refactor context, and symbol analysis
+- impact analysis and blast-radius estimation
+- ownership and API-boundary approximation
+- ordered change planning for safer refactor workflows
+- public MCP tools for component exploration, precedent search, refactor context, symbol analysis, and change planning
 
 ### Not In Scope Today
 

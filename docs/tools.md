@@ -2,132 +2,214 @@
 
 ## Overview
 
-RepoRadar exposes a small set of public MCP tools on top of its search, symbol, graph, ranking, and orchestrator layers.
+RepoRadar exposes a small set of MCP tools on top of a layered code-intelligence stack:
 
-The high-level tools are designed for AI coding agents and developers who need structured repository context rather than raw text search alone.
+`Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
 
-Current high-level tools:
+The public tools are designed for agent-assisted repository understanding and safe refactor planning. They return structured context instead of raw search output whenever possible.
+
+High-level public tools:
 
 - `explore_component`
 - `search_patterns`
-- `collect_refactor_context`
 - `analyze_symbol`
+- `collect_refactor_context`
+- `plan_change`
 
-RepoRadar also includes lower-level primitives such as `search_code`, `open_file`, `list_symbols`, `find_symbol`, `find_references`, and `find_related_files`.
+RepoRadar also includes lower-level support tools such as `search_code`, `open_file`, `list_symbols`, `find_symbol`, `find_references`, and `find_related_files`.
 
 ## `explore_component`
 
 Purpose:
 
-- entry-point component exploration
-- file structure and dependency discovery
+- entry-point repository exploration for a component, file, or symbol
 
-Use it when you want to answer questions like:
+Typical use cases:
 
-- what file implements this component or symbol?
-- what files should I open next?
-- what does this file export?
+- identify the main implementation file
+- inspect nearby collaborators
+- understand what a file exports
 
-Returns structured context such as:
+Input:
 
-- resolved primary file
-- resolved primary symbol
+- `name`
+- optional `repo`
+- optional `limit`
+- optional `relatedLimit`
+
+Output summary:
+
+- primary file and symbol
 - related files
 - defined symbols
 - exported symbols
-- a concise exploration summary
+- concise exploration summary
 
-This is typically the first high-level tool to call when starting work in an unfamiliar area.
+Example:
+
+```text
+explore_component("AudioHero")
+```
 
 ## `search_patterns`
 
 Purpose:
 
-- repository precedent discovery
-- similar implementation search
+- find repository-local precedents and structurally similar implementations
 
-Use it when you want to answer questions like:
+Typical use cases:
 
-- how is this usually done in this repository?
-- what existing components or files should I imitate?
-- what similar feature bundles already exist?
+- look for existing implementations to imitate
+- compare feature bundles or similar components
+- ground code generation in repository conventions
 
-Returns structured context such as:
+Input:
 
-- resolved primary target
-- ranked pattern matches
+- `name`
+- optional `repo`
+- optional `mode`
+- optional `limit`
+
+Output summary:
+
+- resolved target
+- ranked matches
 - explainable reasons for each match
-- symbol and export summaries for the matched files
+- symbol and export summaries for matched files
 
-This is heuristic pattern discovery. It does not claim deep AST or JSX semantic similarity.
+Example:
 
-## `collect_refactor_context`
-
-Purpose:
-
-- refactor impact surface assembly
-- importer and import relationship discovery
-
-Use it when you want to answer questions like:
-
-- if I change this file or component, what else should I inspect first?
-- what depends on this target?
-- what files does this target directly depend on?
-
-Returns structured context such as:
-
-- primary file
-- importing files
-- imported files
-- graph neighbors
-- ranked related files
-- nearby directory or bundle-family files
-- summary counts for local impact
-
-This is bounded refactor context, not full semantic impact analysis.
+```text
+search_patterns({ "name": "AudioHero", "mode": "component" })
+```
 
 ## `analyze_symbol`
 
 Purpose:
 
-- structured symbol analysis
-- symbol identity, role, and usage context
+- explain a symbol's identity, role, and usage shape
 
-Use it when you want to answer questions like:
+Typical use cases:
 
-- what is this symbol?
-- is it exported or local?
-- where is it defined and what nearby symbols matter?
-- does it look feature-local or broadly shared?
+- determine whether a symbol is local or exported
+- inspect nearby symbols and surrounding context
+- understand whether a symbol looks feature-local or broadly shared
 
-Returns structured context such as:
+Input:
+
+- `name`
+- optional `repo`
+- optional `file`
+- optional `limit`
+
+Output summary:
 
 - primary symbol and file
 - symbol kind and export status
-- grounded role summary
+- role summary
 - importing and imported file context
-- related files
 - nearby and sibling symbols
-- safer usage summaries that distinguish file-level proxy usage from verified symbol-level references when reference data is unavailable
+- usage summary
 
-This is structured symbol analysis, not full semantic or reference-complete program understanding.
+Example:
+
+```text
+analyze_symbol({ "name": "AudioHero", "file": "src/app/_components/audio/AudioHero.tsx" })
+```
+
+## `collect_refactor_context`
+
+Purpose:
+
+- assemble bounded refactor context before a change
+
+Typical use cases:
+
+- inspect what depends on a target
+- inspect what the target depends on
+- collect nearby files before editing
+
+Input:
+
+- `name`
+- optional `repo`
+- optional `mode`
+- optional `limit`
+
+Output summary:
+
+- primary file
+- importing files
+- imported files
+- graph neighbors
+- related files
+- nearby files
+- summary counts for local impact
+
+Example:
+
+```text
+collect_refactor_context({ "name": "AudioHero", "mode": "component" })
+```
+
+## `plan_change`
+
+Purpose:
+
+- expose the planning layer as an agent-facing workflow
+
+Typical use cases:
+
+- estimate the safest expected scope of a change
+- separate likely edit targets from review-only files
+- understand change risk before modifying code
+- follow an ordered edit and review sequence
+
+Input:
+
+- `symbol`
+- optional `filePath`
+- optional `repo`
+- optional `mode`
+
+Output summary:
+
+- target symbol and file
+- change scope
+- change risk
+- planning signals
+- primary edit files
+- secondary edit files
+- review files
+- ordered edit and review plan
+- compact agent summary
+
+`plan_change` does not rewrite code or guarantee refactor safety. It exposes a conservative plan built from impact analysis, ownership detection, and graph signals.
+
+Example:
+
+```text
+plan_change({ "symbol": "AudioHero", "filePath": "src/app/_components/audio/AudioHero.tsx" })
+```
 
 ## Typical Workflow
 
-A practical sequence for agent-driven repository work is:
+A practical high-level workflow is:
 
 1. `explore_component`
-   - identify the main implementation file and surrounding collaborators
+   - find the main implementation and nearby collaborators
 2. `search_patterns`
-   - find repository-local precedents before generating or reshaping code
-3. `collect_refactor_context`
-   - inspect likely impact surface before editing
-4. `analyze_symbol`
-   - clarify the role and usage context of specific symbols encountered during the task
+   - find repository precedents
+3. `analyze_symbol`
+   - clarify symbol role and usage
+4. `collect_refactor_context`
+   - inspect bounded dependency context
+5. `plan_change`
+   - estimate safe scope, risk, and ordered edit/review steps
 
 ## Lower-Level Tools
 
-RepoRadar also exposes lower-level MCP tools for direct inspection:
+RepoRadar also exposes lower-level MCP primitives:
 
 - `search_code`
 - `open_file`
@@ -136,17 +218,18 @@ RepoRadar also exposes lower-level MCP tools for direct inspection:
 - `find_references`
 - `find_related_files`
 
-These are useful for fine-grained retrieval, while the high-level tools package common agent workflows into structured results.
+These are useful when an agent needs direct retrieval rather than a higher-level workflow result.
 
 ## Scope And Limits
 
-RepoRadar's tool layer is intentionally practical and bounded.
+RepoRadar tools are intentionally practical and bounded.
 
-Current tools do not claim:
+They do not claim:
 
 - full semantic program understanding
+- compiler-complete rename or refactor support
 - full reference completeness
-- call-graph analysis
-- deep JSX or UI-structure understanding
+- automatic safe refactors
+- guaranteed correctness of all change plans
 
-They are designed to provide explainable code intelligence for real repository workflows using the signals the system actually has today.
+They are designed to provide conservative, explainable code intelligence for real repository workflows.
