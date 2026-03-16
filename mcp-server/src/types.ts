@@ -161,3 +161,10 @@ export interface CollectRefactorContextInput {
   mode?: RefactorContextMode;
   limit?: number;
 }
+
+export interface AnalyzeSymbolInput {
+  name: string;
+  repo?: string;
+  file?: string;
+  limit?: number;
+}

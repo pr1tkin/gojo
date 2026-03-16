@@ -10,7 +10,7 @@ It combines:
 - an import/export graph with conservative local resolution
 - ranking and context assembly layers
 - orchestrator flows
-- MCP tools, including `explore_component`, `search_patterns`, and `collect_refactor_context`
+- MCP tools, including `explore_component`, `search_patterns`, `collect_refactor_context`, and `analyze_symbol`
 
 ## Project Overview
 
@@ -25,7 +25,7 @@ It turns local codebases into structured navigation and exploration data:
 - orchestrator flows assemble agent-ready context bundles
 - MCP tools expose those flows to clients
 
-The current high-level MCP tools are `explore_component`, `search_patterns`, and `collect_refactor_context`.
+The current high-level MCP tools are `explore_component`, `search_patterns`, `collect_refactor_context`, and `analyze_symbol`.
 
 ## Why This Project Exists
 
@@ -111,6 +111,7 @@ Current public MCP tools:
 - `explore_component`
 - `search_patterns`
 - `collect_refactor_context`
+- `analyze_symbol`
 
 ### `explore_component`
 
@@ -166,6 +167,25 @@ Why this matters:
 - agents can see likely impact surface before changing code
 - developers can identify direct dependents and supporting files quickly
 - refactor planning becomes more reliable without requiring deep semantic analysis
+
+### `analyze_symbol`
+
+`analyze_symbol` assembles structured symbol analysis for a file-level or exported symbol.
+
+It returns a structured bundle including:
+
+- the resolved primary symbol and file
+- symbol kind and export status
+- a grounded role summary
+- importing and imported files
+- graph neighbors and ranked related files
+- nearby and sibling symbols in the defining file
+
+Why this matters:
+
+- agents can identify what a symbol is and where it sits in repository structure
+- developers can inspect whether a symbol is local, feature-level, or part of a broader boundary
+- symbol understanding becomes faster without claiming full semantic program analysis
 
 ## Example
 

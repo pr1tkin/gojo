@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
+import { analyzeSymbolToolDefinition, runAnalyzeSymbolTool } from './tools/analyze-symbol.js';
 import {
   collectRefactorContextToolDefinition,
   runCollectRefactorContextTool,
@@ -37,6 +38,16 @@ async function main(): Promise<void> {
       inputSchema: exploreComponentToolDefinition.inputSchema,
     },
     async (input) => runExploreComponentTool(input),
+  );
+
+  server.registerTool(
+    analyzeSymbolToolDefinition.name,
+    {
+      title: analyzeSymbolToolDefinition.title,
+      description: analyzeSymbolToolDefinition.description,
+      inputSchema: analyzeSymbolToolDefinition.inputSchema,
+    },
+    async (input) => runAnalyzeSymbolTool(input),
   );
 
   server.registerTool(

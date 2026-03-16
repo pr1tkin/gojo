@@ -14,7 +14,7 @@ It combines:
 - orchestrator services
 - an MCP tool layer
 
-The current public high-level MCP tools are `explore_component`, `search_patterns`, and `collect_refactor_context`.
+The current public high-level MCP tools are `explore_component`, `search_patterns`, `collect_refactor_context`, and `analyze_symbol`.
 
 ## Runtime Services
 
@@ -71,8 +71,9 @@ Current tools:
 - `explore_component`
 - `search_patterns`
 - `collect_refactor_context`
+- `analyze_symbol`
 
-`explore_component`, `search_patterns`, and `collect_refactor_context` are the current high-level public tools. They return structured exploration or refactor results rather than low-level raw lookup results.
+`explore_component`, `search_patterns`, `collect_refactor_context`, and `analyze_symbol` are the current high-level public tools. They return structured exploration, refactor, or symbol-analysis results rather than low-level raw lookup results.
 
 ### Orchestrator Services
 
@@ -88,8 +89,9 @@ Current public-facing internal services:
 - `getRefactorContextForFile(...)`
 - `getRefactorContextForSymbol(...)`
 - `getRefactorContextForComponent(...)`
+- `getAnalyzeSymbolContext(...)`
 
-These services feed the `explore_component`, `search_patterns`, and `collect_refactor_context` adapters.
+These services feed the `explore_component`, `search_patterns`, `collect_refactor_context`, and `analyze_symbol` adapters.
 
 ### Context Assembly Layer
 
@@ -257,6 +259,28 @@ This matters because it gives agents a practical way to:
 - estimate what surrounding code must be understood before a change
 - identify direct dependents and local impact surface
 - plan scoped refactors without claiming full semantic impact analysis
+
+## `analyze_symbol`
+
+Purpose:
+
+- assemble structured symbol analysis for a file-level or exported symbol
+
+Current output shape includes:
+
+- resolved primary symbol and file
+- symbol kind and exported status
+- a grounded role summary
+- importing and imported files
+- graph neighbors
+- ranked related files
+- nearby and sibling symbols from the defining file
+
+This matters because it gives agents a practical way to:
+
+- identify what a symbol is in repository context
+- understand whether it is local, feature-level, or part of a broader boundary
+- gather nearby files and symbols without claiming full semantic program understanding
 
 ## Repository And Storage Layout
 

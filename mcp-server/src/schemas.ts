@@ -55,3 +55,10 @@ export const collectRefactorContextInputSchema = {
   mode: z.enum(['component', 'symbol', 'file']).optional(),
   limit: z.number().int().min(1).max(20).optional(),
 };
+
+export const analyzeSymbolInputSchema = {
+  name: z.string().min(1),
+  repo: z.string().min(1).optional(),
+  file: z.string().min(1).optional(),
+  limit: z.number().int().min(1).max(20).optional(),
+};

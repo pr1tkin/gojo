@@ -10,11 +10,13 @@ export {
   getRefactorContextForFile,
   getRefactorContextForSymbol,
 } from './refactor-service.js';
+export { getAnalyzeSymbolContext } from './symbol-analysis-service.js';
 export { getSymbolExplorationContext } from './symbol-service.js';
 export type {
   FileExplorationContext,
   GetFileExplorationContextOptions,
   RefactorContext,
+  SymbolAnalysis,
   PatternMatchContext,
   PatternMatchItem,
   GetSymbolExplorationContextOptions,

@@ -166,3 +166,62 @@ export interface RefactorContext {
     notes: string[];
   };
 }
+
+export interface SymbolAnalysisCandidate {
+  symbolId: string;
+  fileId: string;
+  repo: string;
+  filePath: string;
+  name: string;
+  kind: SymbolKind;
+  exported: boolean;
+  score: number;
+  reasons: RankingReason[];
+}
+
+export interface NearbySymbolSummary {
+  symbolId: string;
+  name: string;
+  kind: SymbolKind;
+  exported: boolean;
+  startLine: number;
+  endLine: number;
+}
+
+export interface SymbolAnalysis {
+  target: {
+    requestedName: string;
+    requestedRepo?: string;
+    requestedFile?: string;
+    symbol: IndexedSymbol | null;
+    symbolId: string | null;
+    repo: string | null;
+    file: FileNode | null;
+  };
+  primarySymbol: IndexedSymbol | null;
+  primaryFile: FileNode | null;
+  kind: SymbolKind | null;
+  exported: boolean;
+  roleSummary: string;
+  definedInFile: FileNode | null;
+  exportedFromFile: FileNode | null;
+  importingFiles: FileNode[];
+  importedFiles: FileNode[];
+  reexportingFiles: FileNode[];
+  reexportedFiles: FileNode[];
+  graphNeighbors: FileNode[];
+  relatedFiles: RankedFileContextItem[];
+  nearbyFiles: RefactorNearbyFile[];
+  nearbySymbols: NearbySymbolSummary[];
+  siblingSymbols: NearbySymbolSummary[];
+  exportedSymbols: SymbolNode[];
+  symbolCandidates: SymbolAnalysisCandidate[];
+  usageSummary: {
+    importerCount: number;
+    importCount: number;
+    relatedFileCount: number;
+    exportedStatus: 'exported' | 'local';
+    ambiguityDetected: boolean;
+    notes: string[];
+  };
+}

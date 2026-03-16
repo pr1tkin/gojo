@@ -13,7 +13,7 @@ The aim is to verify:
 - graph construction and local-resolution behavior
 - ranking and context assembly
 - orchestrator services
-- MCP tool contracts, including `explore_component`, `search_patterns`, and `collect_refactor_context`
+- MCP tool contracts, including `explore_component`, `search_patterns`, `collect_refactor_context`, and `analyze_symbol`
 
 The suite does not try to replace Docker integration tests or a live MCP client session.
 
@@ -60,6 +60,7 @@ Current direct coverage includes:
   - `explore_component`
   - `search_patterns`
   - `collect_refactor_context`
+  - `analyze_symbol`
 
 Fixtures live under:
 
@@ -100,6 +101,14 @@ For `collect_refactor_context`, the current tests cover:
 - safe handling of unresolved targets
 - stable ordering of nearby and related files
 
+For `analyze_symbol`, the current tests cover:
+
+- exported symbol analysis
+- local helper analysis
+- file-filtered ambiguity resolution
+- safe handling of missing symbols
+- grounded role summary generation
+
 ## What Is Intentionally Out Of Scope
 
 The unit suite does not attempt to cover:
@@ -123,6 +132,7 @@ npm run test -- orchestrator.service.test.ts
 npm run test -- explore-component.tool.test.ts
 npm run test -- pattern-service.test.ts search-patterns.tool.test.ts
 npm run test -- refactor-context.service.test.ts collect-refactor-context.tool.test.ts
+npm run test -- symbol-analysis.service.test.ts analyze-symbol.tool.test.ts
 ```
 
 Full build verification:
