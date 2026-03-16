@@ -449,6 +449,177 @@ describe('impact analysis service', () => {
     expect(importerSymbol?.evidence[0].notes[0]).toContain('references imported binding "Widget"');
   });
 
+  it('surfaces graph-known importer files even when symbol-level usage cannot be confirmed', async () => {
+    getDefinedSymbolsMock.mockImplementation(async (fileId: string) => {
+      if (fileId === targetSymbol.fileId) {
+        return [
+          symbolNode(
+            targetSymbol.symbolId,
+            targetSymbol.fileId,
+            'repo-a',
+            targetSymbol.filePath,
+            targetSymbol.name,
+            targetSymbol.startLine,
+            targetSymbol.endLine,
+          ),
+        ];
+      }
+
+      if (fileId === consumerFile.fileId) {
+        return [
+          symbolNode('dashboard-page', consumerFile.fileId, 'repo-a', consumerFile.filePath, 'DashboardPage', 2, 4),
+        ];
+      }
+
+      if (fileId === barrelFile.fileId) {
+        return [];
+      }
+
+      return [];
+    });
+    getFileRelationByIdMock.mockImplementation(async (fileId: string) => {
+      if (fileId === targetSymbol.fileId) {
+        return {
+          fileId: targetSymbol.fileId,
+          repo: 'repo-a',
+          filePath: targetSymbol.filePath,
+          classification: 'source',
+          symbolIds: [targetSymbol.symbolId],
+          symbolNames: [targetSymbol.name],
+          imports: [],
+          exports: [
+            {
+              fileId: targetSymbol.fileId,
+              kind: 'named',
+              exportedName: 'Widget',
+              localName: 'Widget',
+              symbolId: targetSymbol.symbolId,
+            },
+          ],
+          importTokens: [],
+        };
+      }
+
+      if (fileId === consumerFile.fileId) {
+        return {
+          fileId: consumerFile.fileId,
+          repo: 'repo-a',
+          filePath: consumerFile.filePath,
+          classification: 'source',
+          symbolIds: ['dashboard-page'],
+          symbolNames: ['DashboardPage'],
+          imports: [
+            {
+              fileId: consumerFile.fileId,
+              source: '../components/Widget',
+              bindings: [
+                {
+                  importedName: 'Widget',
+                  localName: 'AliasedWidget',
+                  kind: 'named',
+                  isTypeOnly: false,
+                },
+              ],
+              resolvedKind: 'local-file',
+            },
+          ],
+          exports: [],
+          importTokens: ['AliasedWidget'],
+        };
+      }
+
+      if (fileId === barrelFile.fileId) {
+        return {
+          fileId: barrelFile.fileId,
+          repo: 'repo-a',
+          filePath: barrelFile.filePath,
+          classification: 'source',
+          symbolIds: ['widget-index-helper'],
+          symbolNames: ['widgetIndexHelper'],
+          imports: [],
+          exports: [
+            {
+              fileId: barrelFile.fileId,
+              kind: 'reexport-named',
+              exportedName: 'Widget',
+              localName: 'Widget',
+              source: './Widget',
+            },
+          ],
+          importTokens: [],
+        };
+      }
+
+      return null;
+    });
+    readRepositoryFileMock.mockImplementation(async (repository: { id: string }, filePath: string) => {
+      if (repository.id !== 'repo-a') {
+        throw new Error('unexpected repo');
+      }
+
+      if (filePath === targetSymbol.filePath) {
+        return {
+          repositoryId: 'repo-a',
+          filePath,
+          absolutePath: `/repos/repo-a/${filePath}`,
+          content: [
+            'export function Widget() {',
+            '  return null;',
+            '}',
+          ].join('\n'),
+          startLine: 1,
+          endLine: 3,
+          totalLines: 3,
+        };
+      }
+
+      if (filePath === consumerFile.filePath) {
+        return {
+          repositoryId: 'repo-a',
+          filePath,
+          absolutePath: `/repos/repo-a/${filePath}`,
+          content: [
+            "import { Widget as AliasedWidget } from '../components/Widget';",
+            'export function DashboardPage() {',
+            '  return "dashboard";',
+            '}',
+          ].join('\n'),
+          startLine: 1,
+          endLine: 4,
+          totalLines: 4,
+        };
+      }
+
+      if (filePath === barrelFile.filePath) {
+        return {
+          repositoryId: 'repo-a',
+          filePath,
+          absolutePath: `/repos/repo-a/${filePath}`,
+          content: "export { Widget } from './Widget';",
+          startLine: 1,
+          endLine: 1,
+          totalLines: 1,
+        };
+      }
+
+      throw new Error(`unexpected file: ${filePath}`);
+    });
+
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'safe',
+    });
+
+    const importerFile = result.directlyImpactedFiles.find((entry) => entry.filePath === consumerFile.filePath);
+    const importerSymbol = result.directlyImpactedSymbols.find((entry) => entry.symbolName === 'DashboardPage');
+
+    expect(importerFile).toEqual(expect.objectContaining({
+      impactScope: 'file-direct',
+      confidence: 'medium',
+    }));
+    expect(importerSymbol).toBeUndefined();
+  });
+
   it('captures barrel re-export file evidence as proxy impact', async () => {
     const result = await analyzeSymbolImpact({
       symbolId: targetSymbol.symbolId,
@@ -465,6 +636,138 @@ describe('impact analysis service', () => {
       reason: 'reexports-target',
       impactScope: 'proxy',
       confidence: 'medium',
+    }));
+  });
+
+  it('surfaces package-style local importers as direct file impacts for shared exported symbols', async () => {
+    const sharedSymbol = {
+      symbolId: 'shared-context',
+      fileId: 'repo-a:components/common/custom-modal-context.tsx',
+      name: 'CustomModalContext',
+      kind: 'variable' as const,
+      repo: 'repo-a',
+      filePath: 'components/common/custom-modal-context.tsx',
+      startLine: 1,
+      endLine: 6,
+      exported: true,
+    };
+    const modalOne = fileNode('repo-a:components/modal-one.tsx', 'repo-a', 'components/modal-one.tsx');
+    const modalTwo = fileNode('repo-a:components/modal-two.tsx', 'repo-a', 'components/modal-two.tsx');
+
+    loadRequiredSymbolIndexMock.mockResolvedValueOnce({
+      symbols: [sharedSymbol],
+      byName: { CustomModalContext: [sharedSymbol] },
+      byNameLower: { custommodalcontext: [sharedSymbol] },
+      byFile: {},
+      stats: {},
+    });
+    getFileNodeMock.mockImplementation(async (fileId: string) => {
+      if (fileId === sharedSymbol.fileId) {
+        return fileNode(sharedSymbol.fileId, 'repo-a', sharedSymbol.filePath);
+      }
+
+      if (fileId === modalOne.fileId) {
+        return modalOne;
+      }
+
+      if (fileId === modalTwo.fileId) {
+        return modalTwo;
+      }
+
+      return null;
+    });
+    getDefinedSymbolsMock.mockResolvedValue([]);
+    getImportingFilesMock.mockResolvedValue([modalOne, modalTwo]);
+    getReexportingFilesMock.mockResolvedValue([]);
+    getFileRelationByIdMock.mockImplementation(async (fileId: string) => {
+      if (fileId === sharedSymbol.fileId) {
+        return {
+          fileId: sharedSymbol.fileId,
+          repo: 'repo-a',
+          filePath: sharedSymbol.filePath,
+          classification: 'source',
+          symbolIds: [sharedSymbol.symbolId],
+          symbolNames: [sharedSymbol.name],
+          imports: [],
+          exports: [
+            {
+              fileId: sharedSymbol.fileId,
+              kind: 'named',
+              exportedName: 'CustomModalContext',
+              localName: 'CustomModalContext',
+              symbolId: sharedSymbol.symbolId,
+            },
+          ],
+          importTokens: [],
+        };
+      }
+
+      if (fileId === modalOne.fileId || fileId === modalTwo.fileId) {
+        return {
+          fileId,
+          repo: 'repo-a',
+          filePath: fileId === modalOne.fileId ? modalOne.filePath : modalTwo.filePath,
+          classification: 'source',
+          symbolIds: [],
+          symbolNames: [],
+          imports: [
+            {
+              fileId,
+              source: 'components/common/custom-modal-context',
+              bindings: [
+                {
+                  importedName: 'CustomModalContext',
+                  localName: 'CustomModalContext',
+                  kind: 'named',
+                  isTypeOnly: false,
+                },
+              ],
+              resolvedKind: 'package',
+            },
+          ],
+          exports: [],
+          importTokens: ['CustomModalContext'],
+        };
+      }
+
+      return null;
+    });
+    readRepositoryFileMock.mockResolvedValue({
+      repositoryId: 'repo-a',
+      filePath: sharedSymbol.filePath,
+      absolutePath: `/repos/repo-a/${sharedSymbol.filePath}`,
+      content: 'export const CustomModalContext = {};',
+      startLine: 1,
+      endLine: 1,
+      totalLines: 1,
+    });
+
+    const result = await analyzeSymbolImpact({
+      symbolId: sharedSymbol.symbolId,
+      repoId: 'repo-a',
+      mode: 'safe',
+    });
+
+    expect(result.directlyImpactedFiles).toEqual([
+      expect.objectContaining({ filePath: modalOne.filePath, impactScope: 'file-direct', confidence: 'medium' }),
+      expect.objectContaining({ filePath: modalTwo.filePath, impactScope: 'file-direct', confidence: 'medium' }),
+    ]);
+    expect(result.summary.fileDirectImpactCount).toBe(2);
+  });
+
+  it('orders graph-derived direct importer files ahead of proxy files', async () => {
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'safe',
+    });
+
+    expect(result.directlyImpactedFiles[0]).toEqual(expect.objectContaining({
+      filePath: consumerFile.filePath,
+      impactScope: 'file-direct',
+    }));
+    expect(result.directlyImpactedFiles[1]).toEqual(expect.objectContaining({
+      filePath: barrelFile.filePath,
+      impactScope: 'proxy',
     }));
   });
 

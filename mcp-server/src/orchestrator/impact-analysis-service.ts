@@ -30,6 +30,10 @@ function normalizePath(filePath: string): string {
   return filePath.replace(/\\/g, '/').replace(/^\/+/, '');
 }
 
+function stripKnownExtension(value: string): string {
+  return value.replace(/\.(tsx?|jsx?)$/i, '');
+}
+
 function compareFiles(left: { repoId?: string; filePath: string }, right: { repoId?: string; filePath: string }): number {
   return (left.repoId ?? '').localeCompare(right.repoId ?? '') || left.filePath.localeCompare(right.filePath);
 }
@@ -263,6 +267,25 @@ function containsIdentifier(source: string, identifier: string): boolean {
   return new RegExp(`\\b${escaped}\\b`).test(source);
 }
 
+function importSourceLikelyTargetsFile(source: string, targetFilePath: string): boolean {
+  const normalizedSource = stripKnownExtension(normalizePath(source)).replace(/\/index$/i, '');
+  const normalizedTarget = stripKnownExtension(normalizePath(targetFilePath)).replace(/\/index$/i, '');
+
+  if (!normalizedSource || !normalizedTarget) {
+    return false;
+  }
+
+  const sourceBase = normalizedSource.split('/').pop() ?? normalizedSource;
+  const targetBase = normalizedTarget.split('/').pop() ?? normalizedTarget;
+
+  return (
+    normalizedSource === normalizedTarget ||
+    normalizedTarget.endsWith(`/${normalizedSource}`) ||
+    normalizedSource.endsWith(`/${targetBase}`) ||
+    sourceBase === targetBase
+  );
+}
+
 function buildEvidence(
   reason: ImpactReason,
   confidence: ImpactConfidence,
@@ -417,26 +440,11 @@ async function collectImporterImpacts(target: IndexedSymbol): Promise<{
       getFileContent(importingFile.repoId, importingFile.filePath),
     ]);
 
-    if (!relation) {
-      continue;
-    }
-
-    const matchingImports = relation.imports.filter(
-      (entry) => entry.resolvedTargetFileId === target.fileId || entry.source === target.filePath,
-    );
-
-    if (matchingImports.length === 0) {
-      continue;
-    }
-
-    const matchingBindings = matchingImports.flatMap((entry) =>
-      entry.bindings.filter((binding) => bindingTargetsSymbol(binding, exportedNames, hasDefault)),
-    );
     const importerFileEvidence = buildEvidence(
       'imports-target',
       'medium',
       importingFile.filePath,
-      ['file directly imports the target file through a resolved local import edge; symbol-level usage inside the file is not confirmed by this evidence alone'],
+      ['file directly imports the target file through a graph-known import edge; symbol-level usage inside the file is not confirmed by this evidence alone'],
       'file-direct',
       'graph',
     );
@@ -449,6 +457,23 @@ async function collectImporterImpacts(target: IndexedSymbol): Promise<{
       impactScope: 'file-direct',
       confidence: 'medium',
       evidence: [importerFileEvidence],
+    });
+
+    if (!relation) {
+      continue;
+    }
+
+    const matchingBindings = relation.imports.flatMap((entry) => {
+      if (!importSourceLikelyTargetsFile(entry.source, target.filePath)) {
+        return [];
+      }
+
+      return entry.bindings
+        .filter((binding) => bindingTargetsSymbol(binding, exportedNames, hasDefault))
+        .map((binding) => ({
+          ...binding,
+          source: entry.source,
+        }));
     });
 
     if (!content || matchingBindings.length === 0) {
@@ -468,7 +493,7 @@ async function collectImporterImpacts(target: IndexedSymbol): Promise<{
         'imports-target',
         'high',
         definedSymbol.filePath,
-        [`symbol span references imported binding "${referencedBinding.localName}" tied to the target export surface`],
+        [`symbol span references imported binding "${referencedBinding.localName}" from "${referencedBinding.source}", tied to the target export surface`],
         'symbol-direct',
         'symbol-index',
         definedSymbol.symbolId,
