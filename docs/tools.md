@@ -2,11 +2,14 @@
 
 ## Overview
 
-RepoRadar exposes a small set of MCP tools on top of a layered code-intelligence stack:
+RepoRadar exposes a small MCP toolset on top of a layered code-intelligence
+stack:
 
 `Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
 
-The public tools are designed for agent-assisted repository understanding and safe refactor planning. They return structured context instead of raw search output whenever possible.
+The public tools are designed for agent-assisted repository understanding and
+safe change planning. They return structured context instead of raw search
+results whenever possible.
 
 High-level public tools:
 
@@ -16,7 +19,9 @@ High-level public tools:
 - `collect_refactor_context`
 - `plan_change`
 
-RepoRadar also includes lower-level support tools such as `search_code`, `open_file`, `list_symbols`, `find_symbol`, `find_references`, and `find_related_files`.
+RepoRadar also includes lower-level support tools such as `search_code`,
+`open_file`, `list_symbols`, `find_symbol`, `find_references`, and
+`find_related_files`.
 
 ## `explore_component`
 
@@ -29,6 +34,7 @@ Typical use cases:
 - identify the main implementation file
 - inspect nearby collaborators
 - understand what a file exports
+- inspect lightweight UI hierarchy context when available
 
 Input:
 
@@ -118,7 +124,7 @@ Output summary:
 Example:
 
 ```text
-analyze_symbol({ "name": "AudioHero", "file": "src/app/_components/audio/AudioHero.tsx" })
+analyze_symbol({ "name": "AudioHero", "file": "src/components/AudioHero.tsx" })
 ```
 
 ## `collect_refactor_context`
@@ -188,12 +194,14 @@ Output summary:
 - ordered edit and review plan
 - compact agent summary
 
-`plan_change` does not rewrite code or guarantee refactor safety. It exposes a conservative plan built from impact analysis, ownership detection, and graph signals.
+`plan_change` does not rewrite code or guarantee refactor safety. It exposes a
+conservative plan built from impact analysis, ownership detection, graph
+signals, and additive UI review hints when available.
 
 Example:
 
 ```text
-plan_change({ "symbol": "AudioHero", "filePath": "src/app/_components/audio/AudioHero.tsx" })
+plan_change({ "symbol": "AudioHero", "filePath": "src/components/AudioHero.tsx" })
 ```
 
 ## Typical Workflow
@@ -222,7 +230,8 @@ RepoRadar also exposes lower-level MCP primitives:
 - `find_references`
 - `find_related_files`
 
-These are useful when an agent needs direct retrieval rather than a higher-level workflow result.
+These are useful when an agent needs direct retrieval rather than a higher-level
+workflow result.
 
 ## Scope And Limits
 
@@ -236,4 +245,5 @@ They do not claim:
 - automatic safe refactors
 - guaranteed correctness of all change plans
 
-They are designed to provide conservative, explainable code intelligence for real repository workflows.
+They are designed to provide conservative, explainable code intelligence for
+real repository workflows.

@@ -2,38 +2,45 @@
 
 ## Purpose
 
-Phase 7 introduces an internal substrate for pattern intelligence in RepoRadar.
+Pattern intelligence is RepoRadar's internal capability for recognizing,
+comparing, and reusing recurring implementation shapes across a repository set.
 
-This substrate exists to support later phases that will:
+It supports three related jobs:
 
-- extract structural pattern candidates
-- compare pattern fingerprints
-- retrieve repository precedents
+- extract deterministic structural patterns from indexed code
+- compare those patterns through normalized fingerprints
+- surface strong internal precedents for similar symbols or files
 
-Step 7.1 does not extract patterns yet. It only establishes stable internal models, storage, and indexing boundaries so future phases can build on the existing architecture without reshaping the pipeline.
+This capability is internal. It enriches repository understanding and agent
+retrieval workflows, but it is not currently exposed as a dedicated public MCP
+tool.
 
 ## Design Constraints
 
-Pattern intelligence in RepoRadar is designed to remain:
+Pattern intelligence is designed to remain:
 
 - deterministic-first
 - graph-aware
 - language-aware
 - incremental-index friendly
 
-The substrate is aligned with existing repository primitives such as:
+It reuses existing repository primitives such as:
 
 - `fileId`
 - `symbolId`
 - import and export metadata
 - graph relationships
-- ranking signals
+- symbol frequency signals
+- UI structure signals when available
 
-## PatternCandidate
+## Pattern Model
+
+### `PatternCandidate`
 
 `PatternCandidate` is the core internal record.
 
-It captures a single extracted structural pattern and anchors it to the existing repository model.
+It captures one extracted structural pattern and anchors it to the existing
+repository model.
 
 Current fields:
 
@@ -53,13 +60,14 @@ Current fields:
 - `confidence`
 - `createdAt`
 
-The model is intentionally lightweight. It is built to survive future extraction refinements without changing its basic identity or storage role.
+The model is intentionally lightweight. It is built to tolerate detector and
+scoring refinement without changing its identity or storage role.
 
-## PatternKind
+### `PatternKind`
 
-`PatternKind` is the central taxonomy for high-level structural pattern categories.
+`PatternKind` is the high-level taxonomy for extracted structural categories.
 
-Initial kinds:
+Current kinds:
 
 - `component`
 - `hook`
@@ -74,124 +82,15 @@ Initial kinds:
 - `service-layer`
 - `data-access`
 
-The taxonomy is extensible. Future phases can add more kinds without changing the storage model.
+The taxonomy is extensible, but the current implementation keeps the category
+set small and explicit.
 
-## PatternSignal
+### `PatternSignal`
 
-`PatternSignal` represents small structural observations that support a candidate.
+`PatternSignal` represents small structural observations that support a
+candidate.
 
-Example signal types:
-
-- `react-function-component`
-- `uses-hooks`
-- `async-function`
-- `map-rendering`
-- `conditional-render`
-- `error-boundary`
-- `form-state`
-- `api-request`
-- `db-access`
-- `test-describe-block`
-- `storybook-meta`
-
-Signals are intended to remain:
-
-- lightweight
-- explicit
-- composable into fingerprints
-
-## PatternFingerprint
-
-`PatternFingerprint` is the comparable representation for a pattern candidate.
-
-It records stable structural dimensions such as:
-
-- `patternKind`
-- `structuralSignals`
-- `importSet`
-- `exportShape`
-- `symbolRole`
-- `uiSignals?`
-- `asyncSignals?`
-
-The fingerprint is designed for future similarity scoring. Step 7.1 does not compare fingerprints yet, but it defines the shape that later phases will rely on.
-
-## PatternRepository
-
-`PatternRepository` is the internal storage boundary for pattern candidates.
-
-Current responsibilities:
-
-- `registerPatternCandidate(...)`
-- `getPatternsForFile(...)`
-- `getPatternsForSymbol(...)`
-- `listPatternsByKind(...)`
-- `getPatternById(...)`
-
-Patterns are stored in a dedicated persisted artifact:
-
-- `mcp-server/.data/pattern-candidates.json`
-
-This keeps the substrate separate from the symbol index, code graph, and UI-structure artifacts while still following the same storage conventions.
-
-## Indexing Lifecycle
-
-The existing indexing pipeline now includes a deterministic pattern stage:
-
-- `runPatternExtractionStage(...)`
-
-Current behavior:
-
-- the stage runs after symbol extraction and import/export metadata collection
-- the stage inspects indexed files, symbols, and imports
-- the stage emits `PatternCandidate` records when rule-based detector evidence is strong
-- the stage persists results in `mcp-server/.data/pattern-candidates.json`
-
-The stage remains conservative. Files without strong detector evidence simply emit no pattern candidates.
-
-## Deterministic Pattern Extraction
-
-Phase 7.2 activates the first rule-based extraction pass for TypeScript and TSX files.
-
-Initial detectors:
-
-- `ReactComponentDetector`
-- `CustomHookDetector`
-- `AsyncDataFlowDetector`
-- `ListRenderingDetector`
-- `ConditionalRenderingDetector`
-- `UtilityExportDetector`
-- `TestSuiteDetector`
-- `StorybookStoryDetector`
-- `ApiHandlerDetector`
-
-These detectors combine:
-
-- Tree-sitter node shape
-- indexed symbol metadata
-- file import/export metadata
-- path conventions where the signal is strong
-
-Example detector behavior:
-
-- React component detection requires a TSX file, an uppercase function-like symbol, and JSX return structure
-- custom hook detection requires a `useX` function name plus hook calls
-- async data flow detection requires async/await plus API-style request or explicit error handling
-- list and conditional rendering detection require JSX plus `map(...)`, ternary, or `&&` rendering
-- test and Storybook detection require known imports, filename conventions, or stable export shapes
-- API handler detection requires route-like file placement and handler naming conventions such as `GET` or `POST`
-
-Recent detector calibration tightened several high-noise cases without changing the underlying pattern model:
-
-- Storybook detection now prefers explicit story files or real meta exports and excludes config/setup files
-- API handler detection now requires stronger function-like route evidence instead of path or naming alone
-- React component detection now supports wrapped component forms such as `forwardRef(...)` and `memo(...)`
-- a narrow framework-specific exception covers file-based UI surfaces such as `not-found.tsx`
-- rendering-pattern extraction is slightly more conservative for clearly non-component JSX helpers
-
-## Signals And Fingerprints In Extraction
-
-Extracted candidates are supported by small structural signals such as:
+Examples:
 
 - `react-function-component`
 - `jsx-return`
@@ -207,20 +106,79 @@ Extracted candidates are supported by small structural signals such as:
 - `test-describe-block`
 - `storybook-meta`
 
-Each emitted candidate also receives a normalized `PatternFingerprint` containing:
+Signals are intended to remain:
 
-- pattern kind
-- structural signal set
-- supporting import set
-- export shape
-- symbol role
-- optional UI and async signal subsets
+- lightweight
+- explicit
+- composable into fingerprints
 
-The fingerprint is designed for later similarity and precedent-retrieval work. Phase 7.2 only emits and stores it.
+### `PatternFingerprint`
 
-## Emission And Deduplication
+`PatternFingerprint` is the normalized comparison surface for a pattern.
 
-Each detector emits at most one pattern candidate per symbol and pattern-kind combination.
+Current fields include:
+
+- `patternKind`
+- `structuralSignals`
+- `importSet`
+- `exportShape`
+- `symbolRole`
+- `uiSignals?`
+- `asyncSignals?`
+- `responsibilitySignals?`
+
+Fingerprints are used for similarity scoring, clustering, and precedent
+ranking. Comparisons operate on this normalized data rather than raw code
+bodies.
+
+## Extraction
+
+Pattern extraction is a deterministic indexing stage that runs after symbol and
+import/export metadata collection.
+
+Current behavior:
+
+- inspects indexed files, symbols, and imports
+- applies rule-based TypeScript and TSX detectors
+- emits `PatternCandidate` records only when evidence is strong enough
+- persists results to `mcp-server/.data/pattern-candidates.json`
+
+The stage stays conservative. Files without strong evidence emit no patterns.
+
+### Current Detectors
+
+RepoRadar currently extracts patterns for detectors such as:
+
+- React components
+- custom hooks
+- async data-flow helpers
+- list rendering
+- conditional rendering
+- utility exports
+- API handlers
+- test suites
+- Storybook stories
+
+Detector evidence combines:
+
+- Tree-sitter node shape
+- indexed symbol metadata
+- file import/export metadata
+- path conventions where the signal is strong
+
+Extraction is calibrated to avoid common noise cases:
+
+- Storybook config and setup files are excluded from story detection
+- API handler detection requires function-like route evidence rather than path
+  naming alone
+- wrapped components such as `forwardRef(...)` and `memo(...)` are recognized
+- narrow framework-specific UI surfaces such as `not-found.tsx` are supported
+- rendering-pattern extraction is conservative around local JSX helper noise
+
+### Deduplication
+
+Each detector emits at most one candidate per symbol and pattern-kind
+combination.
 
 Deduplication uses:
 
@@ -228,90 +186,86 @@ Deduplication uses:
 - `PatternKind`
 - normalized structural signal set
 
-This keeps extraction deterministic and compatible with future incremental indexing work.
+This keeps extraction deterministic and compatible with incremental indexing.
 
-## Pattern Similarity And Clustering
+## Repository And Storage
 
-Phase 7.3 adds deterministic similarity scoring and same-kind clustering for
-`PatternCandidate` records.
+`PatternRepository` is the internal storage boundary for pattern candidates.
 
-Similarity operates only on normalized `PatternFingerprint` fields:
+Current responsibilities:
 
-- pattern kind
+- `registerPatternCandidate(...)`
+- `getPatternsForFile(...)`
+- `getPatternsForSymbol(...)`
+- `listPatternsByKind(...)`
+- `getPatternById(...)`
+
+Patterns are stored in:
+
+- `mcp-server/.data/pattern-candidates.json`
+
+Pattern storage remains separate from the symbol index, code graph, and UI
+artifacts while following the same persistence conventions.
+
+## Similarity And Clustering
+
+RepoRadar computes deterministic similarity between patterns of the same
+`PatternKind`.
+
+Similarity operates on normalized fingerprint fields such as:
+
 - structural signal overlap
 - supporting import overlap
 - export shape
 - symbol role
 - optional UI signal overlap
 - optional async signal overlap
+- optional responsibility overlap
 
-The comparison does not inspect raw code bodies. This keeps similarity deterministic,
-incremental-index friendly, and aligned with the existing pattern store.
+Raw code bodies are not compared.
 
-Current clustering is intentionally simple:
+### Similarity Scoring
 
-- only patterns of the same `PatternKind` are compared
-- similarity uses weighted overlap across normalized fingerprint fields
-- clusters form when similarity passes a stable threshold and the shared-signal
-  evidence is strong enough
-- each cluster records:
-  - `clusterId`
-  - representative pattern
-  - size
-  - dominant structural signals
-
-The similarity layer also supports nearest-neighbor lookup for a single pattern.
-Phase 7.4 will use this substrate for precedent discovery and pattern-based
-navigation.
-
-### Similarity Refinement
-
-The first refinement pass keeps the same fingerprint schema but tightens how broad
-pattern families are compared.
-
-Current calibration adds:
+The current similarity model uses weighted overlap plus several refinements that
+help broad pattern families stay useful:
 
 - stronger gating for high-volume kinds such as `component`, `hook`, and
   `async-data-flow`
-- more weight on supporting import overlap
-- a small representativeness adjustment that favors exported, richer patterns over
-  minimal local helpers
-- a small same-file penalty for nearest-neighbor ranking so local helpers do not
-  dominate precedent candidates
+- increased weight for import-set overlap
+- a small representativeness adjustment that favors exported, richer patterns
+  over minimal local helpers
+- a same-file penalty for nearest-neighbor ranking so helpers do not dominate
+  exported-symbol precedents
+- symbol-name token similarity for kinds where naming carries structural meaning
+- a small family boost when symbol-name similarity is strong
+- small penalties when explicit responsibilities diverge
 
-These adjustments remain deterministic and do not change pattern extraction or the
-stored fingerprint shape.
+The result is a stable similarity score in the range `0.0` to `1.0`.
 
-### Symbol-Aware Similarity
+### Clustering
 
-The next refinement pass adds a lightweight symbol-name similarity signal on top of
-the existing fingerprint-based comparison.
+Clustering is intentionally simple and same-kind only.
 
 Current behavior:
 
-- symbol names are tokenized deterministically from camelCase, PascalCase, and
-  underscore-separated names
-- similarity compares normalized name-token overlap
-- name similarity is used conservatively for kinds where naming carries structural
-  meaning:
-  - `component`
-  - `hook`
-  - `async-data-flow`
-  - `utility-export`
-- strong name-family matches receive a small boost, while generic same-kind matches
-  without import or name overlap are less likely to cluster together
+- only patterns with the same `PatternKind` are compared
+- clusters form when similarity passes a stable threshold and shared evidence is
+  strong enough
+- each cluster records:
+  - `clusterId`
+  - `patternKind`
+  - `memberPatternIds`
+  - `representativePatternId`
+  - `size`
+  - `dominantSignals`
 
-This remains deterministic and lightweight. It does not add embeddings, fuzzy NLP, or
-change the stored fingerprint schema.
+Cluster assignments are computed deterministically from the current pattern
+corpus. They are used internally for inspection and precedent-quality work.
 
-Pattern similarity and clustering remain internal services. There is no MCP exposure
-yet.
+## Responsibility Signals
 
-### Responsibility Signals
-
-The next refinement adds lightweight `responsibilitySignals` to pattern
-fingerprints so broad structural kinds can be separated by approximate role as
-well as shape.
+Responsibility signals add a lightweight approximation of what a symbol is doing
+inside a broad structural family.
 
 Current examples include:
 
@@ -332,56 +286,49 @@ Current examples include:
   - `test-hook`
   - `test-service`
 
-These signals are detected with deterministic naming, import, path, and JSX
-heuristics. They do not use NLP, runtime analysis, or ML classification.
+These signals are derived from deterministic naming, import, path, and JSX
+heuristics. They do not rely on NLP, embeddings, or runtime analysis.
 
 Current use:
 
 - similarity gives additional weight to responsibility overlap
-- broad kinds are penalized slightly when responsibilities clearly diverge
-- precedent ranking adds a small bonus when responsibility signals align
+- broad same-kind matches are penalized slightly when responsibilities diverge
+- precedent ranking can favor candidates with matching responsibilities
 
-Responsibility signals remain additive metadata. They refine ranking and
-precedent quality without changing the core pattern taxonomy.
-
-## Planned Follow-Up Phases
-
-Phase 7.4 adds precedent discovery and retrieval workflows on top of the stored
-pattern corpus and similarity layer.
-
-## Non-Goals In Step 7.3
-
-This step does not implement:
-
-- pattern MCP tools
-- precedent discovery APIs
-- agent-facing interfaces
-
-Similarity and clustering remain internal until precedent retrieval is in place.
+Responsibility signals remain additive metadata. They refine ranking without
+changing the core taxonomy.
 
 ## Precedent Discovery
 
-Phase 7.4 adds an internal `PrecedentDiscoveryService` for retrieving the best
-existing implementations for a symbol, pattern, or file.
+`PrecedentDiscoveryService` retrieves strong internal examples for a symbol,
+pattern, or file.
+
+Current entrypoints include:
+
+- `findPrecedentsForSymbol(...)`
+- `findPrecedentsForPattern(...)`
+- `findPrecedentsForFile(...)`
 
 Current behavior:
 
-- starts from the symbol or pattern's extracted `PatternCandidate` records
+- starts from extracted `PatternCandidate` records
 - retrieves nearest same-kind neighbors through `PatternSimilarityService`
-- enriches candidates with indexed symbol and graph context
-- filters identical-symbol matches and de-emphasizes same-file precedents
+- enriches candidates with symbol and graph context
+- filters identical-symbol matches
+- de-emphasizes same-file precedents without banning them
 - ranks candidates with a deterministic `precedentScore`
 
-Current precedent scoring uses:
+Precedent scoring currently combines:
 
 - similarity score as the primary signal
 - exported symbol bonus
 - cross-file bonus
 - usage-frequency bonus from the symbol index
-- small graph-context bonuses for imported or re-exported files
+- small graph-context bonuses for imported and re-exported files
 - small path-family bonus
+- responsibility-match bonus when applicable
 
-Returned candidates include:
+Returned precedent candidates include:
 
 - symbol and pattern identifiers
 - file path
@@ -390,5 +337,30 @@ Returned candidates include:
 - final precedent score
 - explicit reason signals
 
-This remains internal-only. There is still no MCP precedent tool, no code
-generation layer, and no refactor automation.
+This service remains internal. There is no public precedent MCP tool and no code
+-generation layer built on top of it.
+
+## Debugging And Inspection
+
+The current implementation supports lightweight debug inspection for:
+
+- pattern counts per file during extraction
+- cluster membership and dominant signals
+- precedent ranking explanations and reason signals
+
+These are internal engineering aids rather than public interfaces.
+
+## Boundaries
+
+Pattern intelligence does not currently provide:
+
+- public MCP pattern tools
+- semantic embeddings
+- LLM-based similarity
+- clustering across incompatible pattern kinds
+- automatic code generation
+- automatic refactor planning from precedents
+
+It is a deterministic internal capability that improves precedent discovery and
+repository understanding while staying compatible with the rest of the indexed
+stack.

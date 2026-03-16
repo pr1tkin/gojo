@@ -1,118 +1,113 @@
 # RepoRadar
 
-Code intelligence stack for agent-assisted repository understanding and safe refactor planning.
+RepoRadar is a local code-intelligence stack designed for coding agents.
 
-RepoRadar sits between simple code search and full compiler-backed refactoring systems. It combines fast search, syntax-aware indexing, a deterministic repository graph, and agent-facing MCP workflows so an agent can understand a codebase and plan safer changes without pretending to have perfect semantic knowledge.
+It sits between raw code search and compiler-driven refactoring systems.
 
-## Why This Project Exists
+RepoRadar indexes repositories, extracts symbols and relationships, builds a deterministic code graph, and uses structural pattern intelligence to help an agent:
 
-There is a practical gap between:
+- understand repository structure
+- compare existing implementations
+- find strong internal precedents
+- estimate safe change scope
+- plan conservative edits
 
-- simple search tools that return raw text matches
-- full semantic compilers and refactoring engines that are expensive, language-specific, and often too heavy for general repository understanding
+Instead of pretending to fully understand a program like a compiler, RepoRadar focuses on **practical repository intelligence** that works across real-world codebases.
 
-RepoRadar focuses on the middle ground:
+The system combines:
 
-- repository graph analysis
-- blast-radius detection
-- API boundary approximation
-- agent-assisted refactor planning
+- indexed search (Zoekt)
+- syntax-aware symbol extraction (Tree-sitter)
+- deterministic code graphs
+- impact and ownership analysis
+- change-planning workflows
+- internal pattern similarity and precedent discovery
 
-The goal is not full semantic understanding. The goal is useful, conservative, explainable code intelligence for real repositories.
+All exposed through **agent-oriented MCP tools**.
 
-## Problem
-
-Large repositories are hard to navigate with raw search alone.
-
-- search results are noisy
-- symbol roles are hidden behind imports and barrel files
-- architectural boundaries are implied by folder structure and usage patterns
-- change risk is difficult to judge before editing
-
-RepoRadar helps an agent answer questions like:
-
-- what is this symbol and where does it matter?
-- which files are structurally related?
-- how broad is the likely blast radius?
-- is this symbol internal, shared, or part of a surface?
-- what is the safest order for a change?
-
-## Architecture Overview
+## System Architecture
 
 ```text
-Agent / Copilot
-      |
-      v
-MCP Server
-  |- explore_component
-  |- search_patterns
-  |- analyze_symbol
-  |- collect_refactor_context
-  `- plan_change
-      |
-      v
-Local Intelligence Layer
-  |- Zoekt search
-  |- Tree-sitter
-  |- Symbol index
-  |- Code graph
-  |- Impact analysis
-  |- Ownership detection
-  `- Change planning
+                AI Agent / Copilot
+                        │
+                        ▼
+                   MCP Tools
+     ┌───────────────────────────────────┐
+     │ explore_component                 │
+     │ search_patterns                   │
+     │ analyze_symbol                    │
+     │ collect_refactor_context          │
+     │ plan_change                       │
+     └───────────────────────────────────┘
+                        │
+                        ▼
+                 Orchestrator Layer
+                        │
+        ┌───────────────┼───────────────┐
+        ▼               ▼               ▼
+    Search Layer   Structure Layer   Graph Layer
+      (Zoekt)        (Tree-sitter)    (imports/exports)
+
+                        ▼
+                 Analysis Layer
+        ┌───────────────┼───────────────┐
+        ▼               ▼               ▼
+     Impact         Ownership        Planning
+
+                        ▼
+             Internal Pattern Intelligence
+        extraction → fingerprints → similarity
+              → clustering → precedents
 ```
 
 ## Architecture Summary
 
-RepoRadar is built as a layered pipeline:
+RepoRadar uses a layered analysis model:
 
 `Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
 
-- `Search`
-  - Zoekt-backed repository search for fast candidate retrieval
-- `Structure`
-  - Tree-sitter symbol extraction with persisted `fileId` and `symbolId`
-- `Graph`
-  - deterministic import and re-export relationships with conservative local resolution
-- `Impact`
-  - bounded blast-radius estimation for direct and transitive dependents
-- `Ownership`
-  - heuristic API-boundary and shared-vs-internal classification
-- `Planning`
-  - scope, risk, and ordered edit/review planning for safer changes
+Supporting that stack are two internal capability groups:
 
-For the full system breakdown, see [docs/architecture.md](./docs/architecture.md).
+- UI structure signals for JSX and TSX composition and prop usage
+- pattern intelligence for structural pattern extraction, similarity, and
+  precedent discovery
+
+These capabilities enrich the system without turning it into a compiler-backed
+refactoring engine.
 
 ## Capabilities
 
-- semantic-style code search grounded in repository structure
-- structural symbol extraction with stable identities
-- repository graph analysis over imports and re-exports
+- indexed repository search with Zoekt
+- Tree-sitter symbol extraction with stable `fileId` and `symbolId`
+- deterministic import and re-export graph construction
 - ranked related-file and context assembly
-- blast-radius detection for direct and transitive impact
-- API boundary approximation using ownership heuristics
-- ordered refactor planning with edit and review targets
-- agent-oriented code navigation through MCP tools
+- blast-radius estimation for direct and transitive dependents
+- ownership and API-boundary approximation
+- conservative change planning with ordered edit and review targets
+- JSX and TSX UI hierarchy signals for exploration workflows
+- internal pattern extraction, similarity, clustering, and precedent discovery
+- agent-oriented retrieval through MCP tools
 
 ## MCP Tools
 
 High-level agent workflows:
 
 - `explore_component`
-  - understand a component or symbol in repository context
+  - resolve a component or symbol and inspect related context
 - `search_patterns`
-  - find precedents and structurally similar implementations
+  - find structurally related files and implementation precedents
 - `analyze_symbol`
-  - explain a symbol's role, usage shape, and surrounding context
+  - explain symbol role, export shape, and usage context
 - `collect_refactor_context`
-  - assemble import, importer, and nearby-file context before a change
+  - assemble bounded dependency context before editing
 - `plan_change`
   - estimate safe change scope, risk, and ordered edit/review steps
 
-Lower-level support tools are also available for search, file access, symbol listing, references, and related-file discovery.
+RepoRadar also exposes lower-level retrieval tools such as `search_code`,
+`open_file`, `list_symbols`, `find_symbol`, `find_references`, and
+`find_related_files`.
 
 ## Example Workflow
-
-Typical agent workflow:
 
 ```text
 explore_component("AudioHero")
@@ -123,13 +118,13 @@ plan_change("AudioHero")
 
 Outcome:
 
-- a grounded view of the symbol and its collaborators
-- likely blast radius
-- likely ownership or API-boundary role
+- grounded symbol and file context
+- likely collaborators and nearby structure
+- conservative blast-radius and ownership hints
 - safe change scope
-- primary edit targets
-- review targets
-- conservative risk estimation
+- likely edit targets
+- likely review targets
+- ordered edit and review guidance
 
 ## Quick Start
 
@@ -154,7 +149,7 @@ This starts:
 - `zoekt-indexer`
 - `mcp-server`
 
-### 3. Build the MCP server locally
+### 3. Build and test the MCP server
 
 ```bash
 cd mcp-server
@@ -171,49 +166,43 @@ npm run start
 
 ### 5. Call MCP tools
 
-Example workflow from an MCP-capable client:
-
 ```text
 explore_component("Button")
 search_patterns({ "name": "Button", "mode": "component" })
 analyze_symbol({ "name": "Button" })
 collect_refactor_context({ "name": "Button", "mode": "component" })
-plan_change({ "symbol": "Button", "filePath": "src/app/_components/button/Button.tsx" })
+plan_change({ "symbol": "Button", "filePath": "src/components/Button.tsx" })
 ```
 
-## What `plan_change` Adds
+## Documentation
 
-`plan_change` is the first agent-facing planning workflow built on top of the internal analysis stack.
-
-It exposes:
-
-- change scope
-- change risk
-- planning signals
-- primary edit files
-- secondary edit files
-- review files
-- ordered edit/review steps
-
-It does not generate patches, rewrite code, or guarantee safe refactors.
+- [Architecture](./docs/architecture.md)
+- [Pattern Intelligence](./docs/architecture/pattern-intelligence.md)
+- [Tools](./docs/tools.md)
+- [Operations](./docs/operations.md)
+- [Testing](./docs/testing.md)
 
 ## Repository Layout
 
 - `mcp-server/`
-  - MCP server, symbol indexing, graph logic, orchestrator services, and tools
+  - MCP server, indexers, graph logic, orchestrator services, and tools
 - `zoekt/`
   - Zoekt image and indexing entrypoint
 - `repos/`
   - local repositories mounted into the stack
 - `docs/`
-  - architecture, tools, operations, and testing documentation
+  - architecture and operational documentation
 
-## Documentation
+## Boundaries
 
-- [Architecture](./docs/architecture.md)
-- [Tools](./docs/tools.md)
-- [Operations](./docs/operations.md)
-- [Testing](./docs/testing.md)
+RepoRadar does not claim:
+
+- compiler-complete semantic understanding
+- guaranteed safe refactors
+- automatic patch generation
+- full runtime UI dependency analysis
+
+It aims to be useful, conservative, and explainable.
 
 ## License
 

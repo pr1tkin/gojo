@@ -2,20 +2,24 @@
 
 ## Overview
 
-RepoRadar is a local code-intelligence stack for AI coding agents and developers.
+RepoRadar is a local code-intelligence stack for coding agents and developers.
 
 It combines:
 
-- Zoekt for repository-scale code search
+- Zoekt for repository-scale search
 - Tree-sitter for TypeScript and TSX symbol extraction
 - a persisted symbol index with stable `fileId` and `symbolId`
 - structured import/export metadata and symbol frequency statistics
 - a deterministic file-level code graph
-- ranking and context assembly layers
-- orchestrator services
-- MCP tools for high-level agent workflows
+- UI structure signals for JSX and TSX composition and prop usage
+- higher-level analysis for impact, ownership, and change planning
+- internal pattern intelligence for extraction, similarity, clustering, and
+  precedent discovery
+- MCP tools for agent-facing repository workflows
 
-RepoRadar does not attempt full semantic program understanding. It provides practical, graph-aware code navigation and structured context retrieval for real repositories.
+RepoRadar does not attempt full semantic program understanding. It provides
+practical, graph-aware retrieval and conservative analysis for real repository
+work.
 
 ## Runtime Services
 
@@ -46,18 +50,25 @@ Agent / MCP Client
 Orchestrator Services
         |
         +-------------------+-------------------+-------------------+-------------------+
-        |                   |                   |                   |                   |
-        v                   v                   v                   v                   v
-   Search Layer        Symbol Layer        Graph Layer        Analysis Layer     Ranking + Context
-        |                   |                   |                   |                   |
-        v                   v                   v                   v                   v
-      Zoekt         Tree-sitter +        Import / Export    Impact / Ownership   Candidate ordering,
-                    Symbol Index         Relationships      / Change Planning     related files, summaries
+        |                   |                   |                   |
+        v                   v                   v                   v
+   Search Layer       Structure Layer       Graph Layer       Analysis Layer
+        |                   |                   |                   |
+        v                   v                   v                   v
+      Zoekt        Tree-sitter + Symbol   Import / Export    Impact / Ownership /
+                    Index + UI Signals    Relationships      Change Planning
+
+                 Internal Pattern Intelligence
+      extraction -> fingerprints -> similarity -> clustering -> precedents
 ```
 
 RepoRadar is easiest to think about as a progressive stack:
 
 `Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
+
+Pattern intelligence and UI structure signals are supporting capabilities that
+reuse the same indexed repository data without changing that main analysis
+model.
 
 ## Layer Responsibilities
 
@@ -73,33 +84,34 @@ It is used for:
 
 Zoekt does not parse syntax and does not own symbol or graph relationships.
 
-### Symbol Layer
+### Structure Layer
 
-The symbol layer is built from Tree-sitter parsing plus persisted file metadata.
+The structure layer is built from Tree-sitter parsing plus persisted file
+metadata.
 
-Current symbol data includes:
+Current structured data includes:
 
 - stable `fileId`
 - stable `symbolId`
 - symbol names and kinds
 - export markers
 - file-level import/export metadata
-- deterministic pattern-candidate extraction for TypeScript and TSX files
-- additive JSX / TSX UI composition signals
-- additive JSX / TSX prop surface signals
+- additive JSX and TSX UI composition signals
+- additive JSX and TSX prop-surface signals
 - aggregate symbol frequency statistics
+- deterministic pattern-candidate extraction for TypeScript and TSX files
 
 Persisted files:
 
 - `mcp-server/.data/symbol-index.json`
-- `mcp-server/.data/code-graph.json`
-- `mcp-server/.data/pattern-candidates.json`
 - `mcp-server/.data/ui-composition.json`
 - `mcp-server/.data/ui-props.json`
+- `mcp-server/.data/pattern-candidates.json`
 
 ### Graph Layer
 
-The graph layer builds file-level relationships from indexed import/export metadata.
+The graph layer builds file-level relationships from indexed import/export
+metadata.
 
 Current graph capabilities:
 
@@ -114,25 +126,14 @@ Edge creation stays conservative:
 - create an edge only when exactly one indexed local target resolves
 - prefer missing edges over incorrect guesses
 
-### Ranking And Context Layer
+The persisted graph snapshot lives at:
 
-The ranking and context layers prioritize and assemble repository context.
-
-They provide:
-
-- symbol candidate ordering
-- related-file selection
-- heuristic pattern matching signals
-- explainable scoring reasons
-- concise structured summaries for tools
-
-Phase 7 also introduces an internal pattern-intelligence layer. It now extracts deterministic TypeScript and TSX pattern candidates such as components, hooks, async data-flow helpers, utility exports, test suites, Storybook stories, and API handlers. These candidates are stored internally with structural signals and fingerprints. The layer also computes deterministic similarity, same-kind clustering, and internal precedent retrieval so later phases can surface structurally similar implementations without inspecting raw code bodies again.
-
-This layer does not index files or build the graph. It composes data from the search, symbol, and graph layers into agent-ready results.
+- `mcp-server/.data/code-graph.json`
 
 ### Analysis Layer
 
-The analysis layer derives higher-level change understanding from the indexed graph.
+The analysis layer derives higher-level change understanding from the indexed
+structure and graph.
 
 It currently provides:
 
@@ -140,11 +141,48 @@ It currently provides:
 - ownership and API-boundary approximation
 - change planning and refactor safety estimation
 
-This layer remains heuristic and conservative. It is designed to improve practical agent workflows, not to provide full semantic guarantees.
+This layer remains heuristic and conservative. It is designed to improve agent
+workflows, not to provide semantic guarantees.
 
-RepoRadar also persists additive UI-structure signals from JSX and TSX component composition and prop usage. These signals capture parent-child rendering relationships plus coarse prop-surface data such as which prop names are passed at usage sites and what broad value kinds they use. They are stored separately and are not yet used to change impact-analysis, ownership-analysis, refactor-context, or change-planning behavior.
+#### UI Structure Signals
 
-Exploration-oriented workflows can aggregate these datasets into a lightweight UI hierarchy summary. This adds repository-understanding signals such as which components a target renders, which parents render it, and which prop names are commonly observed at usage sites. The hierarchy summary is informational only and does not feed current Phase 5 reasoning.
+RepoRadar persists additive UI-structure signals from JSX and TSX component
+composition and prop usage.
+
+These signals capture:
+
+- parent-child rendering relationships
+- parent pages and layout-like surfaces
+- coarse observed prop surfaces such as passed prop names and broad value kinds
+
+Current usage:
+
+- `explore_component` can expose a lightweight `uiHierarchy` summary
+- impact analysis can add supplementary UI-aware blast-radius hints
+- ownership analysis can use UI reuse and page-surface evidence as secondary
+  classification hints
+- change planning can surface UI review hints such as rendering components,
+  page-like surfaces, and observed props
+
+These signals remain additive. They do not replace graph-based reasoning or
+claim runtime UI dependency analysis.
+
+### Pattern Intelligence
+
+RepoRadar also includes an internal pattern-intelligence capability that builds
+on the structured index.
+
+It currently provides:
+
+- deterministic pattern extraction for TypeScript and TSX files
+- normalized pattern fingerprints
+- same-kind similarity scoring
+- same-kind clustering
+- internal precedent discovery
+
+Pattern intelligence stays internal. It does not currently expose a dedicated
+public MCP tool. For the detailed design, see
+[Pattern Intelligence](./architecture/pattern-intelligence.md).
 
 ### Orchestrator Services
 
@@ -161,47 +199,14 @@ Current internal services include:
 - `getRefactorContextForSymbol(...)`
 - `getRefactorContextForComponent(...)`
 - `getAnalyzeSymbolContext(...)`
+- `analyzeSymbolImpact(...)`
 - `analyzeSymbolOwnership(...)`
 - `planSymbolChange(...)`
+- `findPrecedentsForSymbol(...)`
+- `findPrecedentsForPattern(...)`
+- `findPrecedentsForFile(...)`
 
 These services compose the underlying layers rather than reimplementing them.
-
-The internal impact-analysis service now also adds result summarization for large blast-radius cases. This summary is derived from the existing direct and transitive impact sets and does not change impact detection or traversal depth.
-
-Impact analysis also supports supplementary UI-aware impact hints derived from the Phase 4.5 UI hierarchy datasets. These hints can surface components or page-like parents that render a target and commonly observed prop names for that target. They remain a separate impact category below graph-derived dependency evidence and do not claim full UI dependency analysis.
-
-Impact analysis is used to answer:
-
-- which files or symbols are directly connected to a change
-- whether the blast radius stays local or expands across features
-- which entry surfaces or feature clusters appear in the downstream path
-
-The internal ownership-analysis service adds heuristic symbol ownership and API-boundary approximation. It reuses the existing symbol index, import/export metadata, and graph relationships, and returns conservative classifications backed by explicit export-surface, path-boundary, usage-fanout, and barrel-entry signals.
-
-Ownership analysis is used to answer:
-
-- whether a symbol looks internal, feature-bounded, shared, or surface-like
-- whether a file acts like an API or framework entry boundary
-- whether a change likely touches implementation details or shared surfaces
-
-Recent refinement work improved ownership classification calibration for local helpers, feature-local exports, and framework entry surfaces while keeping the same explainable heuristic signal model.
-
-The latest refinement improves ownership conflict resolution for barrel-exported shared surfaces so reusable symbols exposed through index-style entry files are less likely to collapse to unknown while local helper protection stays intact.
-
-Ownership analysis now also accepts additive UI hierarchy evidence for JSX and TSX components. Parent-component reuse, page-surface presence, and observed prop-surface breadth can refine ownership confidence and component classification in UI-heavy codebases, but they remain secondary to export, graph, and path signals and do not claim full UI semantic understanding.
-
-The internal change-planning service adds ownership-aware refactor safety estimation. It combines existing impact analysis and ownership analysis to produce conservative scope and risk classification plus an ordered edit/review plan for agent workflows. It does not generate patches or claim semantic refactor completeness.
-
-Change planning is used to answer:
-
-- what is the safest expected scope of a change
-- which files should be edited first
-- which files are likely review-only
-- whether a change should be treated as local, feature-bounded, shared-surface, or broad-shared
-
-Recent refinement work improved edit vs review separation and plan precision for local helpers and framework entry surfaces while keeping the same ownership-aware planning architecture.
-
-Change planning now also exposes additive UI-aware review hints for JSX and TSX components. When existing UI hierarchy data is available, the plan can include rendering components, page-like UI review surfaces, and observed prop-surface hints as contextual review guidance. These hints do not automatically expand edit targets or override graph-based planning signals.
 
 ### MCP Tool Layer
 
@@ -221,9 +226,8 @@ Current tools:
 - `analyze_symbol`
 - `plan_change`
 
-The higher-level tools are built on top of the orchestrator layer and return structured results rather than raw primitives.
-
-RepoRadar now also supports agent-facing change planning workflows that estimate safe refactor scope and ordered edit/review plans based on impact analysis and API-boundary detection. These plans remain conservative and explainable; they do not claim automatic safe refactors or semantic rename support.
+The higher-level tools are built on top of the orchestrator layer and return
+structured results rather than raw primitives.
 
 ## How The Public Tools Build On The Stack
 
@@ -237,8 +241,9 @@ Builds on:
 
 - symbol resolution
 - graph-derived neighboring files
-- ranking of related files
+- related-file ranking
 - file-level defined and exported symbols
+- optional UI hierarchy aggregation
 
 Returns:
 
@@ -246,7 +251,8 @@ Returns:
 - related files
 - defined symbols
 - exported symbols
-- optional UI hierarchy summary with rendered children, parent components, and observed prop names
+- optional UI hierarchy summary with rendered children, parent components, and
+  observed prop names
 - a concise exploration summary
 
 ### `search_patterns`
@@ -269,13 +275,13 @@ Returns:
 - reasons for each match
 - symbol and export summaries for the matched files
 
-This is heuristic pattern discovery, not deep semantic similarity.
+This is heuristic pattern discovery, not full semantic similarity.
 
 ### `collect_refactor_context`
 
 Purpose:
 
-- assemble a bounded refactor impact surface for a file, component, or symbol
+- assemble a bounded refactor context for a file, component, or symbol
 
 Builds on:
 
@@ -293,8 +299,6 @@ Returns:
 - related files
 - nearby files
 - summary counts that help estimate local impact
-
-This is refactor context assembly, not full impact analysis.
 
 ### `analyze_symbol`
 
@@ -317,9 +321,8 @@ Returns:
 - a grounded role summary
 - nearby and sibling symbols
 - importer and import context
-- usage summary fields that distinguish file-level proxy usage from verified symbol-level references when reference data is unavailable
-
-This is structured symbol analysis, not full reference completeness or call-graph understanding.
+- usage summary fields that distinguish file-level proxy usage from verified
+  symbol-level references when reference data is unavailable
 
 ### `plan_change`
 
@@ -343,6 +346,7 @@ Returns:
 - secondary edit files
 - review files
 - ordered edit/review steps
+- optional UI-aware review hints when relevant
 
 This is planning support, not automatic refactoring or patch generation.
 
@@ -351,14 +355,19 @@ This is planning support, not automatic refactoring or patch generation.
 ### Indexing
 
 ```text
-repos/ -> zoekt-indexer -> zoekt-index volume -> zoekt
-repos/ -> mcp-server symbol indexing -> symbol-index.json -> code-graph.json
+repos/ -> zoekt-indexer -> zoekt index volume -> zoekt
+repos/ -> mcp-server indexing -> symbol-index.json
+                              -> code-graph.json
+                              -> ui-composition.json
+                              -> ui-props.json
+                              -> pattern-candidates.json
 ```
 
 1. Repositories are placed under `./repos`.
 2. `zoekt-indexer` scans and refreshes Zoekt indexes.
 3. The MCP server builds a persisted symbol index from repository files.
-4. The MCP server builds a code graph from the persisted symbol index.
+4. The MCP server derives graph, UI-structure, and pattern artifacts from the
+   indexed repository set.
 
 ### Retrieval And Analysis
 
@@ -368,7 +377,7 @@ MCP client -> MCP tools -> orchestrator services
                   +---------------+---------------+-------------------+
                   |                               |                   |
                   v                               v                   v
-             symbol / graph                  ranking / context    analysis services
+             symbol / graph                  UI / pattern data    analysis services
                   |                               |                   |
                   +---------------+---------------+-------------------+
                                   |
@@ -393,10 +402,13 @@ target resolution
   - first-level symlinks are supported if they resolve correctly
 - `zoekt-index`
   - Docker named volume shared by `zoekt` and `zoekt-indexer`
-- `mcp-server/.data/symbol-index.json`
-  - persisted symbol index
-- `mcp-server/.data/code-graph.json`
-  - persisted import/export graph snapshot
+- `mcp-server/.data/`
+  - persisted MCP-side artifacts including:
+  - `symbol-index.json`
+  - `code-graph.json`
+  - `ui-composition.json`
+  - `ui-props.json`
+  - `pattern-candidates.json`
 
 ## Compose Layout
 
@@ -419,24 +431,28 @@ The current `docker-compose.yml` defines:
 - symbol extraction and persisted symbol metadata
 - deterministic local graph construction
 - explainable ranking and context assembly
+- UI hierarchy and prop-surface exploration signals
 - impact analysis and blast-radius estimation
 - ownership and API-boundary approximation
 - ordered change planning for safer refactor workflows
-- public MCP tools for component exploration, precedent search, refactor context, symbol analysis, and change planning
+- internal pattern extraction, similarity, clustering, and precedent discovery
+- public MCP tools for component exploration, pattern search, refactor context,
+  symbol analysis, and change planning
 
 ### Not In Scope Today
 
 - full semantic program analysis
-- full reference completeness
-- call-graph analysis
+- compiler-complete rename or refactor support
 - broad speculative package or workspace inference
-- incremental refresh
-- `.jsx` symbol indexing
+- runtime UI behavior modeling
+- automatic code generation from precedents
+- public precedent-discovery tooling
 - deeper cross-repo graph inference
 
 ## Related Documents
 
 - [README](../README.md)
+- [Pattern Intelligence](./architecture/pattern-intelligence.md)
 - [Tools](./tools.md)
 - [Operations](./operations.md)
 - [Testing](./testing.md)

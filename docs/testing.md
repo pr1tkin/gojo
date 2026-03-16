@@ -2,20 +2,28 @@
 
 ## Philosophy
 
-RepoRadar relies on focused unit tests for the deterministic parts of the code-intelligence stack.
+RepoRadar relies on focused unit tests for the deterministic parts of the
+code-intelligence stack.
 
-The test strategy follows the same layered model used throughout the documentation:
+The test strategy follows the same layered model used throughout the
+architecture docs:
 
 `Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
+
+Pattern intelligence is tested alongside that stack because it reuses the same
+indexed repository data for extraction, similarity, clustering, and precedent
+retrieval.
 
 Tests are intended to verify:
 
 - deterministic indexing and graph behavior
 - stable orchestrator service behavior
 - conservative analysis outputs
+- deterministic pattern-intelligence behavior
 - thin MCP tool wrappers
 
-The suite does not try to claim full end-to-end semantic correctness or full runtime integration coverage.
+The suite does not try to claim compiler-complete correctness or full runtime
+integration coverage.
 
 ## Running Tests
 
@@ -43,6 +51,8 @@ Typical coverage areas:
 - graph build and query helpers
 - ranking and context assembly
 - orchestrator services
+- pattern extraction and similarity
+- precedent discovery
 - MCP tool wrappers
 
 ## What The Tests Cover
@@ -64,6 +74,7 @@ Tests verify:
 - bounded transitive impact expansion
 - confidence and grouping behavior
 - conservative blast-radius summaries
+- additive UI-aware impact hints when relevant
 
 ### Ownership Detection
 
@@ -74,6 +85,7 @@ Tests verify:
 - usage fan-out heuristics
 - barrel and entry-surface heuristics
 - conservative ownership and API-boundary classification
+- additive UI-aware ownership signals when available
 
 ### Change Planning
 
@@ -85,6 +97,18 @@ Tests verify:
 - local helper containment
 - framework entry planning
 - ordered edit and review steps
+- additive UI review hints without edit-target expansion
+
+### Pattern Intelligence
+
+Tests verify:
+
+- deterministic pattern extraction
+- detector calibration for common false-positive cases
+- stable pattern repository behavior
+- deterministic similarity scoring and clustering
+- precedent ranking and candidate filtering
+- responsibility-aware similarity and precedent refinement
 
 ### MCP Tool Wrappers
 
@@ -123,7 +147,8 @@ Targeted examples:
 npm run test -- impact-analysis.service.test.ts
 npm run test -- symbol-ownership.service.test.ts
 npm run test -- change-planning.service.test.ts
-npm run test -- analyze-symbol.tool.test.ts
+npm run test -- pattern-similarity.test.ts
+npm run test -- precedent-discovery.service.test.ts
 npm run test -- plan-change.tool.test.ts
 ```
 
@@ -136,9 +161,11 @@ The unit suite does not attempt to cover:
 - live Zoekt container integration
 - performance benchmarking
 - compiler-complete semantic refactors
-- guaranteed correctness of all impact, ownership, or planning outcomes
+- guaranteed correctness of all impact, ownership, planning, or precedent
+  results
 
-`server.ts` remains lightly tested indirectly because it is mostly MCP SDK bootstrap and tool registration glue.
+`server.ts` remains lightly tested indirectly because it is mostly MCP SDK
+bootstrap and tool registration glue.
 
 ## Validation Strategy
 
@@ -155,6 +182,7 @@ Use manual runtime checks for:
 - Zoekt availability
 - repository indexing
 - MCP client integration
-- workflow quality on real repositories
+- workflow quality on local repositories
 
-For runtime setup, see [Operations](./operations.md). For system design, see [Architecture](./architecture.md).
+For runtime setup, see [Operations](./operations.md). For system design, see
+[Architecture](./architecture.md).

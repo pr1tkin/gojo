@@ -20,14 +20,14 @@ describe('plan_change tool', () => {
     const parsed = z.object(planChangeToolDefinition.inputSchema).parse({
       symbol: 'Button',
       filePath: 'src/app/_components/button/Button.tsx',
-      repo: 'dlf-web',
+      repo: 'repo-alpha',
       mode: 'exploratory',
     });
 
     expect(parsed).toEqual({
       symbol: 'Button',
       filePath: 'src/app/_components/button/Button.tsx',
-      repo: 'dlf-web',
+      repo: 'repo-alpha',
       mode: 'exploratory',
     });
   });
@@ -71,7 +71,7 @@ describe('plan_change tool', () => {
     const result = await runPlanChangeTool({
       symbol: 'Button',
       filePath: 'src/app/_components/button/Button.tsx',
-      repo: 'dlf-web',
+      repo: 'repo-alpha',
       mode: 'exploratory',
     });
     const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
@@ -79,7 +79,7 @@ describe('plan_change tool', () => {
     expect(planSymbolChangeMock).toHaveBeenCalledWith({
       symbolName: 'Button',
       filePath: 'src/app/_components/button/Button.tsx',
-      repoId: 'dlf-web',
+      repoId: 'repo-alpha',
       impactMode: 'exploratory',
     });
     expect(parsed).toEqual(expect.objectContaining({
