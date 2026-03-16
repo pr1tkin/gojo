@@ -13,6 +13,22 @@ export {
 export { getAnalyzeSymbolContext } from './symbol-analysis-service.js';
 export { getSymbolExplorationContext } from './symbol-service.js';
 export type {
+  AnalyzeSymbolImpactInput,
+  ImpactAnalysisMode,
+  ImpactAnalysisResult,
+  ImpactAnalysisSummary,
+  ImpactAnalysisTarget,
+  ImpactConfidence,
+  ImpactEvidence,
+  ImpactEvidenceSource,
+  ImpactPathStep,
+  ImpactReason,
+  ImpactedFile,
+  ImpactedSymbol,
+  PublicSurfaceRisk,
+  TransitiveImpact,
+} from './impact-analysis-types.js';
+export type {
   FileExplorationContext,
   GetFileExplorationContextOptions,
   RefactorContext,
