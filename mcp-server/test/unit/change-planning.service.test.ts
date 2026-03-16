@@ -108,6 +108,7 @@ function impactResult(
       level: 'unknown' as const,
       notes: [],
     },
+    uiImpact: undefined,
     ...overrides,
   };
 }
@@ -231,6 +232,7 @@ describe('change planning service', () => {
     expect(result.risk).toBe('low');
     expect(result.primaryEditFiles).toEqual(['src/app/_components/audioSimple/AudioSimple.tsx']);
     expect(result.secondaryEditFiles).toEqual([]);
+    expect(result.uiPlanningHints).toBeUndefined();
     expect(result.summary).toContain('defining file');
     expect(result.orderedPlan).toEqual([
       expect.objectContaining({
@@ -363,6 +365,222 @@ describe('change planning service', () => {
       expect.objectContaining({ type: 'feature-bounded', strength: 'strong' }),
       expect.objectContaining({ type: 'direct-impact' }),
     ]));
+  });
+
+  it('adds UI planning hints for a shared UI primitive without changing edit targets', async () => {
+    analyzeSymbolOwnershipMock.mockResolvedValue(ownershipResult(
+      'components/common/react-select.tsx',
+      'ReactSelectSingle',
+      'variable',
+      {
+        ownership: 'shared-internal',
+        apiBoundary: 'shared-boundary',
+        confidence: 'high',
+        signals: [
+          { type: 'export-surface', strength: 'moderate', note: 'exported from defining file' },
+          { type: 'repo-wide-usage', strength: 'strong', note: 'broad repository usage' },
+          { type: 'ui-parent-reuse', strength: 'strong', note: 'rendered by many parent components' },
+          { type: 'ui-page-presence', strength: 'strong', note: 'rendered in two page surfaces' },
+        ],
+        summary: 'component reused across 19 parent components and 2 page surfaces without stable entry-surface exposure',
+      },
+    ));
+    analyzeSymbolImpactMock.mockResolvedValue(impactResult(
+      'components/common/react-select.tsx',
+      'ReactSelectSingle',
+      'variable',
+      {
+        directlyImpactedFiles: [
+          directFile('components/profile/form.tsx'),
+          directFile('components/project/settings/form.tsx'),
+        ],
+        transitiveImpacts: [transitiveFile('pages/project/[id]/index.tsx')],
+        uiImpact: {
+          parentComponents: [
+            {
+              componentName: 'ProfileForm',
+              filePath: 'components/profile/form.tsx',
+              symbolId: 'profile-form',
+              resolved: true,
+            },
+            {
+              componentName: 'SettingsForm',
+              filePath: 'components/project/settings/form.tsx',
+              symbolId: 'settings-form',
+              resolved: true,
+            },
+          ],
+          parentPages: [
+            {
+              componentName: 'TranslationPage',
+              filePath: 'pages/project/[id]/index.tsx',
+              symbolId: 'translation-page',
+              resolved: true,
+            },
+          ],
+          observedPropUsage: [
+            { propName: 'options', count: 10 },
+            { propName: 'defaultValue', count: 9 },
+            { propName: 'onChange', count: 9 },
+          ],
+          confidence: 'medium',
+        },
+        summary: {
+          directFileCount: 2,
+          directSymbolCount: 0,
+          transitiveFileCount: 1,
+          transitiveSymbolCount: 0,
+          highConfidenceImpactCount: 2,
+          mediumConfidenceImpactCount: 1,
+          lowConfidenceImpactCount: 0,
+          symbolDirectImpactCount: 0,
+          fileDirectImpactCount: 2,
+          proxyImpactCount: 1,
+          localSymbolImpactCount: 0,
+          overview: '',
+          ambiguityDetected: false,
+          notes: [],
+        },
+      },
+    ));
+
+    const result = await planSymbolChange({ symbolId: 'react-select-single' });
+
+    expect(result.scope).toBe('broad-shared');
+    expect(result.risk).toBe('high');
+    expect(result.primaryEditFiles).toEqual(['components/common/react-select.tsx']);
+    expect(result.secondaryEditFiles).toEqual([]);
+    expect(result.reviewFiles).toEqual([
+      'pages/project/[id]/index.tsx',
+      'components/profile/form.tsx',
+      'components/project/settings/form.tsx',
+    ]);
+    expect(result.uiPlanningHints).toEqual({
+      renderingComponents: [
+        {
+          componentName: 'ProfileForm',
+          filePath: 'components/profile/form.tsx',
+          symbolId: 'profile-form',
+          resolved: true,
+        },
+        {
+          componentName: 'SettingsForm',
+          filePath: 'components/project/settings/form.tsx',
+          symbolId: 'settings-form',
+          resolved: true,
+        },
+      ],
+      renderingPages: [
+        {
+          componentName: 'TranslationPage',
+          filePath: 'pages/project/[id]/index.tsx',
+          symbolId: 'translation-page',
+          resolved: true,
+        },
+      ],
+      observedPropSurface: [
+        { propName: 'options', count: 10 },
+        { propName: 'defaultValue', count: 9 },
+        { propName: 'onChange', count: 9 },
+      ],
+      confidence: 'medium',
+    });
+  });
+
+  it('adds UI planning hints for a feature-local UI component while keeping the plan bounded', async () => {
+    analyzeSymbolOwnershipMock.mockResolvedValue(ownershipResult(
+      'app/contracts/components/ContractStatsScoreDistributionChart.tsx',
+      'ContractStatsScoreDistributionChart',
+      'function',
+      {
+        ownership: 'feature-internal',
+        apiBoundary: 'feature-boundary',
+        confidence: 'medium',
+        signals: [
+          { type: 'export-surface', strength: 'moderate', note: 'exported from defining file' },
+          { type: 'feature-local-usage', strength: 'strong', note: 'bounded to one feature' },
+          { type: 'ui-page-presence', strength: 'moderate', note: 'rendered in a single page surface' },
+        ],
+        summary: 'component used within one feature area',
+      },
+    ));
+    analyzeSymbolImpactMock.mockResolvedValue(impactResult(
+      'app/contracts/components/ContractStatsScoreDistributionChart.tsx',
+      'ContractStatsScoreDistributionChart',
+      'function',
+      {
+        directlyImpactedFiles: [
+          directFile('app/contracts/[contractId]/ContractDetailPage.tsx'),
+        ],
+        uiImpact: {
+          parentComponents: [
+            {
+              componentName: 'ContractDetailPage',
+              filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
+              symbolId: 'contract-detail-page',
+              resolved: true,
+            },
+          ],
+          parentPages: [
+            {
+              componentName: 'Page',
+              filePath: 'app/contracts/[contractId]/page.tsx',
+              symbolId: 'contracts-page',
+              resolved: true,
+            },
+          ],
+          observedPropUsage: [
+            { propName: 'contractId', count: 1 },
+          ],
+          confidence: 'medium',
+        },
+        summary: {
+          directFileCount: 1,
+          directSymbolCount: 0,
+          transitiveFileCount: 0,
+          transitiveSymbolCount: 0,
+          highConfidenceImpactCount: 1,
+          mediumConfidenceImpactCount: 0,
+          lowConfidenceImpactCount: 0,
+          symbolDirectImpactCount: 0,
+          fileDirectImpactCount: 1,
+          proxyImpactCount: 0,
+          localSymbolImpactCount: 0,
+          overview: '',
+          ambiguityDetected: false,
+          notes: [],
+        },
+      },
+    ));
+
+    const result = await planSymbolChange({ symbolId: 'contract-chart' });
+
+    expect(result.scope).toBe('feature-bounded');
+    expect(result.risk).toBe('low');
+    expect(result.primaryEditFiles).toEqual(['app/contracts/components/ContractStatsScoreDistributionChart.tsx']);
+    expect(result.secondaryEditFiles).toEqual(['app/contracts/[contractId]/ContractDetailPage.tsx']);
+    expect(result.uiPlanningHints).toEqual({
+      renderingComponents: [
+        {
+          componentName: 'ContractDetailPage',
+          filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
+          symbolId: 'contract-detail-page',
+          resolved: true,
+        },
+      ],
+      renderingPages: [
+        {
+          componentName: 'Page',
+          filePath: 'app/contracts/[contractId]/page.tsx',
+          symbolId: 'contracts-page',
+          resolved: true,
+        },
+      ],
+      observedPropSurface: [
+        { propName: 'contractId', count: 1 },
+      ],
+      confidence: 'medium',
+    });
   });
 
   it('classifies a barrel-exported shared component as shared-surface and prioritizes the barrel file', async () => {

@@ -197,6 +197,8 @@ Change planning is used to answer:
 
 Recent refinement work improved edit vs review separation and plan precision for local helpers and framework entry surfaces while keeping the same ownership-aware planning architecture.
 
+Change planning now also exposes additive UI-aware review hints for JSX and TSX components. When existing UI hierarchy data is available, the plan can include rendering components, page-like UI review surfaces, and observed prop-surface hints as contextual review guidance. These hints do not automatically expand edit targets or override graph-based planning signals.
+
 ### MCP Tool Layer
 
 The MCP tool layer is the public interface exposed over stdio.

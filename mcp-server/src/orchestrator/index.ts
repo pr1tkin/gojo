@@ -30,6 +30,9 @@ export type {
   ChangeScope,
   PlannedFileRole,
   SymbolChangePlanResult,
+  UiPlanningComponentRef,
+  UiPlanningHints,
+  UiPlanningPropHint,
 } from './change-planning-types.js';
 export type {
   AnalyzeSymbolImpactInput,

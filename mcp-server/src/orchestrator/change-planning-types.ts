@@ -60,6 +60,25 @@ export interface ChangePlanStep {
   confidence: 'high' | 'medium' | 'low';
 }
 
+export interface UiPlanningComponentRef {
+  componentName: string;
+  filePath?: string;
+  symbolId?: string;
+  resolved: boolean;
+}
+
+export interface UiPlanningPropHint {
+  propName: string;
+  count: number;
+}
+
+export interface UiPlanningHints {
+  renderingComponents: UiPlanningComponentRef[];
+  renderingPages: UiPlanningComponentRef[];
+  observedPropSurface: UiPlanningPropHint[];
+  confidence: 'low' | 'medium';
+}
+
 export interface SymbolChangePlanResult {
   target: {
     filePath: string;
@@ -75,5 +94,6 @@ export interface SymbolChangePlanResult {
   secondaryEditFiles: string[];
   reviewFiles: string[];
   orderedPlan: ChangePlanStep[];
+  uiPlanningHints?: UiPlanningHints;
   notes?: string[];
 }

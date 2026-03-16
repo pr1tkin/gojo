@@ -24,6 +24,7 @@ import type {
   ChangeScope,
   PlannedFileRole,
   SymbolChangePlanResult,
+  UiPlanningHints,
 } from './change-planning-types.js';
 
 type UsageKind =
@@ -852,6 +853,29 @@ function collectNotes(ownership: SymbolOwnershipResult, impact: ImpactAnalysisRe
   return notes;
 }
 
+function buildUiPlanningHints(impact: ImpactAnalysisResult): UiPlanningHints | undefined {
+  const uiImpact = impact.uiImpact;
+
+  if (!uiImpact) {
+    return undefined;
+  }
+
+  if (
+    uiImpact.parentComponents.length === 0 &&
+    uiImpact.parentPages.length === 0 &&
+    uiImpact.observedPropUsage.length === 0
+  ) {
+    return undefined;
+  }
+
+  return {
+    renderingComponents: uiImpact.parentComponents,
+    renderingPages: uiImpact.parentPages,
+    observedPropSurface: uiImpact.observedPropUsage,
+    confidence: uiImpact.confidence,
+  };
+}
+
 function buildMissingResult(input: AnalyzeSymbolChangePlanInput): SymbolChangePlanResult {
   return {
     target: {
@@ -902,6 +926,7 @@ export async function planSymbolChange(input: AnalyzeSymbolChangePlanInput): Pro
   const risk = classifyRisk(scope, ownership, impact, signals);
   const orderedPlan = await toOrderedPlan(filePath, impact, scope, facts);
   const fileLists = classifyLists(orderedPlan);
+  const uiPlanningHints = buildUiPlanningHints(impact);
   const notes = collectNotes(ownership, impact, scope);
 
   return {
@@ -919,6 +944,7 @@ export async function planSymbolChange(input: AnalyzeSymbolChangePlanInput): Pro
     secondaryEditFiles: fileLists.secondaryEditFiles,
     reviewFiles: fileLists.reviewFiles,
     orderedPlan,
+    ...(uiPlanningHints ? { uiPlanningHints } : {}),
     notes: notes.length > 0 ? notes : undefined,
   };
 }
