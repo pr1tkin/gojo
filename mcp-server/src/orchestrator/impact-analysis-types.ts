@@ -128,12 +128,41 @@ export interface ImpactAnalysisSummary {
   notes: string[];
 }
 
+export type ImpactSummarySurfaceCategory = 'page' | 'route' | 'layout' | 'feature-entry';
+
+export interface ImpactSummarySurface {
+  fileId?: string;
+  filePath: string;
+  category: ImpactSummarySurfaceCategory;
+}
+
+export interface ImpactSummaryTransitiveGroup {
+  viaFileId?: string;
+  viaFilePath: string;
+  depth: number;
+  fileCount: number;
+  surfaces: ImpactSummarySurface[];
+  featureClusters: string[];
+}
+
+export interface ImpactResultSummary {
+  directFiles: number;
+  directSymbols: number;
+  transitiveFiles: number;
+  transitiveSymbols: number;
+  viaGroups: number;
+  highlightedSurfaces: ImpactSummarySurface[];
+  featureClusters: string[];
+  transitiveGroups: ImpactSummaryTransitiveGroup[];
+}
+
 export interface ImpactAnalysisResult {
   mode: ImpactAnalysisMode;
   target: ImpactAnalysisTarget;
   directlyImpactedSymbols: ImpactedSymbol[];
   directlyImpactedFiles: ImpactedFile[];
   transitiveImpacts: TransitiveImpact[];
+  impactSummary: ImpactResultSummary;
   publicSurfaceRisk?: {
     level: PublicSurfaceRisk;
     notes: string[];

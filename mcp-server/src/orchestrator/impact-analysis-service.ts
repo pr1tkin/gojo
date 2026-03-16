@@ -17,10 +17,14 @@ import type {
   ImpactAnalysisTarget,
   ImpactConfidence,
   ImpactEvidence,
+  ImpactResultSummary,
   ImpactScope,
   ImpactReason,
   ImpactedFile,
   ImpactedSymbol,
+  ImpactSummarySurface,
+  ImpactSummarySurfaceCategory,
+  ImpactSummaryTransitiveGroup,
   TransitiveImpact,
 } from './impact-analysis-types.js';
 
@@ -179,6 +183,93 @@ function architectureSurfaceWeight(filePath: string): number {
   return 1;
 }
 
+function getImpactSummarySurfaceCategory(filePath: string): ImpactSummarySurfaceCategory | null {
+  const normalized = normalizePath(filePath);
+
+  if (/(^|\/)page\.(tsx?|jsx?)$/i.test(normalized) || /^pages\/.+\.(tsx?|jsx?)$/i.test(normalized)) {
+    return 'page';
+  }
+
+  if (/(^|\/)route\.(tsx?|jsx?)$/i.test(normalized)) {
+    return 'route';
+  }
+
+  if (/(^|\/)layout\.(tsx?|jsx?)$/i.test(normalized)) {
+    return 'layout';
+  }
+
+  if (
+    /^app\/[^/]+\/[^/]+\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^src\/app\/[^/]+\/[^/]+\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^pages\/[^/]+\/[^/]+\.(tsx?|jsx?)$/i.test(normalized)
+  ) {
+    return 'feature-entry';
+  }
+
+  return null;
+}
+
+function toImpactSummarySurface(fileId: string | undefined, filePath: string): ImpactSummarySurface | null {
+  const category = getImpactSummarySurfaceCategory(filePath);
+
+  if (!category) {
+    return null;
+  }
+
+  return {
+    fileId,
+    filePath,
+    category,
+  };
+}
+
+function compareImpactSummarySurfaces(left: ImpactSummarySurface, right: ImpactSummarySurface): number {
+  return (
+    architectureSurfaceWeight(right.filePath) - architectureSurfaceWeight(left.filePath) ||
+    pathSegmentCount(left.filePath) - pathSegmentCount(right.filePath) ||
+    left.filePath.localeCompare(right.filePath)
+  );
+}
+
+function detectFeatureCluster(filePath: string): string | null {
+  const normalized = normalizePath(filePath);
+
+  const patterns = [
+    /^pages\/admin\//i,
+    /^pages\/project\//i,
+    /^pages\/api\/[^/]+\//i,
+    /^app\/settings\//i,
+    /^components\/project\//i,
+    /^components\/common\//i,
+    /^components\/bucket\//i,
+    /^components\/translation\//i,
+    /^src\/app\/articles\//i,
+    /^src\/app\/audio\//i,
+    /^src\/app\/_components\/button\//i,
+    /^src\/app\/_components\/metadata\//i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+
+    if (match) {
+      return match[0].replace(/\/$/, '/*');
+    }
+  }
+
+  const segments = normalized.split('/').filter((segment) => segment.length > 0);
+
+  if (segments.length >= 2) {
+    return `${segments[0]}/${segments[1]}/*`;
+  }
+
+  if (segments.length === 1) {
+    return `${segments[0]}/*`;
+  }
+
+  return null;
+}
+
 function compareDirectImpactFileSeeds(left: DirectImpactFileSeed, right: DirectImpactFileSeed): number {
   return (
     scopeWeight(right.impactScope) - scopeWeight(left.impactScope) ||
@@ -247,6 +338,16 @@ function buildMissingResult(input: AnalyzeSymbolImpactInput, notes: string[]): I
     directlyImpactedSymbols: [],
     directlyImpactedFiles: [],
     transitiveImpacts: [],
+    impactSummary: {
+      directFiles: 0,
+      directSymbols: 0,
+      transitiveFiles: 0,
+      transitiveSymbols: 0,
+      viaGroups: 0,
+      highlightedSurfaces: [],
+      featureClusters: [],
+      transitiveGroups: [],
+    },
     publicSurfaceRisk: {
       level: 'unknown',
       notes: ['public surface risk is not derived in phase 5.1 step B'],
@@ -267,6 +368,110 @@ function buildMissingResult(input: AnalyzeSymbolImpactInput, notes: string[]): I
       ambiguityDetected: false,
       notes,
     },
+  };
+}
+
+function buildImpactResultSummary(
+  directFiles: ImpactedFile[],
+  directSymbols: ImpactedSymbol[],
+  transitiveImpacts: TransitiveImpact[],
+): ImpactResultSummary {
+  const allFiles = [
+    ...directFiles.map((entry) => ({ fileId: entry.fileId, filePath: entry.filePath })),
+    ...transitiveImpacts
+      .map((entry) => entry.file)
+      .filter((entry): entry is ImpactedFile => Boolean(entry))
+      .map((entry) => ({ fileId: entry.fileId, filePath: entry.filePath })),
+  ];
+  const highlightedSurfaces = new Map<string, ImpactSummarySurface>();
+  const featureClusters = new Map<string, number>();
+  const transitiveGroups = new Map<string, ImpactSummaryTransitiveGroup>();
+
+  for (const entry of allFiles) {
+    const surface = toImpactSummarySurface(entry.fileId, entry.filePath);
+
+    if (surface && !highlightedSurfaces.has(surface.filePath)) {
+      highlightedSurfaces.set(surface.filePath, surface);
+    }
+
+    const cluster = detectFeatureCluster(entry.filePath);
+
+    if (cluster) {
+      featureClusters.set(cluster, (featureClusters.get(cluster) ?? 0) + 1);
+    }
+  }
+
+  for (const impact of transitiveImpacts) {
+    const file = impact.file;
+    const topEvidence = getTopEvidence(impact);
+    const viaStep = topEvidence?.via?.[0];
+
+    if (!file || !viaStep) {
+      continue;
+    }
+
+    const key = viaStep.fileId ?? viaStep.filePath;
+    const existing = transitiveGroups.get(key);
+    const surface = toImpactSummarySurface(file.fileId, file.filePath);
+    const cluster = detectFeatureCluster(file.filePath);
+
+    if (!existing) {
+      transitiveGroups.set(key, {
+        viaFileId: viaStep.fileId,
+        viaFilePath: viaStep.filePath,
+        depth: impact.depth,
+        fileCount: 1,
+        surfaces: surface ? [surface] : [],
+        featureClusters: cluster ? [cluster] : [],
+      });
+      continue;
+    }
+
+    existing.fileCount += 1;
+
+    if (surface && !existing.surfaces.some((entry) => entry.filePath === surface.filePath)) {
+      existing.surfaces.push(surface);
+    }
+
+    if (cluster && !existing.featureClusters.includes(cluster)) {
+      existing.featureClusters.push(cluster);
+    }
+  }
+
+  const totalFiles = directFiles.length + transitiveImpacts.filter((entry) => entry.file).length;
+  const minimalSummary = totalFiles < 10;
+
+  return {
+    directFiles: directFiles.length,
+    directSymbols: directSymbols.length,
+    transitiveFiles: transitiveImpacts.filter((entry) => entry.file).length,
+    transitiveSymbols: transitiveImpacts.filter((entry) => entry.symbol).length,
+    viaGroups: transitiveGroups.size,
+    highlightedSurfaces: Array.from(highlightedSurfaces.values())
+      .sort(compareImpactSummarySurfaces)
+      .slice(0, minimalSummary ? 3 : 8),
+    featureClusters: minimalSummary
+      ? []
+      : Array.from(featureClusters.entries())
+          .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+          .map(([cluster]) => cluster)
+          .slice(0, 6),
+    transitiveGroups: minimalSummary
+      ? []
+      : Array.from(transitiveGroups.values())
+          .map((group) => ({
+            ...group,
+            surfaces: [...group.surfaces].sort(compareImpactSummarySurfaces).slice(0, 4),
+            featureClusters: [...group.featureClusters].sort((left, right) => left.localeCompare(right)).slice(0, 4),
+          }))
+          .sort((left, right) => {
+            return (
+              right.fileCount - left.fileCount ||
+              architectureSurfaceWeight((right.surfaces[0]?.filePath ?? '')) -
+                architectureSurfaceWeight((left.surfaces[0]?.filePath ?? '')) ||
+              left.viaFilePath.localeCompare(right.viaFilePath)
+            );
+          }),
   };
 }
 
@@ -994,6 +1199,7 @@ export async function analyzeSymbolImpact(input: AnalyzeSymbolImpactInput): Prom
     directlyImpactedSymbols,
     directlyImpactedFiles,
     transitiveImpacts,
+    impactSummary: buildImpactResultSummary(directlyImpactedFiles, directlyImpactedSymbols, transitiveImpacts),
     publicSurfaceRisk: {
       level: 'unknown',
       notes: ['public surface risk is not derived in phase 5.1 step B'],

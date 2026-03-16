@@ -136,6 +136,8 @@ Current internal services include:
 
 These services compose the underlying layers rather than reimplementing them.
 
+The internal impact-analysis service now also adds result summarization for large blast-radius cases. This summary is derived from the existing direct and transitive impact sets and does not change impact detection or traversal depth.
+
 ### MCP Tool Layer
 
 The MCP tool layer is the public interface exposed over stdio.
