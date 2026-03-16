@@ -10,6 +10,10 @@ import { getFileRelation, getFileRelationById } from '../symbol-index/query.js';
 import { loadRequiredSymbolIndex } from '../symbol-index/store.js';
 import type { ExportRecord, ImportBinding, IndexedSymbol } from '../symbol-index/types.js';
 import { loadConfig } from '../config.js';
+import {
+  getObservedPropNamesForComponent,
+  getUiParentsForComponent,
+} from './ui-hierarchy-service.js';
 import type {
   AnalyzeSymbolImpactInput,
   ImpactAnalysisResult,
@@ -26,6 +30,8 @@ import type {
   ImpactSummarySurfaceCategory,
   ImpactSummaryTransitiveGroup,
   TransitiveImpact,
+  UiImpactComponentRef,
+  UiImpactSummary,
 } from './impact-analysis-types.js';
 
 const DEFAULT_SAFE_MAX_DEPTH = 1;
@@ -368,6 +374,120 @@ function buildMissingResult(input: AnalyzeSymbolImpactInput, notes: string[]): I
       ambiguityDetected: false,
       notes,
     },
+  };
+}
+
+function isUiPageLikeFile(filePath: string | undefined): boolean {
+  if (!filePath) {
+    return false;
+  }
+
+  const normalized = normalizePath(filePath);
+
+  return (
+    /(^|\/)page\.(tsx?|jsx?)$/i.test(normalized) ||
+    /(^|\/)layout\.(tsx?|jsx?)$/i.test(normalized) ||
+    /(^|\/)route\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^pages\/.+\.(tsx?|jsx?)$/i.test(normalized)
+  );
+}
+
+function dedupeUiImpactRefs(entries: UiImpactComponentRef[]): UiImpactComponentRef[] {
+  const seen = new Set<string>();
+  const deduped: UiImpactComponentRef[] = [];
+
+  for (const entry of entries) {
+    const key = `${entry.componentName}|${entry.filePath ?? ''}|${entry.symbolId ?? ''}`;
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(entry);
+  }
+
+  return deduped.sort((left, right) => compareFiles(
+    { repoId: undefined, filePath: left.filePath ?? left.componentName },
+    { repoId: undefined, filePath: right.filePath ?? right.componentName },
+  ) || left.componentName.localeCompare(right.componentName));
+}
+
+async function buildUiImpactSummary(target: ImpactAnalysisTarget): Promise<UiImpactSummary | undefined> {
+  if (!target.symbol || !target.file || !target.symbolName) {
+    return undefined;
+  }
+
+  const targetInput = {
+    filePath: target.symbol.filePath,
+    symbolId: target.symbol.symbolId,
+    symbolName: target.symbol.name,
+  };
+  const directParents = await getUiParentsForComponent(targetInput);
+
+  if (directParents.length === 0) {
+    const observedPropUsage = await getObservedPropNamesForComponent(targetInput);
+
+    if (observedPropUsage.length === 0) {
+      return undefined;
+    }
+
+    return {
+      parentComponents: [],
+      parentPages: [],
+      observedPropUsage,
+      confidence: 'low',
+    };
+  }
+
+  const parentPages: UiImpactComponentRef[] = [];
+  const parentComponents: UiImpactComponentRef[] = [];
+
+  for (const parent of directParents) {
+    if (isUiPageLikeFile(parent.filePath)) {
+      parentPages.push(parent);
+      continue;
+    }
+
+    parentComponents.push(parent);
+  }
+
+  for (const parent of parentComponents) {
+    if (!parent.filePath) {
+      continue;
+    }
+
+    const upstreamParents = await getUiParentsForComponent({
+      filePath: parent.filePath,
+      symbolId: parent.symbolId,
+      symbolName: parent.componentName,
+    });
+
+    for (const upstreamParent of upstreamParents) {
+      if (isUiPageLikeFile(upstreamParent.filePath)) {
+        parentPages.push(upstreamParent);
+      }
+    }
+  }
+
+  const observedPropUsage = await getObservedPropNamesForComponent(targetInput);
+  const dedupedParentComponents = dedupeUiImpactRefs(parentComponents);
+  const dedupedParentPages = dedupeUiImpactRefs(parentPages);
+
+  if (
+    dedupedParentComponents.length === 0 &&
+    dedupedParentPages.length === 0 &&
+    observedPropUsage.length === 0
+  ) {
+    return undefined;
+  }
+
+  return {
+    parentComponents: dedupedParentComponents,
+    parentPages: dedupedParentPages,
+    observedPropUsage,
+    confidence:
+      dedupedParentComponents.length > 0 || dedupedParentPages.length > 0 ? 'medium' : 'low',
   };
 }
 
@@ -1193,6 +1313,12 @@ export async function analyzeSymbolImpact(input: AnalyzeSymbolImpactInput): Prom
     notes.push('same-file symbol impacts are based on exact symbol-name matches inside sibling symbol spans and should be treated as local proxy evidence');
   }
 
+  const uiImpact = await buildUiImpactSummary(target);
+
+  if (uiImpact) {
+    notes.push('ui impact signals are supplementary JSX hierarchy hints derived from component composition and observed prop usage; they do not change graph-based impact ranking');
+  }
+
   return {
     mode: input.mode,
     target,
@@ -1200,6 +1326,7 @@ export async function analyzeSymbolImpact(input: AnalyzeSymbolImpactInput): Prom
     directlyImpactedFiles,
     transitiveImpacts,
     impactSummary: buildImpactResultSummary(directlyImpactedFiles, directlyImpactedSymbols, transitiveImpacts),
+    ...(uiImpact ? { uiImpact } : {}),
     publicSurfaceRisk: {
       level: 'unknown',
       notes: ['public surface risk is not derived in phase 5.1 step B'],

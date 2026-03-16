@@ -164,6 +164,8 @@ These services compose the underlying layers rather than reimplementing them.
 
 The internal impact-analysis service now also adds result summarization for large blast-radius cases. This summary is derived from the existing direct and transitive impact sets and does not change impact detection or traversal depth.
 
+Impact analysis also supports supplementary UI-aware impact hints derived from the Phase 4.5 UI hierarchy datasets. These hints can surface components or page-like parents that render a target and commonly observed prop names for that target. They remain a separate impact category below graph-derived dependency evidence and do not claim full UI dependency analysis.
+
 Impact analysis is used to answer:
 
 - which files or symbols are directly connected to a change

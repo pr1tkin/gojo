@@ -11,6 +11,8 @@ const {
   loadConfigMock,
   getRepositoryByIdMock,
   readRepositoryFileMock,
+  getObservedPropNamesForComponentMock,
+  getUiParentsForComponentMock,
 } = vi.hoisted(() => ({
   getDefinedSymbolsMock: vi.fn(),
   getFileNodeMock: vi.fn(),
@@ -22,6 +24,8 @@ const {
   loadConfigMock: vi.fn(),
   getRepositoryByIdMock: vi.fn(),
   readRepositoryFileMock: vi.fn(),
+  getObservedPropNamesForComponentMock: vi.fn(),
+  getUiParentsForComponentMock: vi.fn(),
 }));
 
 vi.mock('../../src/graph/query.js', () => ({
@@ -50,6 +54,11 @@ vi.mock('../../src/repositories.js', () => ({
 
 vi.mock('../../src/files.js', () => ({
   readRepositoryFile: readRepositoryFileMock,
+}));
+
+vi.mock('../../src/orchestrator/ui-hierarchy-service.js', () => ({
+  getObservedPropNamesForComponent: getObservedPropNamesForComponentMock,
+  getUiParentsForComponent: getUiParentsForComponentMock,
 }));
 
 import { analyzeSymbolImpact } from '../../src/orchestrator/impact-analysis-service.js';
@@ -423,6 +432,8 @@ describe('impact analysis service', () => {
 
       throw new Error(`unexpected file: ${filePath}`);
     });
+    getObservedPropNamesForComponentMock.mockResolvedValue([]);
+    getUiParentsForComponentMock.mockResolvedValue([]);
   });
 
   it('resolves the target by symbolId and collects direct impacts', async () => {
@@ -1490,6 +1501,109 @@ describe('impact analysis service', () => {
       impactScope: 'symbol-direct',
       confidence: 'high',
     }));
+  });
+
+  it('adds supplementary UI impact signals for components with clear UI parents and observed props', async () => {
+    getObservedPropNamesForComponentMock.mockResolvedValue([
+      { propName: 'variant', count: 3 },
+      { propName: 'disabled', count: 1 },
+    ]);
+    getUiParentsForComponentMock
+      .mockResolvedValueOnce([
+        {
+          componentName: 'AudioHero',
+          filePath: 'src/components/AudioHero.tsx',
+          symbolId: 'repo-a:src/components/AudioHero.tsx:function:AudioHero:1',
+          resolved: true,
+        },
+        {
+          componentName: 'PodcastPage',
+          filePath: 'src/app/podcast/page.tsx',
+          symbolId: 'repo-a:src/app/podcast/page.tsx:function:PodcastPage:1',
+          resolved: true,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          componentName: 'HomepageHeroSection',
+          filePath: 'src/app/page.tsx',
+          symbolId: 'repo-a:src/app/page.tsx:function:HomepageHeroSection:1',
+          resolved: true,
+        },
+      ]);
+
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'safe',
+    });
+
+    expect(result.uiImpact).toEqual({
+      parentComponents: [
+        {
+          componentName: 'AudioHero',
+          filePath: 'src/components/AudioHero.tsx',
+          symbolId: 'repo-a:src/components/AudioHero.tsx:function:AudioHero:1',
+          resolved: true,
+        },
+      ],
+      parentPages: [
+        {
+          componentName: 'HomepageHeroSection',
+          filePath: 'src/app/page.tsx',
+          symbolId: 'repo-a:src/app/page.tsx:function:HomepageHeroSection:1',
+          resolved: true,
+        },
+        {
+          componentName: 'PodcastPage',
+          filePath: 'src/app/podcast/page.tsx',
+          symbolId: 'repo-a:src/app/podcast/page.tsx:function:PodcastPage:1',
+          resolved: true,
+        },
+      ],
+      observedPropUsage: [
+        { propName: 'variant', count: 3 },
+        { propName: 'disabled', count: 1 },
+      ],
+      confidence: 'medium',
+    });
+    expect(result.directlyImpactedFiles.map((entry) => entry.filePath)).toEqual([
+      consumerFile.filePath,
+      barrelFile.filePath,
+    ]);
+    expect(result.summary.notes).toContain(
+      'ui impact signals are supplementary JSX hierarchy hints derived from component composition and observed prop usage; they do not change graph-based impact ranking',
+    );
+  });
+
+  it('adds low-confidence UI impact when only observed prop usage exists without UI parents', async () => {
+    getObservedPropNamesForComponentMock.mockResolvedValue([
+      { propName: 'title', count: 2 },
+    ]);
+    getUiParentsForComponentMock.mockResolvedValue([]);
+
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'safe',
+    });
+
+    expect(result.uiImpact).toEqual({
+      parentComponents: [],
+      parentPages: [],
+      observedPropUsage: [{ propName: 'title', count: 2 }],
+      confidence: 'low',
+    });
+  });
+
+  it('omits UI impact when no UI hierarchy signals are available', async () => {
+    getObservedPropNamesForComponentMock.mockResolvedValue([]);
+    getUiParentsForComponentMock.mockResolvedValue([]);
+
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'safe',
+    });
+
+    expect(result).not.toHaveProperty('uiImpact');
   });
 
   it('marks exploratory mode as bounded transitive expansion with explicit limitations', async () => {

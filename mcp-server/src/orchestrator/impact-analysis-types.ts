@@ -156,6 +156,25 @@ export interface ImpactResultSummary {
   transitiveGroups: ImpactSummaryTransitiveGroup[];
 }
 
+export interface UiImpactComponentRef {
+  componentName: string;
+  filePath?: string;
+  symbolId?: string;
+  resolved: boolean;
+}
+
+export interface UiImpactPropUsage {
+  propName: string;
+  count: number;
+}
+
+export interface UiImpactSummary {
+  parentComponents: UiImpactComponentRef[];
+  parentPages: UiImpactComponentRef[];
+  observedPropUsage: UiImpactPropUsage[];
+  confidence: Extract<ImpactConfidence, 'low' | 'medium'>;
+}
+
 export interface ImpactAnalysisResult {
   mode: ImpactAnalysisMode;
   target: ImpactAnalysisTarget;
@@ -163,6 +182,7 @@ export interface ImpactAnalysisResult {
   directlyImpactedFiles: ImpactedFile[];
   transitiveImpacts: TransitiveImpact[];
   impactSummary: ImpactResultSummary;
+  uiImpact?: UiImpactSummary;
   publicSurfaceRisk?: {
     level: PublicSurfaceRisk;
     notes: string[];
