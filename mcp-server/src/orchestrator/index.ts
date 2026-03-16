@@ -1,4 +1,5 @@
 export { getFileExplorationContext } from './file-service.js';
+export { analyzeSymbolImpact } from './impact-analysis-service.js';
 export {
   getPatternMatchesForComponent,
   getPatternMatchesForFile,
