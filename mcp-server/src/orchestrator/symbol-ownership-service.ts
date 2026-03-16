@@ -305,8 +305,11 @@ function getUsageSignals(targetFilePath: string, importers: FileNode[]): {
 function calibrateUsageForSymbol(
   symbol: IndexedSymbol | null,
   usage: ReturnType<typeof getUsageSignals>,
+  facts: {
+    exportedFromFile: boolean;
+  },
 ): ReturnType<typeof getUsageSignals> {
-  if (!symbol || symbol.exported) {
+  if (!symbol || symbol.exported || facts.exportedFromFile) {
     return usage;
   }
 
@@ -556,10 +559,29 @@ function classifyOwnership(
   if (
     facts.exportedFromFile &&
     (facts.reexportedThroughBarrel || facts.participatesInEntrySurface) &&
-    (facts.pathBoundary === 'shared' || facts.pathBoundary === 'public' || facts.usageKind === 'cross-feature' || facts.usageKind === 'repo-wide') &&
+    (facts.pathBoundary === 'public' ||
+      facts.usageKind === 'cross-feature' ||
+      facts.usageKind === 'repo-wide' ||
+      ((facts.pathBoundary === 'shared' || facts.participatesInEntrySurface) &&
+        facts.usageKind !== 'none' &&
+        facts.usageKind !== 'local-only')) &&
     !facts.pathHasInternalMarkers
   ) {
     return 'shared-surface';
+  }
+
+  if (
+    facts.exportedFromFile &&
+    facts.reexportedThroughBarrel &&
+    !facts.pathHasInternalMarkers &&
+    (facts.pathBoundary === 'shared' ||
+      facts.pathBoundary === 'public' ||
+      facts.pathBoundary === 'feature' ||
+      facts.usageKind === 'feature-local' ||
+      facts.usageKind === 'cross-feature' ||
+      facts.usageKind === 'repo-wide')
+  ) {
+    return facts.usageKind === 'none' || facts.usageKind === 'local-only' ? 'shared-internal' : 'shared-surface';
   }
 
   if (
@@ -701,7 +723,10 @@ function describeTarget(symbol: IndexedSymbol | null, filePath: string): string 
     return 'provider helper';
   }
 
-  if (/(^|\/)(components?|ui)\//i.test(normalized)) {
+  if (
+    (/(^|\/)_?components?\//i.test(normalized) || /(^|\/)ui\//i.test(normalized)) &&
+    /^[A-Z]/.test(symbol?.name ?? '')
+  ) {
     return 'component';
   }
 
@@ -752,7 +777,11 @@ function buildSummary(
         : `${role} reused across feature areas without stable entry-surface exposure`;
     case 'shared-surface':
       if (facts.reexportedThroughBarrel) {
-        return `${role} exposed through barrel export and used across multiple feature areas`;
+        if (facts.usageKind === 'feature-local' || facts.usageKind === 'cross-feature' || facts.usageKind === 'repo-wide') {
+          return `${role} exposed through barrel export and consumed across multiple downstream files`;
+        }
+
+        return `${role} surfaced through barrel export`;
       }
 
       if (facts.participatesInEntrySurface && (facts.usageKind === 'none' || facts.usageKind === 'local-only' || facts.usageKind === 'feature-local')) {
@@ -794,8 +823,10 @@ export async function analyzeSymbolOwnership(input: AnalyzeSymbolOwnershipInput)
 
   const exportSurface = getExportSurfaceSignals(target.symbol, target.relation, filePath);
   const pathBoundary = getPathSignals(filePath);
-  const usage = calibrateUsageForSymbol(target.symbol, getUsageSignals(filePath, importers));
   const barrel = await getBarrelSignals(target.symbol, target.file, target.relation);
+  const usage = calibrateUsageForSymbol(target.symbol, getUsageSignals(filePath, importers), {
+    exportedFromFile: exportSurface.exportedFromFile,
+  });
   const signals = [
     ...exportSurface.signals,
     ...pathBoundary.signals,

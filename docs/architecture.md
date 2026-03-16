@@ -143,6 +143,8 @@ The internal ownership-analysis service adds heuristic symbol ownership and API-
 
 Recent refinement work improved ownership classification calibration for local helpers, feature-local exports, and framework entry surfaces while keeping the same explainable heuristic signal model.
 
+The latest refinement improves ownership conflict resolution for barrel-exported shared surfaces so reusable symbols exposed through index-style entry files are less likely to collapse to unknown while local helper protection stays intact.
+
 ### MCP Tool Layer
 
 The MCP tool layer is the public interface exposed over stdio.

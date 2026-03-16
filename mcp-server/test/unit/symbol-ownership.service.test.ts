@@ -325,10 +325,142 @@ describe('symbol ownership service', () => {
     expect(result.ownership).toBe('shared-surface');
     expect(result.apiBoundary).toBe('shared-boundary');
     expect(result.confidence).toBe('high');
-    expect(result.summary).toBe('type exposed through barrel export and used across multiple feature areas');
+    expect(result.summary).toBe('type exposed through barrel export and consumed across multiple downstream files');
     expectHeuristicSignals(result);
     expect(result.signals).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'barrel-participation', strength: 'strong' }),
+    ]));
+  });
+
+  it('classifies a barrel-exported shared component with downstream usage as shared-surface', async () => {
+    const symbol = symbolNode(
+      'button',
+      'repo-a:src/app/_components/button/Button.tsx',
+      'repo-a',
+      'src/app/_components/button/Button.tsx',
+      'Button',
+      'function',
+      false,
+    );
+    const relation = {
+      fileId: symbol.fileId,
+      repo: symbol.repo,
+      filePath: symbol.filePath,
+      classification: 'source' as const,
+      symbolIds: [symbol.symbolId],
+      symbolNames: [symbol.name],
+      imports: [],
+      exports: [{
+        fileId: symbol.fileId,
+        kind: 'named' as const,
+        exportedName: 'Button',
+        localName: 'Button',
+        symbolId: symbol.symbolId,
+      }],
+      importTokens: [],
+    };
+    const barrelFile = fileNode('repo-a:src/app/_components/button/index.ts', 'repo-a', 'src/app/_components/button/index.ts');
+    seedTarget(symbol, relation);
+    getImportingFilesMock.mockResolvedValue([
+      fileNode('repo-a:src/features/orders/OrderActions.tsx', 'repo-a', 'src/features/orders/OrderActions.tsx'),
+      fileNode('repo-a:src/features/profile/ProfileForm.tsx', 'repo-a', 'src/features/profile/ProfileForm.tsx'),
+    ]);
+    getReexportingFilesMock.mockResolvedValue([barrelFile]);
+    getFileRelationByIdMock.mockImplementation(async (fileId: string) => {
+      if (fileId === relation.fileId) {
+        return relation;
+      }
+
+      if (fileId === barrelFile.fileId) {
+        return {
+          fileId: barrelFile.fileId,
+          repo: 'repo-a',
+          filePath: barrelFile.filePath,
+          classification: 'source' as const,
+          symbolIds: [],
+          symbolNames: [],
+          imports: [],
+          exports: [{
+            fileId: barrelFile.fileId,
+            kind: 'reexport-named' as const,
+            exportedName: 'Button',
+            localName: 'Button',
+            source: './Button',
+          }],
+          importTokens: [],
+        };
+      }
+
+      return null;
+    });
+
+    const result = await analyzeSymbolOwnership({ symbolId: symbol.symbolId });
+
+    expect(result.ownership).toBe('shared-surface');
+    expect(result.apiBoundary).toBe('shared-boundary');
+    expect(result.confidence).toBe('high');
+    expect(result.summary).toBe('component exposed through barrel export and consumed across multiple downstream files');
+    expectHeuristicSignals(result);
+    expect(result.signals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'export-surface', strength: 'moderate' }),
+      expect.objectContaining({ type: 'barrel-participation', strength: 'strong' }),
+      expect.objectContaining({ type: 'cross-feature-usage', strength: 'moderate' }),
+    ]));
+  });
+
+  it('keeps a barrel-exported symbol with weak downstream usage conservative', async () => {
+    const symbol = symbolNode(
+      'button-label',
+      'repo-a:src/shared/components/Button.tsx',
+      'repo-a',
+      'src/shared/components/Button.tsx',
+      'ButtonLabel',
+      'typeAlias',
+      true,
+    );
+    const relation = fileRelation(symbol.fileId, symbol.repo, symbol.filePath, symbol.symbolId, symbol.name, true);
+    const barrelFile = fileNode('repo-a:src/shared/components/index.ts', 'repo-a', 'src/shared/components/index.ts');
+    seedTarget(symbol, relation);
+    getImportingFilesMock.mockResolvedValue([]);
+    getReexportingFilesMock.mockResolvedValue([barrelFile]);
+    getFileRelationByIdMock.mockImplementation(async (fileId: string) => {
+      if (fileId === relation.fileId) {
+        return relation;
+      }
+
+      if (fileId === barrelFile.fileId) {
+        return {
+          fileId: barrelFile.fileId,
+          repo: 'repo-a',
+          filePath: barrelFile.filePath,
+          classification: 'source' as const,
+          symbolIds: [],
+          symbolNames: [],
+          imports: [],
+          exports: [{
+            fileId: barrelFile.fileId,
+            kind: 'reexport-named' as const,
+            exportedName: 'ButtonLabel',
+            localName: 'ButtonLabel',
+            source: './Button',
+          }],
+          importTokens: [],
+        };
+      }
+
+      return null;
+    });
+
+    const result = await analyzeSymbolOwnership({ symbolId: symbol.symbolId });
+
+    expect(result.ownership).toBe('shared-internal');
+    expect(result.apiBoundary).toBe('shared-boundary');
+    expect(result.confidence).toBe('medium');
+    expect(result.summary).toContain('without stable entry-surface exposure');
+    expectHeuristicSignals(result);
+    expect(result.signals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'barrel-participation', strength: 'strong' }),
+      expect.objectContaining({ type: 'local-only-usage', strength: 'strong' }),
     ]));
   });
 
