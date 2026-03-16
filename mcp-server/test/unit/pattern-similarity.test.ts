@@ -228,6 +228,186 @@ describe('pattern similarity', () => {
     expect(matches[1].similarityScore).toBeLessThan(matches[0].similarityScore);
   });
 
+  it('caps broad-pattern similarity when structural overlap is weak despite shared kind', () => {
+    const pageComponent = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/PageLayout.tsx',
+      symbolId: 'page-layout-symbol',
+      name: 'PageLayout',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 40,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component', 'uses-hooks'],
+        importSet: ['react', './layout.css'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return', 'uses-hooks'],
+      },
+    });
+    const basicCard = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/BasicCard.tsx',
+      symbolId: 'basic-card-symbol',
+      name: 'BasicCard',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 18,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return'],
+        importSet: ['react', './card.css'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+      },
+    });
+
+    const service = createPatternSimilarityService(buildIndex([pageComponent, basicCard]));
+    const score = service.computeSimilarityScore(pageComponent, basicCard);
+
+    expect(score).toBeLessThanOrEqual(0.6);
+  });
+
+  it('uses import overlap to separate stronger same-kind matches', () => {
+    const queryHook = makePattern({
+      kind: 'hook',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/hooks/useCustomersQuery.ts',
+      symbolId: 'customers-query-symbol',
+      name: 'useCustomersQuery',
+      language: 'ts',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'hook',
+        structuralSignals: ['custom-hook', 'uses-hooks'],
+        importSet: ['@tanstack/react-query', '@/lib/types/api'],
+        exportShape: 'named',
+        symbolRole: 'hook',
+        uiSignals: ['uses-hooks'],
+      },
+    });
+    const sameFamily = makePattern({
+      kind: 'hook',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/hooks/useServersQuery.ts',
+      symbolId: 'servers-query-symbol',
+      name: 'useServersQuery',
+      language: 'ts',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'hook',
+        structuralSignals: ['custom-hook', 'uses-hooks'],
+        importSet: ['@tanstack/react-query', '@/lib/types/api'],
+        exportShape: 'named',
+        symbolRole: 'hook',
+        uiSignals: ['uses-hooks'],
+      },
+    });
+    const genericHook = makePattern({
+      kind: 'hook',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/hooks/useIntervalEffect.ts',
+      symbolId: 'interval-effect-symbol',
+      name: 'useIntervalEffect',
+      language: 'ts',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'hook',
+        structuralSignals: ['custom-hook', 'uses-hooks'],
+        importSet: ['react'],
+        exportShape: 'named',
+        symbolRole: 'hook',
+        uiSignals: ['uses-hooks'],
+      },
+    });
+
+    const service = createPatternSimilarityService(buildIndex([queryHook, sameFamily, genericHook]));
+    const sameFamilyScore = service.computeSimilarityScore(queryHook, sameFamily);
+    const genericScore = service.computeSimilarityScore(queryHook, genericHook);
+
+    expect(sameFamilyScore).toBeGreaterThan(genericScore);
+  });
+
+  it('de-emphasizes same-file neighbors and low-representativeness helpers in nearest-neighbor results', () => {
+    const button = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/Button.tsx',
+      symbolId: 'button-symbol',
+      name: 'Button',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component', 'uses-hooks'],
+        importSet: ['react', './button.css'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return', 'uses-hooks'],
+      },
+    });
+    const localButtonBase = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/Button.tsx',
+      symbolId: 'button-base-symbol',
+      name: 'ButtonBase',
+      language: 'tsx',
+      startLine: 22,
+      endLine: 34,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['react', './button.css'],
+        exportShape: 'none',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+      },
+    });
+    const iconButton = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/IconButton.tsx',
+      symbolId: 'icon-button-symbol',
+      name: 'IconButton',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 22,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component', 'uses-hooks'],
+        importSet: ['react', './button.css'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return', 'uses-hooks'],
+      },
+    });
+
+    const service = createPatternSimilarityService(buildIndex([button, localButtonBase, iconButton]));
+    const matches = service.findSimilarPatterns(button.patternId, 3);
+
+    expect(matches[0]).toEqual(
+      expect.objectContaining({
+        patternId: iconButton.patternId,
+        similarityScore: 1,
+      }),
+    );
+    expect(matches[1]).toEqual(
+      expect.objectContaining({
+        patternId: localButtonBase.patternId,
+      }),
+    );
+    expect(matches[1].similarityScore).toBeLessThan(matches[0].similarityScore);
+  });
+
   it('clusters same-kind patterns with shared signals and keeps noisy utility exports isolated', () => {
     const button = makePattern({
       kind: 'component',

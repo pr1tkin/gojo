@@ -264,6 +264,24 @@ The similarity layer also supports nearest-neighbor lookup for a single pattern.
 Phase 7.4 will use this substrate for precedent discovery and pattern-based
 navigation.
 
+### Similarity Refinement
+
+The first refinement pass keeps the same fingerprint schema but tightens how broad
+pattern families are compared.
+
+Current calibration adds:
+
+- stronger gating for high-volume kinds such as `component`, `hook`, and
+  `async-data-flow`
+- more weight on supporting import overlap
+- a small representativeness adjustment that favors exported, richer patterns over
+  minimal local helpers
+- a small same-file penalty for nearest-neighbor ranking so local helpers do not
+  dominate precedent candidates
+
+These adjustments remain deterministic and do not change pattern extraction or the
+stored fingerprint shape.
+
 Pattern similarity and clustering remain internal services. There is no MCP exposure
 yet.
 
