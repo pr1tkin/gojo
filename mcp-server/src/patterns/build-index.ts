@@ -88,31 +88,135 @@ function getNameNode(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
   return node.childForFieldName('name');
 }
 
-function getFunctionLikeValueNode(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
-  if (node.type === 'variable_declarator') {
-    const valueNode = node.childForFieldName('value');
+function getCallExpressionCalleeName(node: Parser.SyntaxNode, source: string): string | null {
+  if (node.type !== 'call_expression') {
+    return null;
+  }
 
-    if (
-      valueNode &&
-      (valueNode.type === 'arrow_function' ||
-        valueNode.type === 'function' ||
-        valueNode.type === 'function_expression')
-    ) {
-      return valueNode;
+  const functionNode = node.childForFieldName('function') ?? node.namedChildren[0];
+
+  if (!functionNode) {
+    return null;
+  }
+
+  const text = getNodeText(functionNode, source).trim();
+  const match = text.match(/([A-Za-z0-9_$]+)$/);
+  return match ? match[1] : text;
+}
+
+function getCallExpressionArguments(node: Parser.SyntaxNode): Parser.SyntaxNode[] {
+  const argumentsNode = node.childForFieldName('arguments');
+
+  if (!argumentsNode) {
+    return node.namedChildren.slice(1);
+  }
+
+  return argumentsNode.namedChildren;
+}
+
+function unwrapFunctionLikeExpression(
+  node: Parser.SyntaxNode | null,
+  source: string,
+  options: {
+    wrapperNames?: string[];
+    searchAnyCallArgument?: boolean;
+  } = {},
+): Parser.SyntaxNode | null {
+  if (!node) {
+    return null;
+  }
+
+  if (
+    node.type === 'arrow_function' ||
+    node.type === 'function' ||
+    node.type === 'function_expression' ||
+    node.type === 'function_declaration' ||
+    node.type === 'method_definition'
+  ) {
+    return node;
+  }
+
+  if (
+    node.type === 'parenthesized_expression' ||
+    node.type === 'type_assertion' ||
+    node.type === 'as_expression' ||
+    node.type === 'satisfies_expression'
+  ) {
+    for (const child of node.namedChildren) {
+      const unwrapped = unwrapFunctionLikeExpression(child, source, options);
+
+      if (unwrapped) {
+        return unwrapped;
+      }
     }
 
     return null;
   }
 
-  if (node.type === 'function_declaration' || node.type === 'method_definition') {
-    return node;
+  if (node.type !== 'call_expression') {
+    return null;
+  }
+
+  const calleeName = getCallExpressionCalleeName(node, source);
+  const argumentsNodes = getCallExpressionArguments(node);
+  const canUseWrapper = options.wrapperNames?.includes(calleeName ?? '') ?? false;
+
+  if (canUseWrapper) {
+    for (const argumentNode of argumentsNodes) {
+      const unwrapped = unwrapFunctionLikeExpression(argumentNode, source, options);
+
+      if (unwrapped) {
+        return unwrapped;
+      }
+    }
+  }
+
+  if (options.searchAnyCallArgument) {
+    for (const argumentNode of argumentsNodes) {
+      const unwrapped = unwrapFunctionLikeExpression(argumentNode, source, {
+        ...options,
+        searchAnyCallArgument: true,
+      });
+
+      if (unwrapped) {
+        return unwrapped;
+      }
+    }
   }
 
   return null;
 }
 
+function getFunctionLikeValueNode(node: Parser.SyntaxNode, source: string): Parser.SyntaxNode | null {
+  if (node.type === 'variable_declarator') {
+    const valueNode = node.childForFieldName('value');
+    return unwrapFunctionLikeExpression(valueNode, source, {
+      wrapperNames: ['forwardRef', 'memo'],
+    });
+  }
+
+  return unwrapFunctionLikeExpression(node, source, {
+    wrapperNames: ['forwardRef', 'memo'],
+  });
+}
+
+function getHandlerLikeValueNode(node: Parser.SyntaxNode, source: string): Parser.SyntaxNode | null {
+  if (node.type === 'variable_declarator') {
+    const valueNode = node.childForFieldName('value');
+    return unwrapFunctionLikeExpression(valueNode, source, {
+      wrapperNames: ['forwardRef', 'memo'],
+      searchAnyCallArgument: true,
+    });
+  }
+
+  return unwrapFunctionLikeExpression(node, source, {
+    wrapperNames: ['forwardRef', 'memo'],
+    searchAnyCallArgument: true,
+  });
+}
+
 function isAsyncFunctionLike(node: Parser.SyntaxNode, source: string): boolean {
-  const valueNode = getFunctionLikeValueNode(node);
+  const valueNode = getFunctionLikeValueNode(node, source);
 
   if (!valueNode) {
     return false;
@@ -219,6 +323,35 @@ function isUppercaseName(name: string): boolean {
   return /^[A-Z]/.test(name);
 }
 
+function isFrameworkUiSurfaceSymbol(relation: FileRelation, symbolName: string): boolean {
+  const normalizedFilePath = relation.filePath.replace(/\\/g, '/').toLowerCase();
+  const baseName = path.posix.basename(normalizedFilePath);
+
+  if (baseName === 'not-found.tsx' && symbolName === 'notFound') {
+    return true;
+  }
+
+  return false;
+}
+
+function isLikelyComponentSymbol(
+  relation: FileRelation,
+  match: SymbolNodeMatch,
+  source: string,
+): boolean {
+  if (getLanguage(relation.filePath) !== 'tsx') {
+    return false;
+  }
+
+  const functionLike = getFunctionLikeValueNode(match.node, source);
+
+  if (!functionLike || !hasJsxReturn(functionLike)) {
+    return false;
+  }
+
+  return isUppercaseName(match.symbol.name) || isFrameworkUiSurfaceSymbol(relation, match.symbol.name);
+}
+
 function hasHookCalls(node: Parser.SyntaxNode, source: string): boolean {
   return hasDescendant(node, (child) => {
     if (child.type !== 'call_expression') {
@@ -309,27 +442,35 @@ function isStorybookFile(filePath: string): boolean {
   return /\.(stories|story)\.(tsx?|jsx?)$/i.test(filePath);
 }
 
-function hasStorybookMeta(tree: Parser.Tree, source: string, relation: FileRelation): boolean {
-  if (isStorybookFile(relation.filePath)) {
-    return true;
-  }
+function isStorybookSupportFile(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/').toLowerCase();
 
-  if (relation.imports.some((entry) => /@storybook\//.test(entry.source))) {
-    return true;
-  }
+  return (
+    /(^|\/)\.storybook\/(main|preview|manager)\.(tsx?|jsx?)$/i.test(normalized) ||
+    /(^|\/)\.storybook\/.*(setup|vitest\.setup)\.(tsx?|jsx?)$/i.test(normalized) ||
+    /(^|\/)(vitest|storybook)\.config\.(tsx?|jsx?)$/i.test(normalized)
+  );
+}
 
-  return tree.rootNode.namedChildren.some((child) => {
+function hasStorybookMeta(tree: Parser.Tree, source: string): boolean {
+  const hasDefaultMetaObject = tree.rootNode.namedChildren.some((child) => {
     if (child.type !== 'export_statement') {
       return false;
     }
 
     const text = getNodeText(child, source);
-    return /export\s+default\s+\{/.test(text) && /\btitle\s*:/.test(text);
+    return /export\s+default\s+\{/.test(text) && (/\btitle\s*:/.test(text) || /\bcomponent\s*:/.test(text));
   });
+
+  if (hasDefaultMetaObject) {
+    return true;
+  }
+
+  return /satisfies\s+Meta<|:\s*Meta<|StoryObj<|StoryFn<|ComponentMeta<|ComponentStory</.test(source);
 }
 
 function isApiHandlerFile(filePath: string): boolean {
-  return /(^|\/)route\.(tsx?|jsx?)$/i.test(filePath) || /(^|\/)api\//i.test(filePath) || /^pages\/api\//i.test(filePath);
+  return /(^|\/)route\.(tsx?|jsx?)$/i.test(filePath) || /^pages\/api\//i.test(filePath);
 }
 
 function matchesHttpHandlerName(name: string): boolean {
@@ -412,22 +553,14 @@ function detectReactComponent(
   match: SymbolNodeMatch,
   source: string,
 ): PatternCandidate | null {
-  if (getLanguage(relation.filePath) !== 'tsx') {
+  if (!isLikelyComponentSymbol(relation, match, source)) {
     return null;
   }
 
-  if (!isUppercaseName(match.symbol.name)) {
-    return null;
-  }
-
-  const functionLike = getFunctionLikeValueNode(match.node);
-
-  if (!functionLike || !hasJsxReturn(functionLike)) {
-    return null;
-  }
+  const functionLike = getFunctionLikeValueNode(match.node, source) as Parser.SyntaxNode;
 
   const signals: PatternSignal[] = [
-    { type: 'react-function-component', strength: 'strong', note: 'uppercase function-like symbol returns JSX in a TSX file' },
+    { type: 'react-function-component', strength: 'strong', note: 'component-like function or wrapped function returns JSX in a TSX file' },
     { type: 'jsx-return', strength: 'strong', note: 'function body contains JSX output' },
   ];
 
@@ -463,7 +596,7 @@ function detectCustomHook(
     return null;
   }
 
-  const functionLike = getFunctionLikeValueNode(match.node);
+  const functionLike = getFunctionLikeValueNode(match.node, source);
 
   if (!functionLike || !hasHookCalls(functionLike, source)) {
     return null;
@@ -498,7 +631,7 @@ function detectAsyncDataFlow(
   match: SymbolNodeMatch,
   source: string,
 ): PatternCandidate | null {
-  const functionLike = getFunctionLikeValueNode(match.node);
+  const functionLike = getFunctionLikeValueNode(match.node, source);
 
   if (!functionLike || !isAsyncFunctionLike(match.node, source) || !hasAwait(functionLike)) {
     return null;
@@ -544,7 +677,11 @@ function detectListRendering(
   match: SymbolNodeMatch,
   source: string,
 ): PatternCandidate | null {
-  const functionLike = getFunctionLikeValueNode(match.node);
+  if (!isLikelyComponentSymbol(relation, match, source)) {
+    return null;
+  }
+
+  const functionLike = getFunctionLikeValueNode(match.node, source);
 
   if (!functionLike || !hasJsxReturn(functionLike) || !hasMapRendering(functionLike, source)) {
     return null;
@@ -578,7 +715,11 @@ function detectConditionalRendering(
   match: SymbolNodeMatch,
   source: string,
 ): PatternCandidate | null {
-  const functionLike = getFunctionLikeValueNode(match.node);
+  if (!isLikelyComponentSymbol(relation, match, source)) {
+    return null;
+  }
+
+  const functionLike = getFunctionLikeValueNode(match.node, source);
 
   if (!functionLike || !hasJsxReturn(functionLike) || !hasConditionalRendering(functionLike, source)) {
     return null;
@@ -649,6 +790,20 @@ function detectApiHandler(
     return null;
   }
 
+  const handlerLike = getHandlerLikeValueNode(match.node, source);
+
+  if (!handlerLike) {
+    return null;
+  }
+
+  const hasRouteExportContext = /(^|\/)route\.(tsx?|jsx?)$/i.test(relation.filePath) && /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)$/i.test(match.symbol.name);
+  const hasRequestHandlingBody = hasApiRequest(handlerLike, source, relation);
+  const hasRequestResponseParameters = /\((?:[^)]*\b(req|request|res|response)\b[^)]*)\)/i.test(getNodeText(handlerLike, source));
+
+  if (!hasRouteExportContext && !hasRequestHandlingBody && !hasRequestResponseParameters) {
+    return null;
+  }
+
   const signals: PatternSignal[] = [
     { type: 'route-handler', strength: 'strong', note: 'symbol name and file path match API handler conventions' },
   ];
@@ -657,7 +812,7 @@ function detectApiHandler(
     signals.push({ type: 'async-function', strength: 'moderate', note: 'API handler is async' });
   }
 
-  if (hasApiRequest(getFunctionLikeValueNode(match.node) ?? match.node, source, relation)) {
+  if (hasRequestHandlingBody) {
     signals.push({ type: 'api-request', strength: 'weak', note: 'handler body references request or service-style calls' });
   }
 
@@ -718,7 +873,14 @@ function detectStorybookStory(
   tree: Parser.Tree,
   source: string,
 ): PatternCandidate | null {
-  if (!hasStorybookMeta(tree, source, relation)) {
+  if (isStorybookSupportFile(relation.filePath)) {
+    return null;
+  }
+
+  const hasExplicitStoryFileName = isStorybookFile(relation.filePath);
+  const hasExplicitMeta = hasStorybookMeta(tree, source);
+
+  if (!hasExplicitStoryFileName && !hasExplicitMeta) {
     return null;
   }
 

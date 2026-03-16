@@ -181,6 +181,14 @@ Example detector behavior:
 - test and Storybook detection require known imports, filename conventions, or stable export shapes
 - API handler detection requires route-like file placement and handler naming conventions such as `GET` or `POST`
 
+Recent detector calibration tightened several high-noise cases without changing the underlying pattern model:
+
+- Storybook detection now prefers explicit story files or real meta exports and excludes config/setup files
+- API handler detection now requires stronger function-like route evidence instead of path or naming alone
+- React component detection now supports wrapped component forms such as `forwardRef(...)` and `memo(...)`
+- a narrow framework-specific exception covers file-based UI surfaces such as `not-found.tsx`
+- rendering-pattern extraction is slightly more conservative for clearly non-component JSX helpers
+
 ## Signals And Fingerprints In Extraction
 
 Extracted candidates are supported by small structural signals such as:

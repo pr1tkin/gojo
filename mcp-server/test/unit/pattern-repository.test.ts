@@ -135,6 +135,8 @@ describe('pattern repository', () => {
     await fs.mkdir(path.join(repositoryRoot, 'src', 'api'), { recursive: true });
     await fs.mkdir(path.join(repositoryRoot, 'src', '__tests__'), { recursive: true });
     await fs.mkdir(path.join(repositoryRoot, 'src', 'stories'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, '.storybook'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'app'), { recursive: true });
 
     await fs.writeFile(
       path.join(repositoryRoot, 'src', 'components', 'Button.tsx'),
@@ -150,6 +152,30 @@ describe('pattern repository', () => {
         '    </section>',
         '  );',
         '}',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'components', 'NumberedTextarea.tsx'),
+      [
+        "import { forwardRef, useEffect, useRef, useState } from 'react';",
+        '',
+        'export const NumberedTextarea = forwardRef<HTMLTextAreaElement, { value?: string }>(',
+        '  function NumberedTextarea({ value = "" }, ref) {',
+        '    const innerRef = useRef<HTMLTextAreaElement | null>(null);',
+        '    const [lineCount, setLineCount] = useState(1);',
+        '    useEffect(() => {',
+        "      setLineCount(value.split('\\n').length);",
+        '    }, [value]);',
+        '    return (',
+        '      <div>',
+        '        <textarea ref={ref ?? innerRef} value={value} readOnly />',
+        '        <span>{lineCount}</span>',
+        '      </div>',
+        '    );',
+        '  }',
+        ');',
       ].join('\n'),
       'utf8',
     );
@@ -210,6 +236,18 @@ describe('pattern repository', () => {
     );
 
     await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'api', 'helper.ts'),
+      [
+        'export type Handler = {',
+        '  method: string;',
+        '};',
+        '',
+        'export const withHandlers = (handlers: Handler[]) => handlers;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await fs.writeFile(
       path.join(repositoryRoot, 'src', '__tests__', 'Button.test.tsx'),
       [
         "import { describe, it, expect } from 'vitest';",
@@ -237,6 +275,41 @@ describe('pattern repository', () => {
       'utf8',
     );
 
+    await fs.writeFile(
+      path.join(repositoryRoot, '.storybook', 'main.ts'),
+      [
+        "import type { StorybookConfig } from '@storybook/react';",
+        '',
+        'const config: StorybookConfig = {',
+        "  stories: ['../src/**/*.stories.tsx'],",
+        '};',
+        '',
+        'export default config;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await fs.writeFile(
+      path.join(repositoryRoot, '.storybook', 'vitest.setup.ts'),
+      [
+        "import { setProjectAnnotations } from '@storybook/react';",
+        "import * as preview from './preview';",
+        '',
+        'setProjectAnnotations([preview]);',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await fs.writeFile(
+      path.join(repositoryRoot, 'app', 'not-found.tsx'),
+      [
+        'export default function notFound() {',
+        "  return <div>Not found</div>;",
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+
     const symbolIndex = await buildIndexedSymbols(reposRoot);
     const patternIndex = await runPatternExtractionStage(reposRoot, symbolIndex);
     const patternsByKind = new Map(patternIndex.patterns.map((pattern) => [`${pattern.fileId}:${pattern.kind}`, pattern]));
@@ -253,8 +326,12 @@ describe('pattern repository', () => {
     const apiPatterns = patternIndex.patterns.filter((pattern) => pattern.kind === 'api-handler');
     const testPatterns = patternIndex.patterns.filter((pattern) => pattern.kind === 'test-suite');
     const storyPatterns = patternIndex.patterns.filter((pattern) => pattern.kind === 'storybook-story');
+    const routeHelperPatterns = patternIndex.patterns.filter((pattern) => pattern.fileId.endsWith('src/api/helper.ts'));
+    const storybookSupportPatterns = patternIndex.patterns.filter((pattern) => /\.storybook\/(main|vitest\.setup)\.ts$/i.test(pattern.fileId));
+    const notFoundPatterns = patternIndex.patterns.filter((pattern) => pattern.fileId.endsWith('app/not-found.tsx'));
+    const wrappedComponentPatterns = patternIndex.patterns.filter((pattern) => pattern.fileId.endsWith('src/components/NumberedTextarea.tsx'));
 
-    expect(componentPatterns).toEqual([
+    expect(componentPatterns).toEqual(expect.arrayContaining([
       expect.objectContaining({
         name: 'Button',
         language: 'tsx',
@@ -264,7 +341,25 @@ describe('pattern repository', () => {
           structuralSignals: ['jsx-return', 'react-function-component', 'uses-hooks'],
         }),
       }),
-    ]);
+      expect.objectContaining({
+        name: 'NumberedTextarea',
+        language: 'tsx',
+        confidence: 'high',
+        fingerprint: expect.objectContaining({
+          patternKind: 'component',
+          structuralSignals: ['jsx-return', 'react-function-component', 'uses-hooks'],
+        }),
+      }),
+      expect.objectContaining({
+        name: 'notFound',
+        language: 'tsx',
+        confidence: 'high',
+        fingerprint: expect.objectContaining({
+          patternKind: 'component',
+          structuralSignals: ['jsx-return', 'react-function-component'],
+        }),
+      }),
+    ]));
     expect(hookPatterns).toEqual([
       expect.objectContaining({
         name: 'useAudio',
@@ -336,8 +431,22 @@ describe('pattern repository', () => {
         }),
       }),
     ]);
+    expect(routeHelperPatterns).toEqual([]);
+    expect(storybookSupportPatterns).toEqual([]);
+    expect(notFoundPatterns).toEqual([
+      expect.objectContaining({
+        kind: 'component',
+        name: 'notFound',
+      }),
+    ]);
+    expect(wrappedComponentPatterns).toEqual([
+      expect.objectContaining({
+        kind: 'component',
+        name: 'NumberedTextarea',
+      }),
+    ]);
 
-    expect(patternIndex.patterns).toHaveLength(9);
+    expect(patternIndex.patterns).toHaveLength(11);
     expect(patternsByKind.size).toBe(patternIndex.patterns.length);
   });
 });
