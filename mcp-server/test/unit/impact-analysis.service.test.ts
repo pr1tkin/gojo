@@ -379,11 +379,18 @@ describe('impact analysis service', () => {
     expect(result.summary).toEqual(expect.objectContaining({
       directFileCount: 2,
       directSymbolCount: 3,
-      highConfidenceImpactCount: 3,
+      highConfidenceImpactCount: 1,
+      mediumConfidenceImpactCount: 2,
+      lowConfidenceImpactCount: 2,
+      symbolDirectImpactCount: 1,
+      fileDirectImpactCount: 1,
+      proxyImpactCount: 1,
+      localSymbolImpactCount: 2,
     }));
+    expect(result.summary.overview).toContain('likely direct impacts identified from graph and local evidence');
     expect(result.summary.notes).toEqual(expect.arrayContaining([
-      'direct importer and re-export relationships are the strongest current impact signals',
-      'same-file symbol impacts are based on exact symbol-name matches inside sibling symbol spans',
+      'direct importer files and re-export files are file-level or proxy impact signals unless symbol-level usage is separately confirmed',
+      'same-file symbol impacts are based on exact symbol-name matches inside sibling symbol spans and should be treated as local proxy evidence',
     ]));
   });
 
@@ -410,18 +417,20 @@ describe('impact analysis service', () => {
     expect(sameFileImpact).toEqual(
       expect.objectContaining({
         filePath: targetSymbol.filePath,
-        confidence: 'medium',
+        impactScope: 'local-symbol',
+        confidence: 'low',
       }),
     );
     expect(sameFileImpact?.evidence[0]).toEqual(
       expect.objectContaining({
         reason: 'same-file-reference',
-        confidence: 'medium',
+        impactScope: 'local-symbol',
+        confidence: 'low',
       }),
     );
   });
 
-  it('captures direct importer file and symbol evidence', async () => {
+  it('captures direct importer file and symbol evidence without overstating file-level impact', async () => {
     const result = await analyzeSymbolImpact({
       symbolId: targetSymbol.symbolId,
       mode: 'safe',
@@ -432,12 +441,15 @@ describe('impact analysis service', () => {
 
     expect(importerFile?.evidence[0]).toEqual(expect.objectContaining({
       reason: 'imports-target',
-      confidence: 'high',
+      impactScope: 'file-direct',
+      confidence: 'medium',
     }));
+    expect(importerFile?.evidence[0].notes[0]).toContain('symbol-level usage inside the file is not confirmed');
+    expect(importerSymbol?.impactScope).toBe('symbol-direct');
     expect(importerSymbol?.evidence[0].notes[0]).toContain('references imported binding "Widget"');
   });
 
-  it('captures barrel re-export file evidence', async () => {
+  it('captures barrel re-export file evidence as proxy impact', async () => {
     const result = await analyzeSymbolImpact({
       symbolId: targetSymbol.symbolId,
       mode: 'safe',
@@ -446,12 +458,42 @@ describe('impact analysis service', () => {
     const barrelImpact = result.directlyImpactedFiles.find((entry) => entry.filePath === barrelFile.filePath);
 
     expect(barrelImpact).toEqual(expect.objectContaining({
-      confidence: 'high',
+      impactScope: 'proxy',
+      confidence: 'medium',
     }));
     expect(barrelImpact?.evidence[0]).toEqual(expect.objectContaining({
       reason: 'reexports-target',
+      impactScope: 'proxy',
+      confidence: 'medium',
+    }));
+  });
+
+  it('ranks graph-derived importer evidence ahead of local same-file proxy matches', async () => {
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'safe',
+    });
+
+    expect(result.directlyImpactedSymbols[0]).toEqual(expect.objectContaining({
+      symbolName: 'DashboardPage',
+      impactScope: 'symbol-direct',
       confidence: 'high',
     }));
+  });
+
+  it('marks exploratory mode as reusing safe-mode evidence with explicit limitations', async () => {
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'exploratory',
+      includeTransitive: true,
+      maxDepth: 2,
+    });
+
+    expect(result.mode).toBe('exploratory');
+    expect(result.summary.notes).toEqual(expect.arrayContaining([
+      'exploratory mode currently reuses the same direct safe-mode evidence; broader traversal and transitive impact expansion are not implemented yet',
+      'transitive expansion is not implemented yet; result includes direct impacts only',
+    ]));
   });
 
   it('degrades safely for unresolved targets', async () => {

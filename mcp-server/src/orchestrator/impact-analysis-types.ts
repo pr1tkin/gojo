@@ -8,6 +8,13 @@ export type ImpactConfidence = 'high' | 'medium' | 'low';
 
 export type ImpactEvidenceSource = 'symbol-index' | 'graph' | 'text-match';
 
+export type ImpactScope =
+  | 'symbol-direct'
+  | 'file-direct'
+  | 'proxy'
+  | 'local-symbol'
+  | 'fallback';
+
 export type ImpactReason =
   | 'same-file-reference'
   | 'imports-target'
@@ -66,6 +73,7 @@ export interface ImpactEvidence {
   reason: ImpactReason;
   confidence: ImpactConfidence;
   source: ImpactEvidenceSource;
+  impactScope: ImpactScope;
   depth: number;
   via: ImpactPathStep[];
   notes: string[];
@@ -80,6 +88,7 @@ export interface ImpactedSymbol {
   exported?: boolean;
   filePath: string;
   repoId?: string;
+  impactScope: Extract<ImpactScope, 'symbol-direct' | 'proxy' | 'local-symbol' | 'fallback'>;
   confidence: ImpactConfidence;
   evidence: ImpactEvidence[];
 }
@@ -89,6 +98,7 @@ export interface ImpactedFile {
   fileId?: string;
   filePath: string;
   repoId?: string;
+  impactScope: Extract<ImpactScope, 'file-direct' | 'proxy' | 'fallback'>;
   confidence: ImpactConfidence;
   evidence: ImpactEvidence[];
 }
@@ -107,7 +117,13 @@ export interface ImpactAnalysisSummary {
   transitiveFileCount: number;
   transitiveSymbolCount: number;
   highConfidenceImpactCount: number;
+  mediumConfidenceImpactCount: number;
   lowConfidenceImpactCount: number;
+  symbolDirectImpactCount: number;
+  fileDirectImpactCount: number;
+  proxyImpactCount: number;
+  localSymbolImpactCount: number;
+  overview: string;
   ambiguityDetected: boolean;
   notes: string[];
 }
