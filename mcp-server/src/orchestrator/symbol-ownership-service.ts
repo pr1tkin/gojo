@@ -5,6 +5,10 @@ import type { FileNode } from '../graph/types.js';
 import { getFileRelation, getFileRelationById } from '../symbol-index/query.js';
 import { loadRequiredSymbolIndex } from '../symbol-index/store.js';
 import type { FileRelation, IndexedSymbol } from '../symbol-index/types.js';
+import {
+  getObservedPropNamesForComponent,
+  getUiParentsForComponent,
+} from './ui-hierarchy-service.js';
 import type {
   AnalyzeSymbolOwnershipInput,
   ApiBoundaryClassification,
@@ -13,6 +17,7 @@ import type {
   OwnershipSignal,
   SymbolOwnershipResult,
   SymbolOwnershipTarget,
+  UiReusePattern,
 } from './symbol-ownership-types.js';
 
 function normalizePath(filePath: string): string {
@@ -34,6 +39,21 @@ function isEntryLikeFile(filePath: string): boolean {
 
 function isBarrelFile(filePath: string): boolean {
   return /(^|\/)(index|mod)\.(tsx?|jsx?)$/i.test(normalizePath(filePath));
+}
+
+function isUiPageLikeFile(filePath: string | undefined): boolean {
+  if (!filePath) {
+    return false;
+  }
+
+  const normalized = normalizePath(filePath);
+
+  return (
+    /(^|\/)page\.(tsx?|jsx?)$/i.test(normalized) ||
+    /(^|\/)layout\.(tsx?|jsx?)$/i.test(normalized) ||
+    /(^|\/)route\.(tsx?|jsx?)$/i.test(normalized) ||
+    /^pages\/.+\.(tsx?|jsx?)$/i.test(normalized)
+  );
 }
 
 function stripExtension(filePath: string): string {
@@ -540,6 +560,9 @@ function classifyOwnership(
     pathHasInternalMarkers: boolean;
     frameworkEntryLike: boolean;
     usageKind: 'none' | 'local-only' | 'feature-local' | 'cross-feature' | 'repo-wide';
+    uiReusePattern: UiReusePattern;
+    parentComponentCount: number;
+    parentPageCount: number;
   },
 ): OwnershipClassification {
   if (!facts.exportedFromFile && (facts.usageKind === 'none' || facts.usageKind === 'local-only')) {
@@ -595,6 +618,22 @@ function classifyOwnership(
   }
 
   if (
+    facts.uiReusePattern === 'shared-ui-primitive' &&
+    !facts.pathHasInternalMarkers &&
+    (facts.pathBoundary === 'shared' ||
+      facts.pathBoundary === 'feature' ||
+      facts.pathBoundary === 'unknown' ||
+      facts.usageKind === 'cross-feature' ||
+      facts.usageKind === 'repo-wide')
+  ) {
+    if (facts.exportedFromFile && (facts.reexportedThroughBarrel || facts.participatesInEntrySurface || facts.pathBoundary === 'public')) {
+      return 'shared-surface';
+    }
+
+    return 'shared-internal';
+  }
+
+  if (
     (facts.pathBoundary === 'shared' || facts.pathBoundary === 'infrastructure' || facts.usageKind === 'cross-feature' || facts.usageKind === 'repo-wide') &&
     !facts.reexportedThroughBarrel &&
     !facts.participatesInEntrySurface
@@ -606,6 +645,18 @@ function classifyOwnership(
     facts.usageKind === 'feature-local' &&
     (facts.pathBoundary === 'feature' || facts.pathBoundary === 'internal' || facts.pathBoundary === 'unknown' || !facts.exportedFromFile) &&
     !facts.reexportedThroughBarrel
+  ) {
+    return 'feature-internal';
+  }
+
+  if (
+    facts.exportedFromFile &&
+    (facts.uiReusePattern === 'feature-ui-component' || facts.uiReusePattern === 'page-level-feature-component') &&
+    !facts.reexportedThroughBarrel &&
+    !facts.participatesInEntrySurface &&
+    !facts.pathHasInternalMarkers &&
+    facts.usageKind !== 'cross-feature' &&
+    facts.usageKind !== 'repo-wide'
   ) {
     return 'feature-internal';
   }
@@ -640,6 +691,8 @@ function classifyApiBoundary(
     pathBoundary: 'internal' | 'feature' | 'shared' | 'public' | 'infrastructure' | 'unknown';
     frameworkEntryLike: boolean;
     usageKind: 'none' | 'local-only' | 'feature-local' | 'cross-feature' | 'repo-wide';
+    uiReusePattern: UiReusePattern;
+    parentPageCount: number;
   },
 ): ApiBoundaryClassification {
   if (ownership === 'unknown') {
@@ -666,7 +719,14 @@ function classifyApiBoundary(
 
   if (
     ownership === 'feature-internal' &&
-    (facts.participatesInEntrySurface || facts.pathBoundary === 'feature' || facts.usageKind === 'feature-local')
+    (
+      facts.participatesInEntrySurface ||
+      facts.pathBoundary === 'feature' ||
+      facts.usageKind === 'feature-local' ||
+      facts.uiReusePattern === 'feature-ui-component' ||
+      facts.uiReusePattern === 'page-level-feature-component' ||
+      facts.parentPageCount >= 1
+    )
   ) {
     return 'feature-boundary';
   }
@@ -697,6 +757,14 @@ function classifyConfidence(ownership: OwnershipClassification, signals: Ownersh
     ownership === 'shared-surface' &&
     hasSignal(signals, 'barrel-participation', 'strong') &&
     (hasSignal(signals, 'cross-feature-usage') || hasSignal(signals, 'repo-wide-usage'))
+  ) {
+    return 'high';
+  }
+
+  if (
+    ownership === 'shared-internal' &&
+    hasSignal(signals, 'ui-parent-reuse', 'strong') &&
+    hasSignal(signals, 'ui-page-presence', 'strong')
   ) {
     return 'high';
   }
@@ -753,6 +821,146 @@ function getTopSignalNotes(signals: OwnershipSignal[]): string[] {
     .slice(0, 2);
 }
 
+function dedupeUiRefs<T extends { componentName: string; filePath?: string; symbolId?: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+
+  for (const item of items) {
+    const key = `${item.componentName}|${item.filePath ?? ''}|${item.symbolId ?? ''}`;
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(item);
+  }
+
+  return deduped.sort((left, right) => (
+    compareFiles(
+      { repoId: undefined, filePath: left.filePath ?? left.componentName },
+      { repoId: undefined, filePath: right.filePath ?? right.componentName },
+    ) ||
+    left.componentName.localeCompare(right.componentName)
+  ));
+}
+
+async function getUiSignals(
+  target: SymbolOwnershipTarget,
+): Promise<{
+  signals: OwnershipSignal[];
+  uiOwnershipSignals?: SymbolOwnershipResult['uiOwnershipSignals'];
+}> {
+  if (!target.symbol || !target.file || !target.symbol.name) {
+    return { signals: [] };
+  }
+
+  const targetInput = {
+    filePath: target.symbol.filePath,
+    symbolId: target.symbol.symbolId,
+    symbolName: target.symbol.name,
+  };
+  const directParents = await getUiParentsForComponent(targetInput);
+  const parentComponents: typeof directParents = [];
+  const parentPages: typeof directParents = [];
+
+  for (const parent of directParents) {
+    if (isUiPageLikeFile(parent.filePath)) {
+      parentPages.push(parent);
+    } else {
+      parentComponents.push(parent);
+    }
+  }
+
+  for (const parent of parentComponents) {
+    if (!parent.filePath) {
+      continue;
+    }
+
+    const upstreamParents = await getUiParentsForComponent({
+      filePath: parent.filePath,
+      symbolId: parent.symbolId,
+      symbolName: parent.componentName,
+    });
+
+    for (const upstreamParent of upstreamParents) {
+      if (isUiPageLikeFile(upstreamParent.filePath)) {
+        parentPages.push(upstreamParent);
+      }
+    }
+  }
+
+  const observedProps = await getObservedPropNamesForComponent(targetInput);
+  const dedupedParentComponents = dedupeUiRefs(parentComponents);
+  const dedupedParentPages = dedupeUiRefs(parentPages);
+
+  if (
+    dedupedParentComponents.length === 0 &&
+    dedupedParentPages.length === 0 &&
+    observedProps.length === 0
+  ) {
+    return { signals: [] };
+  }
+
+  let uiReusePattern: UiReusePattern = 'unknown';
+
+  if (dedupedParentComponents.length >= 4 || dedupedParentPages.length >= 2) {
+    uiReusePattern = 'shared-ui-primitive';
+  } else if (dedupedParentPages.length >= 1 && dedupedParentComponents.length === 0) {
+    uiReusePattern = 'page-level-feature-component';
+  } else if (dedupedParentPages.length <= 1 && dedupedParentComponents.length >= 1 && dedupedParentComponents.length <= 3) {
+    uiReusePattern = 'feature-ui-component';
+  } else if (dedupedParentComponents.length === 1 && dedupedParentPages.length === 0) {
+    uiReusePattern = 'locally-composed-component';
+  }
+
+  const signals: OwnershipSignal[] = [];
+
+  if (dedupedParentComponents.length > 0) {
+    signals.push({
+      type: 'ui-parent-reuse',
+      strength:
+        dedupedParentComponents.length >= 4 ? 'strong' : dedupedParentComponents.length >= 2 ? 'moderate' : 'weak',
+      note:
+        dedupedParentComponents.length >= 4
+          ? `rendered by ${dedupedParentComponents.length} parent components, suggesting shared UI reuse`
+          : `rendered by ${dedupedParentComponents.length} parent component${dedupedParentComponents.length === 1 ? '' : 's'}`,
+    });
+  }
+
+  if (dedupedParentPages.length > 0) {
+    signals.push({
+      type: 'ui-page-presence',
+      strength: dedupedParentPages.length >= 2 ? 'strong' : 'moderate',
+      note:
+        dedupedParentPages.length >= 2
+          ? `rendered in ${dedupedParentPages.length} page or layout surfaces`
+          : 'rendered in a single page or layout surface',
+    });
+  }
+
+  if (observedProps.length > 0) {
+    signals.push({
+      type: 'ui-prop-surface',
+      strength: observedProps.length >= 5 ? 'moderate' : 'weak',
+      note:
+        observedProps.length >= 5
+          ? `observed prop surface includes ${observedProps.length} distinct prop names`
+          : `observed prop surface includes ${observedProps.length} prop name${observedProps.length === 1 ? '' : 's'}`,
+    });
+  }
+
+  return {
+    signals,
+    uiOwnershipSignals: {
+      parentComponentCount: dedupedParentComponents.length,
+      parentPageCount: dedupedParentPages.length,
+      observedPropSurface: observedProps.map((entry) => entry.propName),
+      uiReusePattern,
+    },
+  };
+}
+
 function buildSummary(
   symbol: IndexedSymbol | null,
   filePath: string,
@@ -763,6 +971,7 @@ function buildSummary(
     usageKind: 'none' | 'local-only' | 'feature-local' | 'cross-feature' | 'repo-wide';
   },
   signals: OwnershipSignal[],
+  uiOwnershipSignals?: SymbolOwnershipResult['uiOwnershipSignals'],
 ): string {
   const role = describeTarget(symbol, filePath);
 
@@ -770,12 +979,28 @@ function buildSummary(
     case 'internal-local':
       return `${role} with no shared surface signals`;
     case 'feature-internal':
+      if (uiOwnershipSignals && uiOwnershipSignals.uiReusePattern === 'page-level-feature-component' && uiOwnershipSignals.parentPageCount >= 1) {
+        return `${role} rendered from ${uiOwnershipSignals.parentPageCount} page surface${uiOwnershipSignals.parentPageCount === 1 ? '' : 's'} within one feature area`;
+      }
+
       return `${role} used within one feature area`;
     case 'shared-internal':
+      if (uiOwnershipSignals && uiOwnershipSignals.uiReusePattern === 'shared-ui-primitive') {
+        return `${role} reused across ${uiOwnershipSignals.parentComponentCount} parent components and ${uiOwnershipSignals.parentPageCount} page surfaces without stable entry-surface exposure`;
+      }
+
       return facts.usageKind === 'repo-wide'
         ? `${role} with broad importer fan-out but no stable entry-surface signal`
         : `${role} reused across feature areas without stable entry-surface exposure`;
     case 'shared-surface':
+      if (uiOwnershipSignals && uiOwnershipSignals.uiReusePattern === 'shared-ui-primitive') {
+        if (facts.reexportedThroughBarrel) {
+          return `${role} exposed through barrel export and reused across ${uiOwnershipSignals.parentComponentCount} parent components and ${uiOwnershipSignals.parentPageCount} page surfaces`;
+        }
+
+        return `${role} reused across ${uiOwnershipSignals.parentComponentCount} parent components and ${uiOwnershipSignals.parentPageCount} page surfaces`;
+      }
+
       if (facts.reexportedThroughBarrel) {
         if (facts.usageKind === 'feature-local' || facts.usageKind === 'cross-feature' || facts.usageKind === 'repo-wide') {
           return `${role} exposed through barrel export and consumed across multiple downstream files`;
@@ -827,11 +1052,13 @@ export async function analyzeSymbolOwnership(input: AnalyzeSymbolOwnershipInput)
   const usage = calibrateUsageForSymbol(target.symbol, getUsageSignals(filePath, importers), {
     exportedFromFile: exportSurface.exportedFromFile,
   });
+  const ui = await getUiSignals(target);
   const signals = [
     ...exportSurface.signals,
     ...pathBoundary.signals,
     ...usage.signals,
     ...barrel.signals,
+    ...ui.signals,
   ];
   const ownership = classifyOwnership(signals, {
     exportedFromFile: exportSurface.exportedFromFile,
@@ -841,6 +1068,9 @@ export async function analyzeSymbolOwnership(input: AnalyzeSymbolOwnershipInput)
     pathHasInternalMarkers: pathBoundary.pathHasInternalMarkers,
     frameworkEntryLike: pathBoundary.frameworkEntryLike,
     usageKind: usage.usageKind,
+    uiReusePattern: ui.uiOwnershipSignals?.uiReusePattern ?? 'unknown',
+    parentComponentCount: ui.uiOwnershipSignals?.parentComponentCount ?? 0,
+    parentPageCount: ui.uiOwnershipSignals?.parentPageCount ?? 0,
   });
   const apiBoundary = classifyApiBoundary(ownership, {
     exportedFromFile: exportSurface.exportedFromFile,
@@ -848,6 +1078,8 @@ export async function analyzeSymbolOwnership(input: AnalyzeSymbolOwnershipInput)
     pathBoundary: pathBoundary.boundaryKind,
     frameworkEntryLike: pathBoundary.frameworkEntryLike,
     usageKind: usage.usageKind,
+    uiReusePattern: ui.uiOwnershipSignals?.uiReusePattern ?? 'unknown',
+    parentPageCount: ui.uiOwnershipSignals?.parentPageCount ?? 0,
   });
   const confidence = classifyConfidence(ownership, signals);
 
@@ -862,10 +1094,11 @@ export async function analyzeSymbolOwnership(input: AnalyzeSymbolOwnershipInput)
     apiBoundary,
     confidence,
     signals,
+    ...(ui.uiOwnershipSignals ? { uiOwnershipSignals: ui.uiOwnershipSignals } : {}),
     summary: buildSummary(target.symbol, filePath, ownership, {
       reexportedThroughBarrel: barrel.reexportedThroughBarrel,
       participatesInEntrySurface: barrel.participatesInEntrySurface || exportSurface.entrySurfaceExport,
       usageKind: usage.usageKind,
-    }, signals),
+    }, signals, ui.uiOwnershipSignals),
   };
 }

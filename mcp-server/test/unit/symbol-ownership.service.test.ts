@@ -7,6 +7,8 @@ const {
   getFileRelationMock,
   getFileRelationByIdMock,
   loadRequiredSymbolIndexMock,
+  getUiParentsForComponentMock,
+  getObservedPropNamesForComponentMock,
 } = vi.hoisted(() => ({
   getFileNodeMock: vi.fn(),
   getImportingFilesMock: vi.fn(),
@@ -14,6 +16,8 @@ const {
   getFileRelationMock: vi.fn(),
   getFileRelationByIdMock: vi.fn(),
   loadRequiredSymbolIndexMock: vi.fn(),
+  getUiParentsForComponentMock: vi.fn(),
+  getObservedPropNamesForComponentMock: vi.fn(),
 }));
 
 vi.mock('../../src/graph/query.js', () => ({
@@ -29,6 +33,11 @@ vi.mock('../../src/symbol-index/query.js', () => ({
 
 vi.mock('../../src/symbol-index/store.js', () => ({
   loadRequiredSymbolIndex: loadRequiredSymbolIndexMock,
+}));
+
+vi.mock('../../src/orchestrator/ui-hierarchy-service.js', () => ({
+  getUiParentsForComponent: getUiParentsForComponentMock,
+  getObservedPropNamesForComponent: getObservedPropNamesForComponentMock,
 }));
 
 import { analyzeSymbolOwnership } from '../../src/orchestrator/symbol-ownership-service.js';
@@ -108,6 +117,8 @@ describe('symbol ownership service', () => {
     vi.clearAllMocks();
     getImportingFilesMock.mockResolvedValue([]);
     getReexportingFilesMock.mockResolvedValue([]);
+    getUiParentsForComponentMock.mockResolvedValue([]);
+    getObservedPropNamesForComponentMock.mockResolvedValue([]);
   });
 
   it('classifies a non-exported local helper as internal-local', async () => {
@@ -244,6 +255,67 @@ describe('symbol ownership service', () => {
     ]));
   });
 
+  it('adds UI reuse evidence for a feature-local page component without overriding the feature classification', async () => {
+    const symbol = symbolNode(
+      'score-chart',
+      'repo-a:app/contracts/components/ContractStatsScoreDistributionChart.tsx',
+      'repo-a',
+      'app/contracts/components/ContractStatsScoreDistributionChart.tsx',
+      'ContractStatsScoreDistributionChart',
+      'function',
+      true,
+    );
+    const relation = fileRelation(symbol.fileId, symbol.repo, symbol.filePath, symbol.symbolId, symbol.name, true, 'default');
+    seedTarget(symbol, relation);
+    getImportingFilesMock.mockResolvedValue([
+      fileNode('repo-a:app/contracts/[contractId]/ContractDetailPage.tsx', 'repo-a', 'app/contracts/[contractId]/ContractDetailPage.tsx'),
+    ]);
+    getUiParentsForComponentMock.mockImplementation(async (input: { filePath?: string }) => {
+      if (input.filePath === symbol.filePath) {
+        return [
+          {
+            componentName: 'ContractDetailPage',
+            filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
+            symbolId: 'parent-component',
+            resolved: true,
+          },
+        ];
+      }
+
+      if (input.filePath === 'app/contracts/[contractId]/ContractDetailPage.tsx') {
+        return [
+          {
+            componentName: 'Page',
+            filePath: 'app/contracts/[contractId]/page.tsx',
+            symbolId: 'page-parent',
+            resolved: true,
+          },
+        ];
+      }
+
+      return [];
+    });
+    getObservedPropNamesForComponentMock.mockResolvedValue([
+      { propName: 'contractId', count: 1 },
+    ]);
+
+    const result = await analyzeSymbolOwnership({ symbolId: symbol.symbolId });
+
+    expect(result.ownership).toBe('feature-internal');
+    expect(result.apiBoundary).toBe('feature-boundary');
+    expect(result.uiOwnershipSignals).toEqual({
+      parentComponentCount: 1,
+      parentPageCount: 1,
+      observedPropSurface: ['contractId'],
+      uiReusePattern: 'feature-ui-component',
+    });
+    expect(result.signals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'ui-parent-reuse', strength: 'weak' }),
+      expect.objectContaining({ type: 'ui-page-presence', strength: 'moderate' }),
+      expect.objectContaining({ type: 'ui-prop-surface', strength: 'weak' }),
+    ]));
+  });
+
   it('classifies a shared utility reused across features as shared-internal', async () => {
     const symbol = symbolNode(
       'format-date',
@@ -271,6 +343,104 @@ describe('symbol ownership service', () => {
     expect(result.signals).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'cross-feature-usage', strength: 'moderate' }),
       expect.objectContaining({ type: 'barrel-participation', strength: 'weak' }),
+    ]));
+  });
+
+  it('uses broad UI parent reuse to classify a shared UI primitive conservatively as shared-internal', async () => {
+    const symbol = symbolNode(
+      'react-select-single',
+      'repo-a:components/common/react-select.tsx',
+      'repo-a',
+      'components/common/react-select.tsx',
+      'ReactSelectSingle',
+      'variable',
+      false,
+    );
+    const relation = {
+      fileId: symbol.fileId,
+      repo: symbol.repo,
+      filePath: symbol.filePath,
+      classification: 'source' as const,
+      symbolIds: [symbol.symbolId],
+      symbolNames: [symbol.name],
+      imports: [],
+      exports: [{
+        fileId: symbol.fileId,
+        kind: 'default' as const,
+        exportedName: 'default',
+        localName: symbol.name,
+        symbolId: symbol.symbolId,
+      }],
+      importTokens: [],
+    };
+    seedTarget(symbol, relation);
+    getImportingFilesMock.mockResolvedValue([
+      fileNode('repo-a:components/bucket/modal/filter.tsx', 'repo-a', 'components/bucket/modal/filter.tsx'),
+      fileNode('repo-a:components/profile/form.tsx', 'repo-a', 'components/profile/form.tsx'),
+      fileNode('repo-a:components/translation/header.tsx', 'repo-a', 'components/translation/header.tsx'),
+    ]);
+    getUiParentsForComponentMock.mockResolvedValue([
+      {
+        componentName: 'BucketFilterForm',
+        filePath: 'components/bucket/modal/filter.tsx',
+        symbolId: 'bucket-form',
+        resolved: true,
+      },
+      {
+        componentName: 'ProfileForm',
+        filePath: 'components/profile/form.tsx',
+        symbolId: 'profile-form',
+        resolved: true,
+      },
+      {
+        componentName: 'TranslationHeader',
+        filePath: 'components/translation/header.tsx',
+        symbolId: 'translation-header',
+        resolved: true,
+      },
+      {
+        componentName: 'SettingsForm',
+        filePath: 'components/project/settings/form.tsx',
+        symbolId: 'settings-form',
+        resolved: true,
+      },
+      {
+        componentName: 'BucketDetailPage',
+        filePath: 'pages/project/[id]/bucket/[bid].tsx',
+        symbolId: 'bucket-page',
+        resolved: true,
+      },
+      {
+        componentName: 'TranslationPage',
+        filePath: 'pages/project/[id]/index.tsx',
+        symbolId: 'translation-page',
+        resolved: true,
+      },
+    ]);
+    getObservedPropNamesForComponentMock.mockResolvedValue([
+      { propName: 'options', count: 10 },
+      { propName: 'defaultValue', count: 9 },
+      { propName: 'onChange', count: 9 },
+      { propName: 'placeholder', count: 8 },
+      { propName: 'invalidText', count: 6 },
+    ]);
+
+    const result = await analyzeSymbolOwnership({ symbolId: symbol.symbolId });
+
+    expect(result.ownership).toBe('shared-internal');
+    expect(result.apiBoundary).toBe('shared-boundary');
+    expect(result.confidence).toBe('high');
+    expect(result.uiOwnershipSignals).toEqual({
+      parentComponentCount: 4,
+      parentPageCount: 2,
+      observedPropSurface: ['options', 'defaultValue', 'onChange', 'placeholder', 'invalidText'],
+      uiReusePattern: 'shared-ui-primitive',
+    });
+    expect(result.summary).toBe('component reused across 4 parent components and 2 page surfaces without stable entry-surface exposure');
+    expect(result.signals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'ui-parent-reuse', strength: 'strong' }),
+      expect.objectContaining({ type: 'ui-page-presence', strength: 'strong' }),
+      expect.objectContaining({ type: 'ui-prop-surface', strength: 'moderate' }),
     ]));
   });
 

@@ -56,6 +56,7 @@ export type {
   OwnershipSignalType,
   SymbolOwnershipResult,
   SymbolOwnershipTarget,
+  UiReusePattern,
 } from './symbol-ownership-types.js';
 export type {
   GetUiHierarchyInput,

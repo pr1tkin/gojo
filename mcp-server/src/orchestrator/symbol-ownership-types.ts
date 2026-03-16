@@ -28,7 +28,17 @@ export type OwnershipSignalType =
   | 'local-only-usage'
   | 'feature-local-usage'
   | 'cross-feature-usage'
-  | 'repo-wide-usage';
+  | 'repo-wide-usage'
+  | 'ui-parent-reuse'
+  | 'ui-page-presence'
+  | 'ui-prop-surface';
+
+export type UiReusePattern =
+  | 'shared-ui-primitive'
+  | 'feature-ui-component'
+  | 'page-level-feature-component'
+  | 'locally-composed-component'
+  | 'unknown';
 
 export interface AnalyzeSymbolOwnershipInput {
   repoId?: string;
@@ -64,5 +74,11 @@ export interface SymbolOwnershipResult {
   apiBoundary: ApiBoundaryClassification;
   confidence: OwnershipConfidence;
   signals: OwnershipSignal[];
+  uiOwnershipSignals?: {
+    parentComponentCount: number;
+    parentPageCount: number;
+    observedPropSurface: string[];
+    uiReusePattern: UiReusePattern;
+  };
   summary: string;
 }

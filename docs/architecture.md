@@ -184,6 +184,8 @@ Recent refinement work improved ownership classification calibration for local h
 
 The latest refinement improves ownership conflict resolution for barrel-exported shared surfaces so reusable symbols exposed through index-style entry files are less likely to collapse to unknown while local helper protection stays intact.
 
+Ownership analysis now also accepts additive UI hierarchy evidence for JSX and TSX components. Parent-component reuse, page-surface presence, and observed prop-surface breadth can refine ownership confidence and component classification in UI-heavy codebases, but they remain secondary to export, graph, and path signals and do not claim full UI semantic understanding.
+
 The internal change-planning service adds ownership-aware refactor safety estimation. It combines existing impact analysis and ownership analysis to produce conservative scope and risk classification plus an ordered edit/review plan for agent workflows. It does not generate patches or claim semantic refactor completeness.
 
 Change planning is used to answer:
