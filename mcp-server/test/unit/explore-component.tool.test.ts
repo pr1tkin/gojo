@@ -21,14 +21,14 @@ describe('explore_component tool', () => {
   it('accepts the narrow public input shape', () => {
     const parsed = z.object(exploreComponentToolDefinition.inputSchema).parse({
       name: 'Button',
-      repo: 'ifdt-gui',
+      repo: 'repo-gamma',
       limit: 3,
       relatedLimit: 8,
     });
 
     expect(parsed).toEqual({
       name: 'Button',
-      repo: 'ifdt-gui',
+      repo: 'repo-gamma',
       limit: 3,
       relatedLimit: 8,
     });
@@ -37,14 +37,14 @@ describe('explore_component tool', () => {
   it('resolves a primary component and includes related, defined, and exported symbols', async () => {
     getSymbolExplorationContextMock.mockResolvedValue({
       query: 'Button',
-      repo: 'ifdt-gui',
+      repo: 'repo-gamma',
       kind: undefined,
       primarySymbol: {
-        symbolId: 'ifdt-gui:components/ui/Button.tsx:function:Button:1',
-        fileId: 'ifdt-gui:components/ui/Button.tsx',
+        symbolId: 'repo-gamma:components/ui/Button.tsx:function:Button:1',
+        fileId: 'repo-gamma:components/ui/Button.tsx',
         name: 'Button',
         kind: 'function',
-        repo: 'ifdt-gui',
+        repo: 'repo-gamma',
         filePath: 'components/ui/Button.tsx',
         startLine: 1,
         endLine: 10,
@@ -52,19 +52,19 @@ describe('explore_component tool', () => {
       },
       primaryFile: {
         nodeType: 'file',
-        fileId: 'ifdt-gui:components/ui/Button.tsx',
-        repoId: 'ifdt-gui',
+        fileId: 'repo-gamma:components/ui/Button.tsx',
+        repoId: 'repo-gamma',
         filePath: 'components/ui/Button.tsx',
         classification: 'source',
       },
       rankedSymbols: [
         {
           item: {
-            symbolId: 'ifdt-gui:components/ui/Button.tsx:function:Button:1',
-            fileId: 'ifdt-gui:components/ui/Button.tsx',
+            symbolId: 'repo-gamma:components/ui/Button.tsx:function:Button:1',
+            fileId: 'repo-gamma:components/ui/Button.tsx',
             name: 'Button',
             kind: 'function',
-            repo: 'ifdt-gui',
+            repo: 'repo-gamma',
             filePath: 'components/ui/Button.tsx',
             startLine: 1,
             endLine: 10,
@@ -78,9 +78,9 @@ describe('explore_component tool', () => {
       exportedSymbols: [
         {
           nodeType: 'symbol',
-          symbolId: 'ifdt-gui:components/ui/Button.tsx:function:Button:1',
-          fileId: 'ifdt-gui:components/ui/Button.tsx',
-          repoId: 'ifdt-gui',
+          symbolId: 'repo-gamma:components/ui/Button.tsx:function:Button:1',
+          fileId: 'repo-gamma:components/ui/Button.tsx',
+          repoId: 'repo-gamma',
           filePath: 'components/ui/Button.tsx',
           name: 'Button',
           kind: 'function',
@@ -97,21 +97,21 @@ describe('explore_component tool', () => {
       rawContext: {},
     });
     getFileExplorationContextMock.mockResolvedValue({
-      fileId: 'ifdt-gui:components/ui/Button.tsx',
+      fileId: 'repo-gamma:components/ui/Button.tsx',
       primaryFile: {
         nodeType: 'file',
-        fileId: 'ifdt-gui:components/ui/Button.tsx',
-        repoId: 'ifdt-gui',
+        fileId: 'repo-gamma:components/ui/Button.tsx',
+        repoId: 'repo-gamma',
         filePath: 'components/ui/Button.tsx',
         classification: 'source',
       },
-      repo: 'ifdt-gui',
+      repo: 'repo-gamma',
       relatedFiles: [
         {
           file: {
             nodeType: 'file',
-            fileId: 'ifdt-gui:components/ui/DownloadButton.tsx',
-            repoId: 'ifdt-gui',
+            fileId: 'repo-gamma:components/ui/DownloadButton.tsx',
+            repoId: 'repo-gamma',
             filePath: 'components/ui/DownloadButton.tsx',
             classification: 'source',
           },
@@ -123,8 +123,8 @@ describe('explore_component tool', () => {
         {
           file: {
             nodeType: 'file',
-            fileId: 'ifdt-gui:components/ContractList.tsx',
-            repoId: 'ifdt-gui',
+            fileId: 'repo-gamma:components/ContractList.tsx',
+            repoId: 'repo-gamma',
             filePath: 'components/ContractList.tsx',
             classification: 'source',
           },
@@ -138,9 +138,9 @@ describe('explore_component tool', () => {
       definedSymbols: [
         {
           nodeType: 'symbol',
-          symbolId: 'ifdt-gui:components/ui/Button.tsx:function:Button:1',
-          fileId: 'ifdt-gui:components/ui/Button.tsx',
-          repoId: 'ifdt-gui',
+          symbolId: 'repo-gamma:components/ui/Button.tsx:function:Button:1',
+          fileId: 'repo-gamma:components/ui/Button.tsx',
+          repoId: 'repo-gamma',
           filePath: 'components/ui/Button.tsx',
           name: 'Button',
           kind: 'function',
@@ -152,9 +152,9 @@ describe('explore_component tool', () => {
       exportedSymbols: [
         {
           nodeType: 'symbol',
-          symbolId: 'ifdt-gui:components/ui/Button.tsx:function:Button:1',
-          fileId: 'ifdt-gui:components/ui/Button.tsx',
-          repoId: 'ifdt-gui',
+          symbolId: 'repo-gamma:components/ui/Button.tsx:function:Button:1',
+          fileId: 'repo-gamma:components/ui/Button.tsx',
+          repoId: 'repo-gamma',
           filePath: 'components/ui/Button.tsx',
           name: 'Button',
           kind: 'function',
@@ -174,43 +174,43 @@ describe('explore_component tool', () => {
 
     const result = await runExploreComponentTool({
       name: 'Button',
-      repo: 'ifdt-gui',
+      repo: 'repo-gamma',
       relatedLimit: 8,
     });
     const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
 
     expect(getSymbolExplorationContextMock).toHaveBeenCalledWith('Button', {
-      repo: 'ifdt-gui',
+      repo: 'repo-gamma',
       limit: 5,
       relatedLimit: 8,
     });
-    expect(getFileExplorationContextMock).toHaveBeenCalledWith('ifdt-gui:components/ui/Button.tsx', {
+    expect(getFileExplorationContextMock).toHaveBeenCalledWith('repo-gamma:components/ui/Button.tsx', {
       relatedLimit: 8,
     });
     expect(parsed).toEqual(
       expect.objectContaining({
         requestedName: 'Button',
-        requestedRepo: 'ifdt-gui',
+        requestedRepo: 'repo-gamma',
         resolution: expect.objectContaining({
           status: 'resolved',
           candidateCount: 1,
           ambiguityDetected: false,
           selectedCandidate: expect.objectContaining({
-            fileId: 'ifdt-gui:components/ui/Button.tsx',
+            fileId: 'repo-gamma:components/ui/Button.tsx',
             name: 'Button',
             score: 16,
           }),
         }),
         resolvedPrimaryFile: expect.objectContaining({
-          fileId: 'ifdt-gui:components/ui/Button.tsx',
+          fileId: 'repo-gamma:components/ui/Button.tsx',
         }),
         relatedFiles: [
           expect.objectContaining({
-            file: expect.objectContaining({ fileId: 'ifdt-gui:components/ui/DownloadButton.tsx' }),
+            file: expect.objectContaining({ fileId: 'repo-gamma:components/ui/DownloadButton.tsx' }),
             score: 25,
           }),
           expect.objectContaining({
-            file: expect.objectContaining({ fileId: 'ifdt-gui:components/ContractList.tsx' }),
+            file: expect.objectContaining({ fileId: 'repo-gamma:components/ContractList.tsx' }),
             score: 20,
           }),
         ],
@@ -228,7 +228,7 @@ describe('explore_component tool', () => {
   it('passes repo filtering through to the existing orchestrator service', async () => {
     getSymbolExplorationContextMock.mockResolvedValue({
       query: 'Button',
-      repo: 'dlf-web',
+      repo: 'repo-alpha',
       kind: undefined,
       primarySymbol: null,
       primaryFile: null,
@@ -245,13 +245,13 @@ describe('explore_component tool', () => {
 
     await runExploreComponentTool({
       name: 'Button',
-      repo: 'dlf-web',
+      repo: 'repo-alpha',
       limit: 2,
       relatedLimit: 4,
     });
 
     expect(getSymbolExplorationContextMock).toHaveBeenCalledWith('Button', {
-      repo: 'dlf-web',
+      repo: 'repo-alpha',
       limit: 2,
       relatedLimit: 4,
     });
@@ -260,14 +260,14 @@ describe('explore_component tool', () => {
   it('surfaces ambiguity conservatively while selecting the strongest ranked candidate', async () => {
     getSymbolExplorationContextMock.mockResolvedValue({
       query: 'AdminProjectPage',
-      repo: 'ibm-strings',
+      repo: 'repo-beta',
       kind: undefined,
       primarySymbol: {
-        symbolId: 'ibm-strings:pages/admin/cleanup.tsx:variable:AdminProjectPage:1',
-        fileId: 'ibm-strings:pages/admin/cleanup.tsx',
+        symbolId: 'repo-beta:pages/admin/cleanup.tsx:variable:AdminProjectPage:1',
+        fileId: 'repo-beta:pages/admin/cleanup.tsx',
         name: 'AdminProjectPage',
         kind: 'variable',
-        repo: 'ibm-strings',
+        repo: 'repo-beta',
         filePath: 'pages/admin/cleanup.tsx',
         startLine: 1,
         endLine: 20,
@@ -275,19 +275,19 @@ describe('explore_component tool', () => {
       },
       primaryFile: {
         nodeType: 'file',
-        fileId: 'ibm-strings:pages/admin/cleanup.tsx',
-        repoId: 'ibm-strings',
+        fileId: 'repo-beta:pages/admin/cleanup.tsx',
+        repoId: 'repo-beta',
         filePath: 'pages/admin/cleanup.tsx',
         classification: 'source',
       },
       rankedSymbols: [
         {
           item: {
-            symbolId: 'ibm-strings:pages/admin/cleanup.tsx:variable:AdminProjectPage:1',
-            fileId: 'ibm-strings:pages/admin/cleanup.tsx',
+            symbolId: 'repo-beta:pages/admin/cleanup.tsx:variable:AdminProjectPage:1',
+            fileId: 'repo-beta:pages/admin/cleanup.tsx',
             name: 'AdminProjectPage',
             kind: 'variable',
-            repo: 'ibm-strings',
+            repo: 'repo-beta',
             filePath: 'pages/admin/cleanup.tsx',
             startLine: 1,
             endLine: 20,
@@ -298,11 +298,11 @@ describe('explore_component tool', () => {
         },
         {
           item: {
-            symbolId: 'ibm-strings:pages/admin/project.tsx:variable:AdminProjectPage:1',
-            fileId: 'ibm-strings:pages/admin/project.tsx',
+            symbolId: 'repo-beta:pages/admin/project.tsx:variable:AdminProjectPage:1',
+            fileId: 'repo-beta:pages/admin/project.tsx',
             name: 'AdminProjectPage',
             kind: 'variable',
-            repo: 'ibm-strings',
+            repo: 'repo-beta',
             filePath: 'pages/admin/project.tsx',
             startLine: 1,
             endLine: 20,
@@ -322,15 +322,15 @@ describe('explore_component tool', () => {
       rawContext: {},
     });
     getFileExplorationContextMock.mockResolvedValue({
-      fileId: 'ibm-strings:pages/admin/cleanup.tsx',
+      fileId: 'repo-beta:pages/admin/cleanup.tsx',
       primaryFile: {
         nodeType: 'file',
-        fileId: 'ibm-strings:pages/admin/cleanup.tsx',
-        repoId: 'ibm-strings',
+        fileId: 'repo-beta:pages/admin/cleanup.tsx',
+        repoId: 'repo-beta',
         filePath: 'pages/admin/cleanup.tsx',
         classification: 'source',
       },
-      repo: 'ibm-strings',
+      repo: 'repo-beta',
       relatedFiles: [],
       neighboringFiles: [],
       definedSymbols: [],
@@ -346,7 +346,7 @@ describe('explore_component tool', () => {
 
     const result = await runExploreComponentTool({
       name: 'AdminProjectPage',
-      repo: 'ibm-strings',
+      repo: 'repo-beta',
     });
     const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
 
@@ -356,11 +356,11 @@ describe('explore_component tool', () => {
         candidateCount: 2,
         ambiguityDetected: true,
         selectedCandidate: expect.objectContaining({
-          fileId: 'ibm-strings:pages/admin/cleanup.tsx',
+          fileId: 'repo-beta:pages/admin/cleanup.tsx',
         }),
         alternativeCandidates: [
           expect.objectContaining({
-            fileId: 'ibm-strings:pages/admin/project.tsx',
+            fileId: 'repo-beta:pages/admin/project.tsx',
           }),
         ],
       }),

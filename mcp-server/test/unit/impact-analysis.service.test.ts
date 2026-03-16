@@ -115,6 +115,7 @@ describe('impact analysis service', () => {
   );
   const consumerFile = fileNode('repo-a:src/pages/dashboard.tsx', 'repo-a', 'src/pages/dashboard.tsx');
   const barrelFile = fileNode('repo-a:src/components/index.ts', 'repo-a', 'src/components/index.ts');
+  const transitivePageFile = fileNode('repo-a:src/app/page.tsx', 'repo-a', 'src/app/page.tsx');
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -151,6 +152,10 @@ describe('impact analysis service', () => {
         return barrelFile;
       }
 
+      if (fileId === transitivePageFile.fileId) {
+        return transitivePageFile;
+      }
+
       return null;
     });
     getDefinedSymbolsMock.mockImplementation(async (fileId: string) => {
@@ -182,9 +187,25 @@ describe('impact analysis service', () => {
         ];
       }
 
+      if (fileId === transitivePageFile.fileId) {
+        return [
+          symbolNode('home-page', transitivePageFile.fileId, 'repo-a', transitivePageFile.filePath, 'HomePage', 1, 4),
+        ];
+      }
+
       return [];
     });
-    getImportingFilesMock.mockResolvedValue([consumerFile]);
+    getImportingFilesMock.mockImplementation(async (fileId: string) => {
+      if (fileId === targetSymbol.fileId) {
+        return [consumerFile];
+      }
+
+      if (fileId === consumerFile.fileId) {
+        return [transitivePageFile];
+      }
+
+      return [];
+    });
     getReexportingFilesMock.mockResolvedValue([barrelFile]);
     getFileRelationMock.mockResolvedValue({
       fileId: targetSymbol.fileId,
@@ -286,6 +307,35 @@ describe('impact analysis service', () => {
         };
       }
 
+      if (fileId === transitivePageFile.fileId) {
+        return {
+          fileId: transitivePageFile.fileId,
+          repo: 'repo-a',
+          filePath: transitivePageFile.filePath,
+          classification: 'source',
+          symbolIds: ['home-page'],
+          symbolNames: ['HomePage'],
+          imports: [
+            {
+              fileId: transitivePageFile.fileId,
+              source: '../pages/dashboard',
+              bindings: [
+                {
+                  importedName: 'default',
+                  localName: 'DashboardPage',
+                  kind: 'default',
+                  isTypeOnly: false,
+                },
+              ],
+              resolvedKind: 'local-file',
+              resolvedTargetFileId: consumerFile.fileId,
+            },
+          ],
+          exports: [],
+          importTokens: ['DashboardPage'],
+        };
+      }
+
       return null;
     });
     readRepositoryFileMock.mockImplementation(async (repository: { id: string }, filePath: string) => {
@@ -346,6 +396,23 @@ describe('impact analysis service', () => {
             "export { Widget } from './Widget';",
             'export function widgetIndexHelper() {',
             '  return Widget;',
+            '}',
+          ].join('\n'),
+          startLine: 1,
+          endLine: 4,
+          totalLines: 4,
+        };
+      }
+
+      if (filePath === transitivePageFile.filePath) {
+        return {
+          repositoryId: 'repo-a',
+          filePath,
+          absolutePath: `/repos/repo-a/${filePath}`,
+          content: [
+            "import DashboardPage from '../pages/dashboard';",
+            'export default function HomePage() {',
+            '  return <DashboardPage />;',
             '}',
           ].join('\n'),
           startLine: 1,
@@ -639,6 +706,16 @@ describe('impact analysis service', () => {
     }));
   });
 
+  it('keeps safe mode bounded to direct impacts only', async () => {
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'safe',
+    });
+
+    expect(result.transitiveImpacts).toEqual([]);
+    expect(result.summary.transitiveFileCount).toBe(0);
+  });
+
   it('surfaces package-style local importers as direct file impacts for shared exported symbols', async () => {
     const sharedSymbol = {
       symbolId: 'shared-context',
@@ -771,6 +848,65 @@ describe('impact analysis service', () => {
     }));
   });
 
+  it('adds one bounded transitive importer hop in exploratory mode', async () => {
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'exploratory',
+    });
+
+    expect(result.transitiveImpacts).toEqual([
+      expect.objectContaining({
+        depth: 2,
+        confidence: 'low',
+        file: expect.objectContaining({
+          filePath: transitivePageFile.filePath,
+          impactScope: 'proxy',
+          confidence: 'low',
+        }),
+      }),
+    ]);
+    expect(result.summary.transitiveFileCount).toBe(1);
+    expect(result.summary.overview).toContain('1 bounded transitive');
+    expect(result.summary.notes).toContain('exploratory mode adds one bounded transitive importer hop beyond the direct impact surface');
+  });
+
+  it('records the transitive via chain from the direct importer file', async () => {
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'exploratory',
+    });
+
+    const transitive = result.transitiveImpacts[0];
+
+    expect(transitive.file?.filePath).toBe(transitivePageFile.filePath);
+    expect(transitive.evidence[0]).toEqual(expect.objectContaining({
+      depth: 2,
+      confidence: 'low',
+      impactScope: 'proxy',
+    }));
+    expect(transitive.evidence[0].via).toEqual([
+      expect.objectContaining({
+        fileId: consumerFile.fileId,
+        filePath: consumerFile.filePath,
+        reason: 'imports-target',
+      }),
+    ]);
+  });
+
+  it('respects maxDepth in exploratory mode and stays direct-only when below 2', async () => {
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'exploratory',
+      maxDepth: 1,
+    });
+
+    expect(result.transitiveImpacts).toEqual([]);
+    expect(result.summary.transitiveFileCount).toBe(0);
+    expect(result.summary.notes).toContain(
+      'exploratory mode is enabled, but bounded transitive expansion was not applied because maxDepth is below 2',
+    );
+  });
+
   it('ranks graph-derived importer evidence ahead of local same-file proxy matches', async () => {
     const result = await analyzeSymbolImpact({
       symbolId: targetSymbol.symbolId,
@@ -784,7 +920,7 @@ describe('impact analysis service', () => {
     }));
   });
 
-  it('marks exploratory mode as reusing safe-mode evidence with explicit limitations', async () => {
+  it('marks exploratory mode as bounded transitive expansion with explicit limitations', async () => {
     const result = await analyzeSymbolImpact({
       symbolId: targetSymbol.symbolId,
       mode: 'exploratory',
@@ -794,9 +930,9 @@ describe('impact analysis service', () => {
 
     expect(result.mode).toBe('exploratory');
     expect(result.summary.notes).toEqual(expect.arrayContaining([
-      'exploratory mode currently reuses the same direct safe-mode evidence; broader traversal and transitive impact expansion are not implemented yet',
-      'transitive expansion is not implemented yet; result includes direct impacts only',
+      'exploratory mode adds one bounded transitive importer hop beyond the direct impact surface',
     ]));
+    expect(result.summary.transitiveFileCount).toBeGreaterThan(0);
   });
 
   it('degrades safely for unresolved targets', async () => {

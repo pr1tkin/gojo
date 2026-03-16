@@ -24,7 +24,10 @@ import type {
   TransitiveImpact,
 } from './impact-analysis-types.js';
 
-const DEFAULT_MAX_DEPTH = 1;
+const DEFAULT_SAFE_MAX_DEPTH = 1;
+const DEFAULT_EXPLORATORY_MAX_DEPTH = 2;
+const MAX_EXPLORATORY_DEPTH = 2;
+const MAX_TRANSITIVE_IMPACTS = 200;
 
 function normalizePath(filePath: string): string {
   return filePath.replace(/\\/g, '/').replace(/^\/+/, '');
@@ -43,6 +46,14 @@ function compareSymbols(
   right: { repoId?: string; filePath: string; symbolName: string },
 ): number {
   return compareFiles(left, right) || left.symbolName.localeCompare(right.symbolName);
+}
+
+function getEffectiveMaxDepth(input: AnalyzeSymbolImpactInput): number {
+  if (typeof input.maxDepth === 'number' && Number.isInteger(input.maxDepth) && input.maxDepth >= 0) {
+    return Math.min(input.maxDepth, MAX_EXPLORATORY_DEPTH);
+  }
+
+  return input.mode === 'exploratory' ? DEFAULT_EXPLORATORY_MAX_DEPTH : DEFAULT_SAFE_MAX_DEPTH;
 }
 
 function confidenceWeight(confidence: ImpactConfidence): number {
@@ -295,21 +306,25 @@ function buildEvidence(
   source: ImpactEvidence['source'] = 'graph',
   symbolId?: string,
   symbolName?: string,
+  depth = 1,
+  via?: ImpactEvidence['via'],
 ): ImpactEvidence {
   return {
     reason,
     confidence,
     source,
     impactScope,
-    depth: 1,
-    via: [
-      {
-        filePath,
-        symbolId,
-        symbolName,
-        reason,
-      },
-    ],
+    depth,
+    via:
+      via ??
+      [
+        {
+          filePath,
+          symbolId,
+          symbolName,
+          reason,
+        },
+      ],
     notes,
   };
 }
@@ -645,6 +660,149 @@ function mergeImpactedSymbols(entries: ImpactedSymbol[]): ImpactedSymbol[] {
     .sort((left, right) => compareEvidence(left.evidence, right.evidence) || compareSymbols(left, right));
 }
 
+interface DirectImpactFileSeed {
+  fileId: string;
+  filePath: string;
+  repoId: string;
+  impactScope: ImpactScope;
+  reason: ImpactReason;
+}
+
+function collectDirectImpactFileSeeds(
+  directFiles: ImpactedFile[],
+  directSymbols: ImpactedSymbol[],
+  targetFileId: string,
+): DirectImpactFileSeed[] {
+  const seeds = new Map<string, DirectImpactFileSeed>();
+
+  for (const entry of directFiles) {
+    if (!entry.fileId || !entry.repoId || entry.fileId === targetFileId) {
+      continue;
+    }
+
+    const topReason = entry.evidence[0]?.reason ?? 'imports-target';
+    seeds.set(entry.fileId, {
+      fileId: entry.fileId,
+      filePath: entry.filePath,
+      repoId: entry.repoId,
+      impactScope: entry.impactScope,
+      reason: topReason,
+    });
+  }
+
+  for (const entry of directSymbols) {
+    const fileId = entry.file?.fileId;
+    const repoId = entry.repoId ?? entry.file?.repoId;
+
+    if (!fileId || !repoId || fileId === targetFileId || seeds.has(fileId)) {
+      continue;
+    }
+
+    const topReason = entry.evidence[0]?.reason ?? 'imports-target';
+    seeds.set(fileId, {
+      fileId,
+      filePath: entry.filePath,
+      repoId,
+      impactScope: entry.impactScope,
+      reason: topReason,
+    });
+  }
+
+  return Array.from(seeds.values()).sort(compareFiles);
+}
+
+async function collectTransitiveImpacts(
+  target: ImpactAnalysisTarget,
+  directFiles: ImpactedFile[],
+  directSymbols: ImpactedSymbol[],
+): Promise<{ impacts: TransitiveImpact[]; truncated: boolean }> {
+  if (!target.file?.fileId) {
+    return { impacts: [], truncated: false };
+  }
+
+  const seeds = collectDirectImpactFileSeeds(directFiles, directSymbols, target.file.fileId);
+  const directFileIds = new Set<string>([
+    target.file.fileId,
+    ...directFiles.map((entry) => entry.fileId).filter((entry): entry is string => typeof entry === 'string'),
+  ]);
+  const impacts = new Map<string, TransitiveImpact>();
+  const visited = new Set<string>([target.file.fileId]);
+  let truncated = false;
+
+  for (const seed of seeds) {
+    visited.add(seed.fileId);
+  }
+
+  for (const seed of seeds) {
+    const importers = await getImportingFiles(seed.fileId);
+
+    for (const importer of importers) {
+      if (visited.has(importer.fileId) || directFileIds.has(importer.fileId)) {
+        continue;
+      }
+
+      const evidence = buildEvidence(
+        'imports-target',
+        'low',
+        importer.filePath,
+        [`file imports direct impact file "${seed.filePath}" and is included as a bounded exploratory second-hop candidate`],
+        'proxy',
+        'graph',
+        undefined,
+        undefined,
+        2,
+        [
+          {
+            fileId: seed.fileId,
+            filePath: seed.filePath,
+            reason: seed.reason,
+          },
+        ],
+      );
+      const fileImpact: ImpactedFile = {
+        file: importer,
+        fileId: importer.fileId,
+        filePath: importer.filePath,
+        repoId: importer.repoId,
+        impactScope: 'proxy',
+        confidence: 'low',
+        evidence: [evidence],
+      };
+
+      impacts.set(importer.fileId, {
+        depth: 2,
+        file: fileImpact,
+        confidence: 'low',
+        evidence: [evidence],
+      });
+      visited.add(importer.fileId);
+
+      if (impacts.size >= MAX_TRANSITIVE_IMPACTS) {
+        truncated = true;
+        break;
+      }
+    }
+
+    if (truncated) {
+      break;
+    }
+  }
+
+  return {
+    impacts: Array.from(impacts.values()).sort((left, right) => {
+      const leftFile = left.file;
+      const rightFile = right.file;
+
+      if (!leftFile || !rightFile) {
+        return 0;
+      }
+
+      return compareFiles(leftFile, rightFile);
+    }),
+    truncated,
+  };
+}
+
 function buildSummary(
   files: ImpactedFile[],
   symbols: ImpactedSymbol[],
@@ -679,6 +837,10 @@ function buildSummary(
     overviewParts.push(`${localSymbolImpactCount} local same-file`);
   }
 
+  if (transitiveImpacts.length > 0) {
+    overviewParts.push(`${transitiveImpacts.length} bounded transitive`);
+  }
+
   const overview =
     overviewParts.length > 0
       ? `likely direct impacts identified from graph and local evidence: ${overviewParts.join(', ')}`
@@ -709,15 +871,8 @@ export async function analyzeSymbolImpact(input: AnalyzeSymbolImpactInput): Prom
     return buildMissingResult(input, ['target symbol could not be resolved from the current symbol index and graph']);
   }
 
+  const effectiveMaxDepth = getEffectiveMaxDepth(input);
   const notes: string[] = [];
-
-  if (input.mode === 'exploratory') {
-    notes.push('exploratory mode currently reuses the same direct safe-mode evidence; broader traversal and transitive impact expansion are not implemented yet');
-  }
-
-  if ((input.maxDepth ?? DEFAULT_MAX_DEPTH) > 1 || input.includeTransitive) {
-    notes.push('transitive expansion is not implemented yet; result includes direct impacts only');
-  }
 
   const [sameFileSymbols, importerImpacts, reexportImpacts] = await Promise.all([
     collectSameFileImpacts(target.symbol),
@@ -734,7 +889,22 @@ export async function analyzeSymbolImpact(input: AnalyzeSymbolImpactInput): Prom
     ...importerImpacts.files,
     ...reexportImpacts.files,
   ]);
-  const transitiveImpacts: TransitiveImpact[] = [];
+  let transitiveImpacts: TransitiveImpact[] = [];
+
+  if (input.mode === 'exploratory' && effectiveMaxDepth >= 2) {
+    const transitive = await collectTransitiveImpacts(target, directlyImpactedFiles, directlyImpactedSymbols);
+    transitiveImpacts = transitive.impacts;
+
+    if (transitiveImpacts.length > 0) {
+      notes.push('exploratory mode adds one bounded transitive importer hop beyond the direct impact surface');
+    }
+
+    if (transitive.truncated) {
+      notes.push(`exploratory transitive results were capped at ${MAX_TRANSITIVE_IMPACTS} files to keep traversal bounded`);
+    }
+  } else if (input.mode === 'exploratory') {
+    notes.push('exploratory mode is enabled, but bounded transitive expansion was not applied because maxDepth is below 2');
+  }
 
   if (directlyImpactedFiles.length > 0) {
     notes.push('direct importer files and re-export files are file-level or proxy impact signals unless symbol-level usage is separately confirmed');
