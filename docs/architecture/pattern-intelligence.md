@@ -230,20 +230,53 @@ Deduplication uses:
 
 This keeps extraction deterministic and compatible with future incremental indexing work.
 
-## Planned Follow-Up Phases
+## Pattern Similarity And Clustering
 
-Phase 7.3 will add pattern similarity scoring.
+Phase 7.3 adds deterministic similarity scoring and same-kind clustering for
+`PatternCandidate` records.
+
+Similarity operates only on normalized `PatternFingerprint` fields:
+
+- pattern kind
+- structural signal overlap
+- supporting import overlap
+- export shape
+- symbol role
+- optional UI signal overlap
+- optional async signal overlap
+
+The comparison does not inspect raw code bodies. This keeps similarity deterministic,
+incremental-index friendly, and aligned with the existing pattern store.
+
+Current clustering is intentionally simple:
+
+- only patterns of the same `PatternKind` are compared
+- similarity uses weighted overlap across normalized fingerprint fields
+- clusters form when similarity passes a stable threshold and the shared-signal
+  evidence is strong enough
+- each cluster records:
+  - `clusterId`
+  - representative pattern
+  - size
+  - dominant structural signals
+
+The similarity layer also supports nearest-neighbor lookup for a single pattern.
+Phase 7.4 will use this substrate for precedent discovery and pattern-based
+navigation.
+
+Pattern similarity and clustering remain internal services. There is no MCP exposure
+yet.
+
+## Planned Follow-Up Phases
 
 Phase 7.4 will add precedent discovery and retrieval workflows.
 
-## Non-Goals In Step 7.2
+## Non-Goals In Step 7.3
 
 This step does not implement:
 
-- pattern similarity
-- clustering
-- pattern search
-- MCP exposure
-- tool integration
+- pattern MCP tools
+- precedent discovery APIs
+- agent-facing interfaces
 
-The substrate is internal-only until extracted candidates, similarity logic, and precedent retrieval are all in place.
+Similarity and clustering remain internal until precedent retrieval is in place.

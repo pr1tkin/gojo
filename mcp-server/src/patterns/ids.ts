@@ -16,3 +16,7 @@ export function createPatternId(
   const symbolSegment = symbolId ? normalizeSegment(symbolId) : 'file-scope';
   return `${normalizeSegment(repoId)}:${normalizeSegment(fileId)}:${kind}:${name}:${startLine}-${endLine}:${symbolSegment}`;
 }
+
+export function createPatternClusterId(kind: PatternKind, representativePatternId: string): string {
+  return `cluster:${kind}:${normalizeSegment(representativePatternId)}`;
+}

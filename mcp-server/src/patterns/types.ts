@@ -72,3 +72,19 @@ export interface PatternIndex {
   generatedAt: string;
   patterns: PatternCandidate[];
 }
+
+export interface SimilarPatternMatch {
+  patternId: string;
+  fileId: string;
+  symbolId?: string;
+  similarityScore: number;
+}
+
+export interface PatternCluster {
+  clusterId: string;
+  patternKind: PatternKind;
+  memberPatternIds: string[];
+  representativePatternId: string;
+  size: number;
+  dominantSignals: string[];
+}
