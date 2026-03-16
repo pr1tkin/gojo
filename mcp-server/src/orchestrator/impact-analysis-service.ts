@@ -151,6 +151,84 @@ function compareEvidence(left: ImpactEvidence[], right: ImpactEvidence[]): numbe
   );
 }
 
+function pathSegmentCount(filePath: string): number {
+  return normalizePath(filePath)
+    .split('/')
+    .filter((segment) => segment.length > 0).length;
+}
+
+function architectureSurfaceWeight(filePath: string): number {
+  const normalized = normalizePath(filePath);
+
+  if (/(^|\/)page\.(tsx?|jsx?)$/i.test(normalized) || /^pages\/.+\.(tsx?|jsx?)$/i.test(normalized)) {
+    return 5;
+  }
+
+  if (/(^|\/)layout\.(tsx?|jsx?)$/i.test(normalized) || /(^|\/)route\.(tsx?|jsx?)$/i.test(normalized)) {
+    return 4;
+  }
+
+  if (/^app\/[^/]+\.(tsx?|jsx?)$/i.test(normalized) || /^src\/app\/[^/]+\.(tsx?|jsx?)$/i.test(normalized)) {
+    return 3;
+  }
+
+  if (/(^|\/)index\.(tsx?|jsx?)$/i.test(normalized)) {
+    return 2;
+  }
+
+  return 1;
+}
+
+function compareDirectImpactFileSeeds(left: DirectImpactFileSeed, right: DirectImpactFileSeed): number {
+  return (
+    scopeWeight(right.impactScope) - scopeWeight(left.impactScope) ||
+    reasonWeight(right.reason) - reasonWeight(left.reason) ||
+    compareFiles(left, right)
+  );
+}
+
+function getTopEvidence(entry: { evidence: ImpactEvidence[] }): ImpactEvidence | undefined {
+  return [...entry.evidence].sort((left, right) => compareEvidence([left], [right]))[0];
+}
+
+function getViaGroupKey(entry: { evidence: ImpactEvidence[] }): string {
+  const topEvidence = getTopEvidence(entry);
+  const via = topEvidence?.via ?? [];
+
+  if (via.length === 0) {
+    return '';
+  }
+
+  return via.map((step) => step.fileId ?? step.filePath).join('>');
+}
+
+function compareTransitiveImpacts(
+  left: TransitiveImpact,
+  right: TransitiveImpact,
+  groupOrder: Map<string, number>,
+): number {
+  const leftTopEvidence = getTopEvidence(left);
+  const rightTopEvidence = getTopEvidence(right);
+  const leftGroupKey = getViaGroupKey(left);
+  const rightGroupKey = getViaGroupKey(right);
+  const leftPrimaryStep = leftTopEvidence?.via?.[0];
+  const rightPrimaryStep = rightTopEvidence?.via?.[0];
+  const leftGroupOrder = groupOrder.get(leftPrimaryStep?.fileId ?? leftPrimaryStep?.filePath ?? '') ?? Number.MAX_SAFE_INTEGER;
+  const rightGroupOrder =
+    groupOrder.get(rightPrimaryStep?.fileId ?? rightPrimaryStep?.filePath ?? '') ?? Number.MAX_SAFE_INTEGER;
+  const leftFilePath = left.file?.filePath ?? left.symbol?.filePath ?? '';
+  const rightFilePath = right.file?.filePath ?? right.symbol?.filePath ?? '';
+
+  return (
+    left.depth - right.depth ||
+    leftGroupOrder - rightGroupOrder ||
+    leftGroupKey.localeCompare(rightGroupKey) ||
+    architectureSurfaceWeight(rightFilePath) - architectureSurfaceWeight(leftFilePath) ||
+    pathSegmentCount(leftFilePath) - pathSegmentCount(rightFilePath) ||
+    leftFilePath.localeCompare(rightFilePath)
+  );
+}
+
 function buildMissingResult(input: AnalyzeSymbolImpactInput, notes: string[]): ImpactAnalysisResult {
   return {
     mode: input.mode,
@@ -708,7 +786,7 @@ function collectDirectImpactFileSeeds(
     });
   }
 
-  return Array.from(seeds.values()).sort(compareFiles);
+  return Array.from(seeds.values()).sort(compareDirectImpactFileSeeds);
 }
 
 async function collectTransitiveImpacts(
@@ -727,11 +805,16 @@ async function collectTransitiveImpacts(
   ]);
   const impacts = new Map<string, TransitiveImpact>();
   const visited = new Set<string>([target.file.fileId]);
+  const groupOrder = new Map<string, number>();
   let truncated = false;
 
   for (const seed of seeds) {
     visited.add(seed.fileId);
   }
+
+  seeds.forEach((seed, index) => {
+    groupOrder.set(seed.fileId, index);
+  });
 
   for (const seed of seeds) {
     const importers = await getImportingFiles(seed.fileId);
@@ -789,16 +872,7 @@ async function collectTransitiveImpacts(
   }
 
   return {
-    impacts: Array.from(impacts.values()).sort((left, right) => {
-      const leftFile = left.file;
-      const rightFile = right.file;
-
-      if (!leftFile || !rightFile) {
-        return 0;
-      }
-
-      return compareFiles(leftFile, rightFile);
-    }),
+    impacts: Array.from(impacts.values()).sort((left, right) => compareTransitiveImpacts(left, right, groupOrder)),
     truncated,
   };
 }

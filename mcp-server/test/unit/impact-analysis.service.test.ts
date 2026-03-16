@@ -893,6 +893,347 @@ describe('impact analysis service', () => {
     ]);
   });
 
+  it('groups exploratory transitive results by via chain and prefers architectural surfaces within a group', async () => {
+    const layoutFile = fileNode('repo-a:src/app/layout.tsx', 'repo-a', 'src/app/layout.tsx');
+    const appPageFile = fileNode('repo-a:src/app/page.tsx', 'repo-a', 'src/app/page.tsx');
+    const helperModuleFile = fileNode('repo-a:src/lib/widget-helper.ts', 'repo-a', 'src/lib/widget-helper.ts');
+    const barrelConsumerFile = fileNode(
+      'repo-a:src/features/widget/WidgetPanel.tsx',
+      'repo-a',
+      'src/features/widget/WidgetPanel.tsx',
+    );
+
+    getFileNodeMock.mockImplementation(async (fileId: string) => {
+      if (fileId === targetSymbol.fileId) {
+        return fileNode(targetSymbol.fileId, 'repo-a', targetSymbol.filePath);
+      }
+
+      if (fileId === consumerFile.fileId) {
+        return consumerFile;
+      }
+
+      if (fileId === barrelFile.fileId) {
+        return barrelFile;
+      }
+
+      if (fileId === layoutFile.fileId) {
+        return layoutFile;
+      }
+
+      if (fileId === appPageFile.fileId) {
+        return appPageFile;
+      }
+
+      if (fileId === helperModuleFile.fileId) {
+        return helperModuleFile;
+      }
+
+      if (fileId === barrelConsumerFile.fileId) {
+        return barrelConsumerFile;
+      }
+
+      return null;
+    });
+    getDefinedSymbolsMock.mockImplementation(async (fileId: string) => {
+      if (fileId === targetSymbol.fileId) {
+        return [
+          symbolNode(
+            targetSymbol.symbolId,
+            targetSymbol.fileId,
+            'repo-a',
+            targetSymbol.filePath,
+            targetSymbol.name,
+            targetSymbol.startLine,
+            targetSymbol.endLine,
+          ),
+          widgetPropsSymbol,
+          helperSymbol,
+        ];
+      }
+
+      if (fileId === consumerFile.fileId) {
+        return [
+          symbolNode('dashboard-page', consumerFile.fileId, 'repo-a', consumerFile.filePath, 'DashboardPage', 1, 6),
+        ];
+      }
+
+      if (fileId === barrelFile.fileId) {
+        return [
+          symbolNode('widget-index-helper', barrelFile.fileId, 'repo-a', barrelFile.filePath, 'widgetIndexHelper', 1, 3),
+        ];
+      }
+
+      if (fileId === layoutFile.fileId) {
+        return [symbolNode('app-layout', layoutFile.fileId, 'repo-a', layoutFile.filePath, 'RootLayout', 1, 4)];
+      }
+
+      if (fileId === appPageFile.fileId) {
+        return [symbolNode('app-page', appPageFile.fileId, 'repo-a', appPageFile.filePath, 'HomePage', 1, 4)];
+      }
+
+      if (fileId === helperModuleFile.fileId) {
+        return [symbolNode('helper-module', helperModuleFile.fileId, 'repo-a', helperModuleFile.filePath, 'widgetHelper', 1, 3)];
+      }
+
+      if (fileId === barrelConsumerFile.fileId) {
+        return [symbolNode('widget-panel', barrelConsumerFile.fileId, 'repo-a', barrelConsumerFile.filePath, 'WidgetPanel', 1, 4)];
+      }
+
+      return [];
+    });
+    getImportingFilesMock.mockImplementation(async (fileId: string) => {
+      if (fileId === targetSymbol.fileId) {
+        return [consumerFile];
+      }
+
+      if (fileId === consumerFile.fileId) {
+        return [helperModuleFile, appPageFile, layoutFile];
+      }
+
+      if (fileId === barrelFile.fileId) {
+        return [barrelConsumerFile];
+      }
+
+      return [];
+    });
+    getFileRelationByIdMock.mockImplementation(async (fileId: string) => {
+      if (fileId === targetSymbol.fileId) {
+        return {
+          fileId: targetSymbol.fileId,
+          repo: 'repo-a',
+          filePath: targetSymbol.filePath,
+          classification: 'source',
+          symbolIds: [targetSymbol.symbolId],
+          symbolNames: [targetSymbol.name],
+          imports: [],
+          exports: [
+            {
+              fileId: targetSymbol.fileId,
+              kind: 'named',
+              exportedName: 'Widget',
+              localName: 'Widget',
+              symbolId: targetSymbol.symbolId,
+            },
+          ],
+          importTokens: [],
+        };
+      }
+
+      if (fileId === consumerFile.fileId) {
+        return {
+          fileId: consumerFile.fileId,
+          repo: 'repo-a',
+          filePath: consumerFile.filePath,
+          classification: 'source',
+          symbolIds: ['dashboard-page'],
+          symbolNames: ['DashboardPage'],
+          imports: [
+            {
+              fileId: consumerFile.fileId,
+              source: '../components/Widget',
+              bindings: [
+                {
+                  importedName: 'Widget',
+                  localName: 'Widget',
+                  kind: 'named',
+                  isTypeOnly: false,
+                },
+              ],
+              resolvedKind: 'local-file',
+              resolvedTargetFileId: targetSymbol.fileId,
+            },
+          ],
+          exports: [],
+          importTokens: ['Widget'],
+        };
+      }
+
+      if (fileId === barrelFile.fileId) {
+        return {
+          fileId: barrelFile.fileId,
+          repo: 'repo-a',
+          filePath: barrelFile.filePath,
+          classification: 'source',
+          symbolIds: ['widget-index-helper'],
+          symbolNames: ['widgetIndexHelper'],
+          imports: [],
+          exports: [
+            {
+              fileId: barrelFile.fileId,
+              kind: 'reexport-named',
+              exportedName: 'Widget',
+              localName: 'Widget',
+              source: './Widget',
+            },
+            {
+              fileId: barrelFile.fileId,
+              kind: 'named',
+              exportedName: 'widgetIndexHelper',
+              localName: 'widgetIndexHelper',
+              symbolId: 'widget-index-helper',
+            },
+          ],
+          importTokens: [],
+        };
+      }
+
+      if (fileId === layoutFile.fileId) {
+        return {
+          fileId: layoutFile.fileId,
+          repo: 'repo-a',
+          filePath: layoutFile.filePath,
+          classification: 'source',
+          symbolIds: ['app-layout'],
+          symbolNames: ['RootLayout'],
+          imports: [
+            {
+              fileId: layoutFile.fileId,
+              source: '../pages/dashboard',
+              bindings: [
+                {
+                  importedName: 'default',
+                  localName: 'DashboardPage',
+                  kind: 'default',
+                  isTypeOnly: false,
+                },
+              ],
+              resolvedKind: 'local-file',
+              resolvedTargetFileId: consumerFile.fileId,
+            },
+          ],
+          exports: [],
+          importTokens: ['DashboardPage'],
+        };
+      }
+
+      if (fileId === appPageFile.fileId) {
+        return {
+          fileId: appPageFile.fileId,
+          repo: 'repo-a',
+          filePath: appPageFile.filePath,
+          classification: 'source',
+          symbolIds: ['app-page'],
+          symbolNames: ['HomePage'],
+          imports: [
+            {
+              fileId: appPageFile.fileId,
+              source: '../pages/dashboard',
+              bindings: [
+                {
+                  importedName: 'default',
+                  localName: 'DashboardPage',
+                  kind: 'default',
+                  isTypeOnly: false,
+                },
+              ],
+              resolvedKind: 'local-file',
+              resolvedTargetFileId: consumerFile.fileId,
+            },
+          ],
+          exports: [],
+          importTokens: ['DashboardPage'],
+        };
+      }
+
+      if (fileId === helperModuleFile.fileId) {
+        return {
+          fileId: helperModuleFile.fileId,
+          repo: 'repo-a',
+          filePath: helperModuleFile.filePath,
+          classification: 'source',
+          symbolIds: ['helper-module'],
+          symbolNames: ['widgetHelper'],
+          imports: [
+            {
+              fileId: helperModuleFile.fileId,
+              source: '../pages/dashboard',
+              bindings: [
+                {
+                  importedName: 'default',
+                  localName: 'DashboardPage',
+                  kind: 'default',
+                  isTypeOnly: false,
+                },
+              ],
+              resolvedKind: 'local-file',
+              resolvedTargetFileId: consumerFile.fileId,
+            },
+          ],
+          exports: [],
+          importTokens: ['DashboardPage'],
+        };
+      }
+
+      if (fileId === barrelConsumerFile.fileId) {
+        return {
+          fileId: barrelConsumerFile.fileId,
+          repo: 'repo-a',
+          filePath: barrelConsumerFile.filePath,
+          classification: 'source',
+          symbolIds: ['widget-panel'],
+          symbolNames: ['WidgetPanel'],
+          imports: [
+            {
+              fileId: barrelConsumerFile.fileId,
+              source: '../../components',
+              bindings: [
+                {
+                  importedName: 'Widget',
+                  localName: 'Widget',
+                  kind: 'named',
+                  isTypeOnly: false,
+                },
+              ],
+              resolvedKind: 'local-file',
+              resolvedTargetFileId: barrelFile.fileId,
+            },
+          ],
+          exports: [],
+          importTokens: ['Widget'],
+        };
+      }
+
+      return null;
+    });
+    readRepositoryFileMock.mockImplementation(async (repository: { id: string }, filePath: string) => {
+      if (repository.id !== 'repo-a') {
+        throw new Error('unexpected repo');
+      }
+
+      return {
+        repositoryId: 'repo-a',
+        filePath,
+        absolutePath: `/repos/repo-a/${filePath}`,
+        content: 'export {};',
+        startLine: 1,
+        endLine: 1,
+        totalLines: 1,
+      };
+    });
+
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'exploratory',
+    });
+
+    expect(result.directlyImpactedFiles.map((entry) => entry.filePath)).toEqual([
+      consumerFile.filePath,
+      barrelFile.filePath,
+    ]);
+    expect(result.transitiveImpacts.map((entry) => entry.file?.filePath)).toEqual([
+      appPageFile.filePath,
+      layoutFile.filePath,
+      helperModuleFile.filePath,
+      barrelConsumerFile.filePath,
+    ]);
+    expect(result.transitiveImpacts.map((entry) => entry.evidence[0]?.via[0]?.filePath)).toEqual([
+      consumerFile.filePath,
+      consumerFile.filePath,
+      consumerFile.filePath,
+      barrelFile.filePath,
+    ]);
+  });
+
   it('respects maxDepth in exploratory mode and stays direct-only when below 2', async () => {
     const result = await analyzeSymbolImpact({
       symbolId: targetSymbol.symbolId,
@@ -933,6 +1274,21 @@ describe('impact analysis service', () => {
       'exploratory mode adds one bounded transitive importer hop beyond the direct impact surface',
     ]));
     expect(result.summary.transitiveFileCount).toBeGreaterThan(0);
+  });
+
+  it('keeps exploratory transitive ordering deterministic across repeated runs', async () => {
+    const first = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'exploratory',
+    });
+    const second = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'exploratory',
+    });
+
+    expect(first.transitiveImpacts.map((entry) => entry.file?.filePath)).toEqual(
+      second.transitiveImpacts.map((entry) => entry.file?.filePath),
+    );
   });
 
   it('degrades safely for unresolved targets', async () => {
