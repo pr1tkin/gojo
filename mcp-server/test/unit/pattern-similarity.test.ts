@@ -335,6 +335,168 @@ describe('pattern similarity', () => {
     expect(sameFamilyScore).toBeGreaterThan(genericScore);
   });
 
+  it('uses symbol-name similarity to favor natural same-family component neighbors', () => {
+    const button = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/Button.tsx',
+      symbolId: 'button-symbol',
+      name: 'Button',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['react'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+      },
+    });
+    const iconButton = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/IconButton.tsx',
+      symbolId: 'icon-button-symbol',
+      name: 'IconButton',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['react'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+      },
+    });
+    const contentSection = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/ContentSection.tsx',
+      symbolId: 'content-section-symbol',
+      name: 'ContentSection',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['react'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+      },
+    });
+
+    const service = createPatternSimilarityService(buildIndex([button, iconButton, contentSection]));
+    const buttonFamilyScore = service.computeSimilarityScore(button, iconButton);
+    const genericComponentScore = service.computeSimilarityScore(button, contentSection);
+    const neighbors = service.findSimilarPatterns(button.patternId, 3);
+
+    expect(buttonFamilyScore).toBeGreaterThan(genericComponentScore);
+    expect(neighbors[0]).toEqual(
+      expect.objectContaining({
+        patternId: iconButton.patternId,
+      }),
+    );
+  });
+
+  it('uses symbol-name similarity to cluster same-family broad-kind patterns more tightly', () => {
+    const button = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/Button.tsx',
+      symbolId: 'button-symbol',
+      name: 'Button',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['react'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+      },
+    });
+    const iconButton = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/IconButton.tsx',
+      symbolId: 'icon-button-symbol',
+      name: 'IconButton',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['react'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+      },
+    });
+    const primaryButton = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/PrimaryButton.tsx',
+      symbolId: 'primary-button-symbol',
+      name: 'PrimaryButton',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['react'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+      },
+    });
+    const contentSection = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/ContentSection.tsx',
+      symbolId: 'content-section-symbol',
+      name: 'ContentSection',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['next/image', './section.css'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+      },
+    });
+
+    const service = createPatternSimilarityService(
+      buildIndex([button, iconButton, primaryButton, contentSection]),
+    );
+    const clusters = service.buildClusters();
+    const familyCluster = clusters.find((cluster) => cluster.memberPatternIds.includes(button.patternId));
+
+    expect(familyCluster).toEqual(
+      expect.objectContaining({
+        patternKind: 'component',
+        size: 3,
+      }),
+    );
+    expect(familyCluster?.memberPatternIds).toEqual([
+      button.patternId,
+      iconButton.patternId,
+      primaryButton.patternId,
+    ]);
+  });
+
   it('de-emphasizes same-file neighbors and low-representativeness helpers in nearest-neighbor results', () => {
     const button = makePattern({
       kind: 'component',

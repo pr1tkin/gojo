@@ -15,6 +15,12 @@ const DEFAULT_SIMILAR_LIMIT = 6;
 const MAX_DOMINANT_SIGNALS = 5;
 const SAME_FILE_NEIGHBOR_PENALTY = 0.9;
 const BROAD_PATTERN_KINDS = new Set<PatternKind>(['component', 'hook', 'async-data-flow']);
+const NAME_AWARE_PATTERN_KINDS = new Set<PatternKind>([
+  'component',
+  'hook',
+  'async-data-flow',
+  'utility-export',
+]);
 
 interface WeightedDimension {
   score: number;
@@ -93,6 +99,50 @@ function contextualOverlap(left: Set<string>, right: Set<string>): number {
   }
 
   return jaccardSimilarity(left, right);
+}
+
+function tokenizeSymbolName(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/[_\s-]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .map((token) => token.toLowerCase())
+    .filter((token) => token.length > 0);
+}
+
+function countCommonPrefixTokens(left: string[], right: string[]): number {
+  const limit = Math.min(left.length, right.length);
+  let count = 0;
+
+  while (count < limit && left[count] === right[count]) {
+    count += 1;
+  }
+
+  return count;
+}
+
+function countCommonSuffixTokens(left: string[], right: string[]): number {
+  const reversedLeft = [...left].reverse();
+  const reversedRight = [...right].reverse();
+  return countCommonPrefixTokens(reversedLeft, reversedRight);
+}
+
+function computeSymbolNameSimilarity(leftName: string, rightName: string): number {
+  const leftTokens = tokenizeSymbolName(leftName);
+  const rightTokens = tokenizeSymbolName(rightName);
+
+  if (leftTokens.length === 0 || rightTokens.length === 0) {
+    return 0;
+  }
+
+  const tokenOverlap = jaccardSimilarity(new Set(leftTokens), new Set(rightTokens));
+  const maxTokenLength = Math.max(leftTokens.length, rightTokens.length);
+  const prefixSimilarity = countCommonPrefixTokens(leftTokens, rightTokens) / maxTokenLength;
+  const suffixSimilarity = countCommonSuffixTokens(leftTokens, rightTokens) / maxTokenLength;
+
+  return Math.max(0, Math.min(1, roundScore(tokenOverlap + prefixSimilarity * 0.15 + suffixSimilarity * 0.15)));
 }
 
 function computeSymbolRoleSimilarity(
@@ -188,6 +238,9 @@ function applyPairAdjustments(
   structuralOverlap: number,
 ): number {
   let adjustedScore = score;
+  const nameSimilarity = NAME_AWARE_PATTERN_KINDS.has(left.kind)
+    ? computeSymbolNameSimilarity(left.name, right.name)
+    : 0;
 
   if (BROAD_PATTERN_KINDS.has(left.kind) && structuralOverlap < 0.5) {
     adjustedScore = Math.min(adjustedScore, 0.6);
@@ -202,6 +255,14 @@ function applyPairAdjustments(
     right.fingerprint.structuralSignals.length <= 1
   ) {
     adjustedScore *= 0.9;
+  }
+
+  if (NAME_AWARE_PATTERN_KINDS.has(left.kind)) {
+    adjustedScore = adjustedScore * 0.85 + nameSimilarity * 0.15;
+  }
+
+  if (nameSimilarity > 0.6) {
+    adjustedScore *= 1.05;
   }
 
   return Math.max(0, Math.min(1, adjustedScore));
@@ -266,9 +327,24 @@ function passesClusteringGate(
   const rightStructuralSignals = toSet(right.fingerprint.structuralSignals);
   const sharedStructuralSignals = countIntersection(leftStructuralSignals, rightStructuralSignals);
   const structuralOverlap = jaccardSimilarity(leftStructuralSignals, rightStructuralSignals);
+  const importOverlap = contextualOverlap(toSet(left.fingerprint.importSet), toSet(right.fingerprint.importSet));
+  const uiOverlap = contextualOverlap(toSet(left.fingerprint.uiSignals), toSet(right.fingerprint.uiSignals));
+  const asyncOverlap = contextualOverlap(toSet(left.fingerprint.asyncSignals), toSet(right.fingerprint.asyncSignals));
+  const nameSimilarity = NAME_AWARE_PATTERN_KINDS.has(left.kind)
+    ? computeSymbolNameSimilarity(left.name, right.name)
+    : 0;
 
   if (sharedStructuralSignals >= 2) {
     if (BROAD_PATTERN_KINDS.has(left.kind) && structuralOverlap < 0.5) {
+      return false;
+    }
+
+    if (
+      BROAD_PATTERN_KINDS.has(left.kind) &&
+      Math.min(leftStructuralSignals.size, rightStructuralSignals.size) <= 2 &&
+      importOverlap < 0.2 &&
+      nameSimilarity < 0.2
+    ) {
       return false;
     }
 
@@ -279,15 +355,11 @@ function passesClusteringGate(
     return false;
   }
 
-  const importOverlap = contextualOverlap(toSet(left.fingerprint.importSet), toSet(right.fingerprint.importSet));
-  const uiOverlap = contextualOverlap(toSet(left.fingerprint.uiSignals), toSet(right.fingerprint.uiSignals));
-  const asyncOverlap = contextualOverlap(toSet(left.fingerprint.asyncSignals), toSet(right.fingerprint.asyncSignals));
-
   if (BROAD_PATTERN_KINDS.has(left.kind) && structuralOverlap < 0.5) {
     return false;
   }
 
-  return importOverlap >= 0.35 || uiOverlap > 0 || asyncOverlap > 0;
+  return importOverlap >= 0.35 || uiOverlap > 0 || asyncOverlap > 0 || nameSimilarity >= 0.35;
 }
 
 function collectDominantSignals(patterns: PatternCandidate[]): string[] {

@@ -282,6 +282,28 @@ Current calibration adds:
 These adjustments remain deterministic and do not change pattern extraction or the
 stored fingerprint shape.
 
+### Symbol-Aware Similarity
+
+The next refinement pass adds a lightweight symbol-name similarity signal on top of
+the existing fingerprint-based comparison.
+
+Current behavior:
+
+- symbol names are tokenized deterministically from camelCase, PascalCase, and
+  underscore-separated names
+- similarity compares normalized name-token overlap
+- name similarity is used conservatively for kinds where naming carries structural
+  meaning:
+  - `component`
+  - `hook`
+  - `async-data-flow`
+  - `utility-export`
+- strong name-family matches receive a small boost, while generic same-kind matches
+  without import or name overlap are less likely to cluster together
+
+This remains deterministic and lightweight. It does not add embeddings, fuzzy NLP, or
+change the stored fingerprint schema.
+
 Pattern similarity and clustering remain internal services. There is no MCP exposure
 yet.
 
