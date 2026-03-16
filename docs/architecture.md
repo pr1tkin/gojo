@@ -126,7 +126,7 @@ They provide:
 - explainable scoring reasons
 - concise structured summaries for tools
 
-Phase 7 also introduces an internal pattern-intelligence layer. It now extracts deterministic TypeScript and TSX pattern candidates such as components, hooks, async data-flow helpers, utility exports, test suites, Storybook stories, and API handlers. These candidates are stored internally with structural signals and fingerprints. The layer does not yet compare patterns, rank similarities, or expose precedent retrieval workflows.
+Phase 7 also introduces an internal pattern-intelligence layer. It now extracts deterministic TypeScript and TSX pattern candidates such as components, hooks, async data-flow helpers, utility exports, test suites, Storybook stories, and API handlers. These candidates are stored internally with structural signals and fingerprints. The layer also computes deterministic similarity, same-kind clustering, and internal precedent retrieval so later phases can surface structurally similar implementations without inspecting raw code bodies again.
 
 This layer does not index files or build the graph. It composes data from the search, symbol, and graph layers into agent-ready results.
 

@@ -309,7 +309,8 @@ yet.
 
 ## Planned Follow-Up Phases
 
-Phase 7.4 will add precedent discovery and retrieval workflows.
+Phase 7.4 adds precedent discovery and retrieval workflows on top of the stored
+pattern corpus and similarity layer.
 
 ## Non-Goals In Step 7.3
 
@@ -320,3 +321,37 @@ This step does not implement:
 - agent-facing interfaces
 
 Similarity and clustering remain internal until precedent retrieval is in place.
+
+## Precedent Discovery
+
+Phase 7.4 adds an internal `PrecedentDiscoveryService` for retrieving the best
+existing implementations for a symbol, pattern, or file.
+
+Current behavior:
+
+- starts from the symbol or pattern's extracted `PatternCandidate` records
+- retrieves nearest same-kind neighbors through `PatternSimilarityService`
+- enriches candidates with indexed symbol and graph context
+- filters identical-symbol matches and de-emphasizes same-file precedents
+- ranks candidates with a deterministic `precedentScore`
+
+Current precedent scoring uses:
+
+- similarity score as the primary signal
+- exported symbol bonus
+- cross-file bonus
+- usage-frequency bonus from the symbol index
+- small graph-context bonuses for imported or re-exported files
+- small path-family bonus
+
+Returned candidates include:
+
+- symbol and pattern identifiers
+- file path
+- pattern kind
+- raw similarity score
+- final precedent score
+- explicit reason signals
+
+This remains internal-only. There is still no MCP precedent tool, no code
+generation layer, and no refactor automation.

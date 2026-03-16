@@ -1,6 +1,13 @@
 export { getFileExplorationContext } from './file-service.js';
 export { analyzeSymbolImpact } from './impact-analysis-service.js';
 export { planSymbolChange } from './change-planning-service.js';
+export {
+  createPrecedentDiscoveryService,
+  findPrecedentsForFile,
+  findPrecedentsForPattern,
+  findPrecedentsForSymbol,
+  PrecedentDiscoveryService,
+} from './precedent-discovery-service.js';
 export { analyzeSymbolOwnership } from './symbol-ownership-service.js';
 export {
   getObservedPropNamesForComponent,
@@ -34,6 +41,12 @@ export type {
   UiPlanningHints,
   UiPlanningPropHint,
 } from './change-planning-types.js';
+export type {
+  FindPrecedentsInput,
+  PrecedentCandidate,
+  PrecedentDiscoveryResult,
+  PrecedentDiscoveryTarget,
+} from './precedent-discovery-types.js';
 export type {
   AnalyzeSymbolImpactInput,
   ImpactAnalysisMode,
