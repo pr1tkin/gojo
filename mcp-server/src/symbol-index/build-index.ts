@@ -21,7 +21,7 @@ function normalizeRelativePath(filePath: string): string {
   return filePath.split(path.sep).join('/');
 }
 
-async function collectRepositorySourceFiles(
+export async function collectRepositorySourceFiles(
   repositoryRoot: string,
   repositoryId: string,
   currentDirectory: string = repositoryRoot,

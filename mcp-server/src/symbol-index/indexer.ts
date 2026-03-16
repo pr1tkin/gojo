@@ -1,6 +1,8 @@
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig } from '../config.js';
+import { buildUiCompositionIndex } from '../ui-composition/build-index.js';
+import { saveUiCompositionIndex } from '../ui-composition/store.js';
 import { buildIndexedSymbols } from './build-index.js';
 import { saveSymbolIndex } from './store.js';
 import type { SymbolIndex } from './types.js';
@@ -14,7 +16,10 @@ export async function buildSymbolIndex(reposRoot: string): Promise<SymbolIndex> 
 async function main(): Promise<void> {
   const config = loadConfig();
   const index = await buildSymbolIndex(config.reposRoot);
+  const uiCompositionIndex = await buildUiCompositionIndex(config.reposRoot, index);
+  await saveUiCompositionIndex(uiCompositionIndex);
   console.log(`Indexed ${index.symbols.length} symbols.`);
+  console.log(`Indexed ${uiCompositionIndex.edges.length} UI composition edges.`);
 }
 
 const currentFilePath = fileURLToPath(import.meta.url);
