@@ -186,6 +186,35 @@ Typical sequence:
 The Compose file includes an `mcp-server` service that mounts `./repos` and
 depends on `zoekt`.
 
+Persistence note:
+
+- Compose mounts a named volume at `/app/.data` for MCP state
+- the shared `refresh-coordination` volume is mounted at
+  `/app/.data/coordination`
+- generation history, health snapshots, consistency reports, maintenance
+  artifacts, and current-generation pointers survive container restarts
+- an empty volume is valid; the MCP server initializes the required directories
+  on first write
+
+Relevant Compose mounts:
+
+```yaml
+mcp-server:
+  volumes:
+    - ./repos:/repos:ro
+    - mcp-server-data:/app/.data
+    - refresh-coordination:/app/.data/coordination
+```
+
+Restart sanity check:
+
+1. Run a refresh and verify `/app/.data/current-generation.json` exists.
+2. Restart the stack with `docker compose restart mcp-server`.
+3. Verify the same generation directory still exists under
+   `/app/.data/generations/`.
+4. Run another refresh and confirm RepoRadar continues from persisted state
+   instead of reinitializing from an empty data root.
+
 ### IDE-Started MCP Container
 
 If an IDE starts the MCP server separately with `docker run`, that container
@@ -195,7 +224,8 @@ It must be given:
 
 - a `/repos` mount
 - access to the Compose network if it should reach Zoekt
-- an optional `/app/.data` mount if you want persisted MCP-side artifacts
+- a persistent `/app/.data` mount if you want stable MCP-side artifacts and
+  restart-safe health/coordination state
 
 Example:
 

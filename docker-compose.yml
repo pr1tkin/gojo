@@ -27,8 +27,10 @@ services:
       - zoekt
     volumes:
       - ./repos:/repos:ro
+      - mcp-server-data:/app/.data
       - refresh-coordination:/app/.data/coordination
 
 volumes:
   zoekt-index:
   refresh-coordination:
+  mcp-server-data:
