@@ -6,11 +6,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { cleanupGenerationDebris } from '../../src/indexing/generation-debris.js';
 import {
+  getRefreshFailureHistoryFilePath,
   getGenerationArtifactFilePath,
   getGenerationsDirectory,
   loadCurrentGenerationState,
   loadGenerationLifecycleMarker,
   loadRefreshFailure,
+  saveSearchRefreshSnapshot,
 } from '../../src/indexing/generation-store.js';
 import { getCurrentIndexHealth } from '../../src/indexing/health.js';
 import { refreshIndexes } from '../../src/indexing/refresh.js';
@@ -41,6 +43,25 @@ async function listGenerationDirectories(tempRoot: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+async function markCurrentSearchReady(snapshotId: string = 'test-snapshot'): Promise<void> {
+  const state = await loadCurrentGenerationState();
+
+  if (!state) {
+    throw new Error('current generation state is unavailable');
+  }
+
+  await saveSearchRefreshSnapshot({
+    schemaVersion: 1,
+    fingerprintContractVersion: 1,
+    snapshotId,
+    status: 'ready',
+    refreshedAt: new Date().toISOString(),
+    aggregateFingerprint: state.search.aggregateFingerprint,
+    repoFingerprints: state.search.repoFingerprints,
+    details: 'test search snapshot ready',
+  });
 }
 
 const tempDirectories: string[] = [];
@@ -93,11 +114,15 @@ describe.sequential('refresh fault injection', () => {
     expect(healthAfterFailure.reasons.join(' ')).toContain('last refresh failed');
 
     const recovered = await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+    await markCurrentSearchReady('recovery-success');
     const healthAfterRecovery = await getCurrentIndexHealth();
 
     expect(recovered.diagnostics.generationId).not.toBe(first.diagnostics.generationId);
     expect(await loadRefreshFailure()).toBeNull();
     expect(healthAfterRecovery.lastRefreshFailure).toBeNull();
+    expect(healthAfterRecovery.reasons.join(' ')).not.toContain('last refresh failed');
+    expect(healthAfterRecovery.trustState).toBe('healthy');
+    expect(healthAfterRecovery.suitableForAgentWorkflows).toBe(true);
   });
 
   it('keeps partially written staged artifacts out of the published generation and cleans them up later', async () => {
@@ -205,6 +230,138 @@ describe.sequential('refresh fault injection', () => {
     expect(failure?.stage).toBe('consistency-maintenance');
     expect(health.lastRefreshFailure?.stage).toBe('consistency-maintenance');
     expect(health.trustState).not.toBe('healthy');
+  });
+
+  it('does not clear failure state on partial recovery that still leaves blocking health issues', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/util.ts', 'export const alpha = 1;');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/util.ts', 'export const beta = 2;');
+
+    await expect(
+      refreshIndexes(reposRoot, {
+        logger: silentLogger,
+        runConsistencyChecks: 'never',
+        faultInjection: { stage: 'before-commit', mode: 'throw' },
+      }),
+    ).rejects.toThrow('before-commit');
+
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/util.ts', 'export const gamma = 3;');
+
+    await refreshIndexes(reposRoot, {
+      logger: silentLogger,
+      runConsistencyChecks: 'always',
+      faultInjection: { stage: 'consistency-maintenance', mode: 'throw' },
+    });
+    const health = await getCurrentIndexHealth();
+
+    expect(await loadRefreshFailure()).not.toBeNull();
+    expect(health.lastRefreshFailure).not.toBeNull();
+    expect(health.trustState).not.toBe('healthy');
+  });
+
+  it('archives a recovered failure only once when recovery is detected during the immediate pending state', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/util.ts', 'export const alpha = 1;');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/util.ts', 'export const beta = 2;');
+    await expect(
+      refreshIndexes(reposRoot, {
+        logger: silentLogger,
+        runConsistencyChecks: 'never',
+        faultInjection: { stage: 'before-commit', mode: 'throw' },
+      }),
+    ).rejects.toThrow('before-commit');
+
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/util.ts', 'export const gamma = 3;');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+
+    const health = await getCurrentIndexHealth();
+    const history = JSON.parse(await fs.readFile(getRefreshFailureHistoryFilePath(), 'utf8')) as Array<{
+      resolution: string;
+    }>;
+
+    expect(await loadRefreshFailure()).toBeNull();
+    expect(health.lastRefreshFailure).toBeNull();
+    expect(health.search?.status).toBe('pending');
+    expect(history).toHaveLength(1);
+    expect(history[0]?.resolution).toBe('recovered');
+  });
+
+  it('archives multiple failures and clears the active failure after a final successful recovery', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/util.ts', 'export const alpha = 1;');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/util.ts', 'export const beta = 2;');
+    await expect(
+      refreshIndexes(reposRoot, {
+        logger: silentLogger,
+        runConsistencyChecks: 'never',
+        faultInjection: { stage: 'before-commit', mode: 'throw' },
+      }),
+    ).rejects.toThrow('before-commit');
+
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/util.ts', 'export const gamma = 3;');
+    await expect(
+      refreshIndexes(reposRoot, {
+        logger: silentLogger,
+        runConsistencyChecks: 'never',
+        faultInjection: { stage: 'before-commit', mode: 'throw' },
+      }),
+    ).rejects.toThrow('before-commit');
+
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/util.ts', 'export const delta = 4;');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+    await markCurrentSearchReady('multiple-recovery');
+
+    const health = await getCurrentIndexHealth();
+    const history = JSON.parse(await fs.readFile(getRefreshFailureHistoryFilePath(), 'utf8')) as Array<{
+      resolution: string;
+    }>;
+
+    expect(await loadRefreshFailure()).toBeNull();
+    expect(health.lastRefreshFailure).toBeNull();
+    expect(health.reasons.join(' ')).not.toContain('last refresh failed');
+    expect(history.length).toBeGreaterThanOrEqual(1);
+    expect(history.every((entry) => entry.resolution === 'recovered')).toBe(true);
+  });
+
+  it('leaves healthy baseline state untouched when no prior failure exists', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/util.ts', 'export const alpha = 1;');
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+    await markCurrentSearchReady('baseline');
+    const health = await getCurrentIndexHealth();
+
+    expect(result.diagnostics.status).toBe('committed');
+    expect(await loadRefreshFailure()).toBeNull();
+    expect(health.lastRefreshFailure).toBeNull();
+    expect(health.trustState).toBe('healthy');
+    expect(health.suitableForAgentWorkflows).toBe(true);
   });
 
   it('supports deterministic activation from environment variables', async () => {

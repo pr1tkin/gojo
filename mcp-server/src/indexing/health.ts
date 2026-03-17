@@ -8,6 +8,8 @@ import {
 import { assessCriticalDataDependencies } from './critical-data.js';
 import { loadPatternIndexResult } from '../patterns/store.js';
 import {
+  archiveRefreshFailure,
+  clearRefreshFailure,
   getCoordinationDirectory,
   getCurrentHealthSnapshotFilePath,
   getGenerationArtifactFilePath,
@@ -83,6 +85,87 @@ function dedupeStringsPreserveOrder(values: Iterable<string>): string[] {
   }
 
   return ordered;
+}
+
+function isValidRecoverySearchState(search: SearchFreshnessState | null): boolean {
+  if (!search) {
+    return false;
+  }
+
+  return search.status === 'ready' || search.status === 'pending';
+}
+
+function hasUnresolvedHighRiskValidation(state: {
+  highRiskRefreshValidation?: { status: 'not-applicable' | 'passed' | 'degraded' | 'failed' };
+}): boolean {
+  return (
+    state.highRiskRefreshValidation?.status === 'degraded' ||
+    state.highRiskRefreshValidation?.status === 'failed'
+  );
+}
+
+function hasBlockingConsistencyIssues(consistency: ConsistencyRunReport | null): boolean {
+  if (!consistency) {
+    return false;
+  }
+
+  return consistency.overview.failed > 0 || consistency.overview.repairsRecommended > 0;
+}
+
+export function hasSuccessfulRecoveryFromRefreshFailure(input: {
+  refreshFailure: RefreshFailureRecord | null;
+  state: {
+    generationId: string;
+    createdAt: string;
+    errors: string[];
+    patternIntegrity?: { status: 'trusted' | 'degraded' | 'failed' };
+    highRiskRefreshValidation?: { status: 'not-applicable' | 'passed' | 'degraded' | 'failed' };
+  };
+  search: SearchFreshnessState | null;
+  consistency: ConsistencyRunReport | null;
+  criticalDataTrustImpact: 'none' | 'degraded' | 'inconsistent';
+  catastrophicCountRegressionCount: number;
+}): boolean {
+  const { refreshFailure, state, search, consistency, criticalDataTrustImpact, catastrophicCountRegressionCount } =
+    input;
+
+  if (!refreshFailure) {
+    return false;
+  }
+
+  if (Date.parse(state.createdAt) <= Date.parse(refreshFailure.failedAt)) {
+    return false;
+  }
+
+  if (state.errors.length > 0) {
+    return false;
+  }
+
+  if (state.patternIntegrity?.status === 'failed') {
+    return false;
+  }
+
+  if (hasUnresolvedHighRiskValidation(state)) {
+    return false;
+  }
+
+  if (criticalDataTrustImpact !== 'none') {
+    return false;
+  }
+
+  if (catastrophicCountRegressionCount > 0) {
+    return false;
+  }
+
+  if (hasBlockingConsistencyIssues(consistency)) {
+    return false;
+  }
+
+  if (!isValidRecoverySearchState(search)) {
+    return false;
+  }
+
+  return true;
 }
 
 function determineTrustState(input: {
@@ -179,7 +262,7 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     }
   }
 
-  const refreshFailure = await loadRefreshFailure().catch(() => null);
+  let refreshFailure = await loadRefreshFailure().catch(() => null);
 
   if (!pointer || !state) {
     const summary: IndexHealthSummary = {
@@ -253,6 +336,29 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     baseline: priorTrustedBaseline,
     changeSummary: changeSummaryStatus.value,
   });
+  const recoveredRefreshFailure = hasSuccessfulRecoveryFromRefreshFailure({
+    refreshFailure,
+    state,
+    search,
+    consistency: consistencyStatus.value,
+    criticalDataTrustImpact: criticalData.strongestTrustImpact,
+    catastrophicCountRegressionCount: countRegressionIssues.length,
+  })
+    ? refreshFailure
+    : null;
+
+  if (recoveredRefreshFailure) {
+    await archiveRefreshFailure(recoveredRefreshFailure, {
+      archivedAt: new Date().toISOString(),
+      recoveredAt: state.createdAt,
+      recoveryGenerationId: state.generationId,
+      resolution: 'recovered',
+    }).catch(() => undefined);
+    await clearRefreshFailure().catch(() => undefined);
+    refreshFailure = null;
+  }
+
+  const activeRefreshFailure = refreshFailure;
   const reasons: string[] = [];
   const warnings: string[] = [...state.warnings];
   const errors: string[] = [...state.errors];
@@ -352,10 +458,10 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     reasons.push(search.details ?? `search freshness is ${search.status}`);
   }
 
-  if (refreshFailure) {
-    const failureMessage = `last refresh failed at ${refreshFailure.failedAt}: ${refreshFailure.reason}`;
+  if (activeRefreshFailure) {
+    const failureMessage = `last refresh failed at ${activeRefreshFailure.failedAt}: ${activeRefreshFailure.reason}`;
 
-    if (refreshFailure.trustImpact === 'inconsistent') {
+    if (activeRefreshFailure.trustImpact === 'inconsistent') {
       errors.push(failureMessage);
     } else {
       warnings.push(failureMessage);
@@ -403,7 +509,7 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     search,
     consistency,
     changeSummary,
-    refreshFailure,
+    refreshFailure: activeRefreshFailure,
     warnings,
     errors,
     reasons,
@@ -436,7 +542,7 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     changeSummary,
     consistency,
     recentActivity,
-    lastRefreshFailure: refreshFailure,
+    lastRefreshFailure: activeRefreshFailure,
     trustState,
     suitableForAgentWorkflows:
       (trustState === 'healthy' || trustState === 'degraded') &&

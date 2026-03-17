@@ -7,6 +7,7 @@ import type {
   CurrentGenerationPointer,
   GenerationLifecycleMarker,
   IndexGenerationState,
+  RefreshFailureHistoryEntry,
   RefreshFailureRecord,
   SearchFreshnessState,
   SearchRefreshRequest,
@@ -82,6 +83,10 @@ export function getCurrentHealthSnapshotFilePath(): string {
 
 export function getRefreshFailureFilePath(): string {
   return path.join(getDataDirectory(), 'maintenance', 'refresh-failures', 'latest.json');
+}
+
+export function getRefreshFailureHistoryFilePath(): string {
+  return path.join(getDataDirectory(), 'maintenance', 'refresh-failures', 'history.json');
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -439,6 +444,13 @@ export async function saveSearchRefreshRequest(request: SearchRefreshRequest): P
   return filePath;
 }
 
+export async function saveSearchRefreshSnapshot(snapshot: SearchRefreshSnapshot): Promise<string> {
+  const filePath = getSearchRefreshSnapshotFilePath();
+  await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
+  await fsPromises.writeFile(filePath, JSON.stringify(snapshot, null, 2), 'utf8');
+  return filePath;
+}
+
 export async function saveRefreshFailure(record: Omit<RefreshFailureRecord, 'schemaVersion'>): Promise<string> {
   const filePath = getRefreshFailureFilePath();
   await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
@@ -459,6 +471,67 @@ export async function saveRefreshFailure(record: Omit<RefreshFailureRecord, 'sch
 
 export async function clearRefreshFailure(): Promise<void> {
   await fsPromises.rm(getRefreshFailureFilePath(), { force: true });
+}
+
+export async function archiveRefreshFailure(
+  record: RefreshFailureRecord,
+  options: {
+    archivedAt: string;
+    resolution: RefreshFailureHistoryEntry['resolution'];
+    recoveryGenerationId?: string;
+    recoveredAt?: string;
+  },
+): Promise<string> {
+  const filePath = getRefreshFailureHistoryFilePath();
+  await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
+
+  let history: RefreshFailureHistoryEntry[] = [];
+
+  try {
+    const content = await fsPromises.readFile(filePath, 'utf8');
+    const parsed = JSON.parse(content) as unknown;
+
+    if (Array.isArray(parsed)) {
+      history = parsed.filter(isObject).map((entry) => ({
+        schemaVersion:
+          typeof entry.schemaVersion === 'number' && Number.isInteger(entry.schemaVersion)
+            ? entry.schemaVersion
+            : REFRESH_FAILURE_SCHEMA_VERSION,
+        failedAt: typeof entry.failedAt === 'string' ? entry.failedAt : '',
+        generationId: typeof entry.generationId === 'string' ? entry.generationId : undefined,
+        stage: typeof entry.stage === 'string' ? (entry.stage as RefreshFailureRecord['stage']) : undefined,
+        mode: typeof entry.mode === 'string' ? (entry.mode as RefreshFailureRecord['mode']) : undefined,
+        reason: typeof entry.reason === 'string' ? entry.reason : '',
+        cleanupRequired: entry.cleanupRequired === true,
+        trustImpact:
+          entry.trustImpact === 'inconsistent' ? 'inconsistent' : 'degraded',
+        archivedAt: typeof entry.archivedAt === 'string' ? entry.archivedAt : options.archivedAt,
+        recoveryGenerationId:
+          typeof entry.recoveryGenerationId === 'string' ? entry.recoveryGenerationId : undefined,
+        recoveredAt: typeof entry.recoveredAt === 'string' ? entry.recoveredAt : undefined,
+        resolution: entry.resolution === 'superseded' ? 'superseded' : 'recovered',
+      }));
+    }
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: string }).code)
+        : '';
+
+    if (code !== 'ENOENT') {
+      throw error;
+    }
+  }
+
+  history.push({
+    ...record,
+    archivedAt: options.archivedAt,
+    recoveryGenerationId: options.recoveryGenerationId,
+    recoveredAt: options.recoveredAt,
+    resolution: options.resolution,
+  });
+  await fsPromises.writeFile(filePath, JSON.stringify(history, null, 2), 'utf8');
+  return filePath;
 }
 
 export async function loadRefreshFailure(): Promise<RefreshFailureRecord | null> {

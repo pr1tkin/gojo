@@ -336,6 +336,13 @@ export interface RefreshFailureRecord {
   trustImpact: RefreshFailureTrustImpact;
 }
 
+export interface RefreshFailureHistoryEntry extends RefreshFailureRecord {
+  archivedAt: string;
+  recoveryGenerationId?: string;
+  recoveredAt?: string;
+  resolution: 'recovered' | 'superseded';
+}
+
 export interface SearchRefreshRequest {
   schemaVersion: number;
   fingerprintContractVersion?: number;

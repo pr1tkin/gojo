@@ -18,6 +18,10 @@ log_error() {
   echo "[zoekt-coordination] $*" >&2
 }
 
+log_timing() {
+  echo "[zoekt-timing] $*" >&2
+}
+
 SEARCH_IGNORED_DIRECTORIES=(
   ".git"
   "node_modules"
@@ -183,6 +187,31 @@ should_ignore_relative_path() {
   return 1
 }
 
+find_relevant_repo_files() {
+  local repo_path="$1"
+  local find_args=("${repo_path}")
+  local ignored_directory
+  local index
+
+  if [[ "${#SEARCH_IGNORED_DIRECTORIES[@]}" -gt 0 ]]; then
+    find_args+=("(" "-type" "d" "(")
+
+    for index in "${!SEARCH_IGNORED_DIRECTORIES[@]}"; do
+      ignored_directory="${SEARCH_IGNORED_DIRECTORIES[${index}]}"
+      find_args+=("-name" "${ignored_directory}")
+
+      if [[ "${index}" -lt $(("${#SEARCH_IGNORED_DIRECTORIES[@]}" - 1)) ]]; then
+        find_args+=("-o")
+      fi
+    done
+
+    find_args+=(")" "-prune" ")" "-o")
+  fi
+
+  find_args+=("-type" "f" "-print0")
+  find "${find_args[@]}"
+}
+
 run_index_pass() {
   local indexed_any=false
   local refresh_started_at
@@ -217,11 +246,34 @@ run_index_pass() {
     fi
 
     echo "Indexing ${repo_name}..."
+    local phase_started_at
+    local phase_finished_at
+    local phase_duration_seconds
+
+    phase_started_at="$(date +%s)"
+    log_timing "repo=${repo_name} phase=zoekt-git-index event=start"
     zoekt-git-index -index "${INDEX_ROOT}" "${repo_path}"
+    phase_finished_at="$(date +%s)"
+    phase_duration_seconds=$((phase_finished_at - phase_started_at))
+    log_timing "repo=${repo_name} phase=zoekt-git-index event=finish durationSeconds=${phase_duration_seconds}"
+
     local repo_fingerprint
-    repo_fingerprint="$(compute_repo_fingerprint "${repo_path}")"
     local repo_file_count
+
+    phase_started_at="$(date +%s)"
+    log_timing "repo=${repo_name} phase=count-relevant-files event=start"
     repo_file_count="$(count_repo_files "${repo_path}")"
+    phase_finished_at="$(date +%s)"
+    phase_duration_seconds=$((phase_finished_at - phase_started_at))
+    log_timing "repo=${repo_name} phase=count-relevant-files event=finish durationSeconds=${phase_duration_seconds} fileCount=${repo_file_count}"
+
+    phase_started_at="$(date +%s)"
+    log_timing "repo=${repo_name} phase=compute-fingerprint event=start"
+    repo_fingerprint="$(compute_repo_fingerprint "${repo_path}")"
+    phase_finished_at="$(date +%s)"
+    phase_duration_seconds=$((phase_finished_at - phase_started_at))
+    log_timing "repo=${repo_name} phase=compute-fingerprint event=finish durationSeconds=${phase_duration_seconds}"
+
     printf '%s\t%s\t%s\n' "${repo_name}" "${repo_fingerprint}" "${repo_file_count}" >> "${repo_fingerprint_file}"
     indexed_any=true
   done
@@ -249,7 +301,7 @@ count_repo_files() {
     fi
 
     file_count=$((file_count + 1))
-  done < <(find "${repo_path}" -type f -print0)
+  done < <(find_relevant_repo_files "${repo_path}")
 
   printf '%s' "${file_count}"
 }
@@ -268,7 +320,7 @@ compute_repo_fingerprint() {
     fi
 
     printf '%s\t%s\n' "${relative_path}" "$(sha256sum "${file_path}" | awk '{print $1}')" >> "${tmp_file}"
-  done < <(find "${repo_path}" -type f -print0 | sort_canonical_lines_zero_delimited)
+  done < <(find_relevant_repo_files "${repo_path}" | sort_canonical_lines_zero_delimited)
 
   if [[ ! -s "${tmp_file}" ]]; then
     rm -f "${tmp_file}"

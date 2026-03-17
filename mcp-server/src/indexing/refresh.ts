@@ -40,7 +40,6 @@ import {
 } from './ui-semantics.js';
 import {
   getGenerationArtifactFilePath,
-  clearRefreshFailure,
   loadCurrentGenerationState,
   initializeStagedGeneration,
   markGenerationAbandoned,
@@ -484,7 +483,6 @@ async function refreshIndexesUnlocked(
     };
     logDiagnostics(logger, diagnostics);
     await getCurrentIndexHealth();
-    await clearRefreshFailure();
     return { symbolIndex: currentSymbolIndex, diagnostics };
   }
 
@@ -927,9 +925,6 @@ async function refreshIndexesUnlocked(
     };
     logDiagnostics(logger, diagnostics);
     await getCurrentIndexHealth();
-    if (postCommitErrors.length === 0) {
-      await clearRefreshFailure();
-    }
 
     return {
       symbolIndex: finalSymbolIndex,
