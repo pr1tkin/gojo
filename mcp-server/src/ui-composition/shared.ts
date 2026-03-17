@@ -29,6 +29,14 @@ export function getNodeText(node: Parser.SyntaxNode, source: string): string {
   return source.slice(node.startIndex, node.endIndex);
 }
 
+export function getJsxOpeningNode(node: Parser.SyntaxNode): Parser.SyntaxNode {
+  if (node.type === 'jsx_self_closing_element') {
+    return node;
+  }
+
+  return node.namedChildren.find((child) => child.type === 'jsx_opening_element') ?? node;
+}
+
 export function isPascalCaseComponentName(name: string): boolean {
   return /^[A-Z][A-Za-z0-9_$]*$/.test(name);
 }
@@ -37,7 +45,7 @@ export function extractChildComponentCandidate(
   node: Parser.SyntaxNode,
   source: string,
 ): UiComponentCandidate | null {
-  const nameNode = node.childForFieldName('name');
+  const nameNode = getJsxOpeningNode(node).childForFieldName('name') ?? node.childForFieldName('name');
 
   if (!nameNode) {
     return null;

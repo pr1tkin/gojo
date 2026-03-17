@@ -141,12 +141,16 @@ function normalizeUiProps(propUsages: UiPropUsage[], filePath: string): string[]
 
 function normalizeUiSemantics(index: UiSemanticsIndex, repoId: string, filePath: string): {
   wrapperElements: string[];
+  structureSequence: string[];
+  renderingSignals: string[];
   stylingSignals: string[];
 } {
   const summary = index.files[`${repoId}/${filePath}`];
 
   return {
     wrapperElements: summary?.wrapperElements ?? [],
+    structureSequence: summary?.structureSequence ?? [],
+    renderingSignals: summary?.renderingSignals ?? [],
     stylingSignals: summary?.stylingSignals ?? [],
   };
 }
@@ -301,8 +305,16 @@ function classifyAddedOrDeletedFile(options: {
     addSignal(signals, 'uiStructureChanged');
   }
 
+  if (uiSemantics.structureSequence.length > 0) {
+    addSignal(signals, 'uiStructureChanged');
+  }
+
   if (uiSemantics.stylingSignals.length > 0) {
     addSignal(signals, 'uiStylingChanged');
+  }
+
+  if (uiSemantics.renderingSignals.length > 0) {
+    addSignal(signals, 'uiRenderingChanged');
   }
 
   if (patternSurface.length > 0) {
@@ -429,7 +441,15 @@ function classifyModifiedFile(options: {
     addSignal(signals, 'uiStructureChanged');
   }
 
+  if (!areStringArraysEqual(previousUiSemantics.structureSequence, currentUiSemantics.structureSequence)) {
+    addSignal(signals, 'uiStructureChanged');
+  }
+
   if (!areStringArraysEqual(previousUiRendering, currentUiRendering)) {
+    addSignal(signals, 'uiRenderingChanged');
+  }
+
+  if (!areStringArraysEqual(previousUiSemantics.renderingSignals, currentUiSemantics.renderingSignals)) {
     addSignal(signals, 'uiRenderingChanged');
   }
 

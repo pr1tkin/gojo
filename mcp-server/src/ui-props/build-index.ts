@@ -10,6 +10,7 @@ import type { IndexedSymbol, SymbolIndex } from '../symbol-index/types.js';
 import { parseTypeScriptSource } from '../tree-sitter.js';
 import {
   extractChildComponentCandidate,
+  getJsxOpeningNode,
   getNodeText,
   isTsxFile,
   resolveChildComponent,
@@ -100,7 +101,7 @@ function createPropUsagesForNode(
     repoConfigById,
     childCandidate.note,
   );
-  const attributes = node.namedChildren.filter((child) => child.type === 'jsx_attribute');
+  const attributes = getJsxOpeningNode(node).namedChildren.filter((child) => child.type === 'jsx_attribute');
   const propUsages: UiPropUsage[] = [];
 
   for (const attribute of attributes) {

@@ -409,6 +409,57 @@ describe.sequential('refreshIndexes', () => {
     ).toBe(true);
   });
 
+  it('detects prop changes on non-self-closing JSX component usages', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Badge.tsx',
+      'export function Badge(props: { label?: string; tone?: string; title?: string }) { return <span>{props.label}</span>; }',
+    );
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Panel.tsx',
+      [
+        "import { Badge } from './Badge';",
+        '',
+        'export function Panel() {',
+        '  return <Badge tone="subtle">hello</Badge>;',
+        '}',
+      ].join('\n'),
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Panel.tsx',
+      [
+        "import { Badge } from './Badge';",
+        '',
+        'export function Panel() {',
+        '  return <Badge tone="subtle" title="greeting">hello</Badge>;',
+        '}',
+      ].join('\n'),
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+
+    expect(result.diagnostics.changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/Panel.tsx',
+        signals: expect.arrayContaining(['contentChanged', 'uiPropsChanged']),
+        impactHints: expect.arrayContaining(['requiresUiRefresh']),
+      }),
+    ]);
+  });
+
   it('classifies wrapper and layout changes as uiStructureChanged', async () => {
     const tempRoot = await createTempDirectory();
     const reposRoot = path.join(tempRoot, 'repos');
@@ -460,6 +511,57 @@ describe.sequential('refreshIndexes', () => {
     ]);
   });
 
+  it('classifies repeated child component additions as uiStructureChanged', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Badge.tsx',
+      'export function Badge() { return <span>badge</span>; }',
+    );
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Panel.tsx',
+      [
+        "import { Badge } from './Badge';",
+        '',
+        'export function Panel() {',
+        '  return <section><Badge /></section>;',
+        '}',
+      ].join('\n'),
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Panel.tsx',
+      [
+        "import { Badge } from './Badge';",
+        '',
+        'export function Panel() {',
+        '  return <section><Badge /><Badge /></section>;',
+        '}',
+      ].join('\n'),
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+
+    expect(result.diagnostics.changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/Panel.tsx',
+        signals: expect.arrayContaining(['contentChanged', 'uiStructureChanged']),
+        impactHints: expect.arrayContaining(['requiresUiRefresh']),
+      }),
+    ]);
+  });
+
   it('classifies conditional rendering changes as uiRenderingChanged', async () => {
     const tempRoot = await createTempDirectory();
     const reposRoot = path.join(tempRoot, 'repos');
@@ -501,6 +603,47 @@ describe.sequential('refreshIndexes', () => {
     ]);
   });
 
+  it('classifies JSX conditional form changes as uiRenderingChanged', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Panel.tsx',
+      [
+        'export function Panel(props: { ready: boolean }) {',
+        '  return <section>{props.ready && <strong>ready</strong>}</section>;',
+        '}',
+      ].join('\n'),
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Panel.tsx',
+      [
+        'export function Panel(props: { ready: boolean }) {',
+        '  return <section>{props.ready ? <strong>ready</strong> : <span>waiting</span>}</section>;',
+        '}',
+      ].join('\n'),
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+
+    expect(result.diagnostics.changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/Panel.tsx',
+        signals: expect.arrayContaining(['contentChanged', 'uiRenderingChanged']),
+        impactHints: expect.arrayContaining(['requiresUiRefresh']),
+      }),
+    ]);
+  });
+
   it('classifies simple JSX styling changes as uiStylingChanged', async () => {
     const tempRoot = await createTempDirectory();
     const reposRoot = path.join(tempRoot, 'repos');
@@ -527,6 +670,47 @@ describe.sequential('refreshIndexes', () => {
       [
         'export function Card() {',
         '  return <section style={{ color: "red" }}>card</section>;',
+        '}',
+      ].join('\n'),
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+
+    expect(result.diagnostics.changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/Card.tsx',
+        signals: expect.arrayContaining(['contentChanged', 'uiStylingChanged']),
+        impactHints: expect.arrayContaining(['requiresUiRefresh']),
+      }),
+    ]);
+  });
+
+  it('classifies className token changes as uiStylingChanged', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Card.tsx',
+      [
+        'export function Card() {',
+        '  return <section className="mb-8 flex gap-2">card</section>;',
+        '}',
+      ].join('\n'),
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Card.tsx',
+      [
+        'export function Card() {',
+        '  return <section className="mb-8 bg-gray-50 flex gap-2">card</section>;',
         '}',
       ].join('\n'),
     );
