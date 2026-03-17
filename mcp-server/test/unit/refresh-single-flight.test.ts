@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -49,6 +50,49 @@ async function listGenerationDirectories(tempRoot: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+async function waitForFile(filePath: string): Promise<void> {
+  for (;;) {
+    try {
+      await fs.access(filePath);
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+}
+
+async function readJsonFile<T>(filePath: string): Promise<T> {
+  return JSON.parse(await fs.readFile(filePath, 'utf8')) as T;
+}
+
+function spawnRefreshChild(
+  tempRoot: string,
+  reposRoot: string,
+  resultFile: string,
+  env: Record<string, string> = {},
+): Promise<number> {
+  const fixturePath = path.join(originalCwd, 'test', 'fixtures', 'refresh-child.ts');
+  const tsxCliPath = path.join(originalCwd, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      [tsxCliPath, fixturePath, reposRoot, resultFile],
+      {
+        cwd: tempRoot,
+        env: {
+          ...process.env,
+          ...env,
+        },
+        stdio: 'ignore',
+      },
+    );
+
+    child.on('error', reject);
+    child.on('exit', (code) => resolve(code ?? 0));
+  });
 }
 
 const tempDirectories: string[] = [];
@@ -294,4 +338,135 @@ describe.sequential('refresh single-flight protection', () => {
     expect(currentState?.generationId).toBe(firstResult.diagnostics.generationId);
     await expect(fs.access(generationsDirectory)).resolves.toBeUndefined();
   });
+
+  it('coalesces burst refresh requests across multiple processes into one committed generation', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    const releaseFile = path.join(tempRoot, 'release.txt');
+    const startedFile = path.join(tempRoot, 'started.txt');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export const alpha = 1;');
+
+    const primaryResultFile = path.join(tempRoot, 'primary-result.json');
+    const primary = spawnRefreshChild(tempRoot, reposRoot, primaryResultFile, {
+      REPORADAR_CHILD_HOLD_ON_START: 'true',
+      REPORADAR_CHILD_SIGNAL_FILE: startedFile,
+      REPORADAR_CHILD_RELEASE_FILE: releaseFile,
+    });
+
+    await waitForFile(startedFile);
+
+    const followerResultFiles = Array.from({ length: 10 }, (_, index) =>
+      path.join(tempRoot, `follower-${index}.json`),
+    );
+    const followers = followerResultFiles.map((resultFile) =>
+      spawnRefreshChild(tempRoot, reposRoot, resultFile),
+    );
+
+    await fs.writeFile(releaseFile, 'go', 'utf8');
+
+    const exitCodes = await Promise.all([primary, ...followers]);
+    const generationDirectories = await listGenerationDirectories(tempRoot);
+    const currentState = await loadCurrentGenerationState();
+    const results = await Promise.all(
+      [primaryResultFile, ...followerResultFiles].map((resultFile) =>
+        readJsonFile<{ generationId?: string; error?: string }>(resultFile),
+      ),
+    );
+
+    expect(exitCodes.every((code) => code === 0)).toBe(true);
+    expect(results.every((result) => !result.error)).toBe(true);
+    expect(new Set(results.map((result) => result.generationId)).size).toBe(1);
+    expect(generationDirectories).toHaveLength(1);
+    expect(currentState?.generationId).toBe(results[0]?.generationId);
+  }, 20_000);
+
+  it('runs exactly one cross-process follow-up refresh when a new request arrives during an active refresh', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    const releaseFile = path.join(tempRoot, 'release-manifest.txt');
+    const startedFile = path.join(tempRoot, 'manifest-started.txt');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    const logger = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+    };
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export const alpha = 1;');
+    await refreshIndexes(reposRoot, { logger });
+
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export const beta = 2;');
+
+    const primaryResultFile = path.join(tempRoot, 'primary-follow-up.json');
+    const primary = spawnRefreshChild(tempRoot, reposRoot, primaryResultFile, {
+      REPORADAR_CHILD_HOLD_AFTER_MANIFEST: 'true',
+      REPORADAR_CHILD_SIGNAL_FILE: startedFile,
+      REPORADAR_CHILD_RELEASE_FILE: releaseFile,
+    });
+
+    await waitForFile(startedFile);
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export const gamma = 3;');
+
+    const followerResultFile = path.join(tempRoot, 'follower-follow-up.json');
+    const follower = spawnRefreshChild(tempRoot, reposRoot, followerResultFile);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await fs.writeFile(releaseFile, 'go', 'utf8');
+
+    const [primaryExitCode, followerExitCode] = await Promise.all([primary, follower]);
+    const generationDirectories = await listGenerationDirectories(tempRoot);
+    const symbolIndex = await loadSymbolIndex();
+    const currentState = await loadCurrentGenerationState();
+    const primaryResult = await readJsonFile<{ generationId?: string; error?: string }>(primaryResultFile);
+    const followerResult = await readJsonFile<{ generationId?: string; error?: string }>(followerResultFile);
+
+    expect(primaryExitCode).toBe(0);
+    expect(followerExitCode).toBe(0);
+    expect(primaryResult.error).toBeUndefined();
+    expect(followerResult.error).toBeUndefined();
+    expect(symbolIndex.symbols.some((symbol) => symbol.name === 'gamma')).toBe(true);
+    expect(symbolIndex.symbols.some((symbol) => symbol.name === 'beta')).toBe(false);
+    expect(generationDirectories).toHaveLength(3);
+    expect(currentState?.generationId).toBe(followerResult.generationId);
+    expect(
+      new Set([primaryResult.generationId, followerResult.generationId]).size,
+    ).toBeLessThanOrEqual(2);
+  }, 20_000);
+
+  it('recovers from a crashed process that dies while holding the refresh lock', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    const startedFile = path.join(tempRoot, 'crash-started.txt');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    const logger = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+    };
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export const alpha = 1;');
+
+    const crashedResultFile = path.join(tempRoot, 'crashed-result.json');
+    const crashedExitCodePromise = spawnRefreshChild(tempRoot, reposRoot, crashedResultFile, {
+      REPORADAR_CHILD_HOLD_ON_START: 'true',
+      REPORADAR_CHILD_SIGNAL_FILE: startedFile,
+      REPORADAR_CHILD_CRASH_ON_SIGNAL: 'true',
+    });
+
+    await waitForFile(startedFile);
+    expect(await crashedExitCodePromise).not.toBe(0);
+
+    const recovered = await refreshIndexes(reposRoot, { logger });
+
+    expect(recovered.diagnostics.generationId).toBeTruthy();
+  }, 20_000);
 });

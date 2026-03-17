@@ -14,6 +14,7 @@ interface RefreshLockMetadata {
   ownerPid: number;
   ownerHost: string;
   reposRoot: string;
+  phase: 'primary' | 'follow-up';
   startedAt: string;
   heartbeatAt: string;
 }
@@ -23,6 +24,7 @@ interface RefreshLockHandle {
   lockPath: string;
   metadataPath: string;
   ownerId: string;
+  updatePhase: (phase: RefreshLockMetadata['phase']) => Promise<void>;
   release: () => Promise<void>;
 }
 
@@ -35,9 +37,10 @@ export interface RefreshCoordinatorTestHooks {
   }) => Promise<void> | void;
 }
 
-interface RefreshCoordinatorOptions {
+interface RefreshCoordinatorOptions<TResult> {
   logger?: Pick<Console, 'info' | 'warn' | 'error'>;
   testHooks?: RefreshCoordinatorTestHooks;
+  loadSettledResult?: () => Promise<TResult | null>;
 }
 
 interface LocalRefreshFlight<TResult> {
@@ -81,6 +84,7 @@ function createLockMetadata(ownerId: string, reposRoot: string): RefreshLockMeta
     ownerPid: process.pid,
     ownerHost: os.hostname(),
     reposRoot: path.resolve(reposRoot),
+    phase: 'primary',
     startedAt: now,
     heartbeatAt: now,
   };
@@ -156,39 +160,35 @@ async function markRefreshPending(reposRoot: string): Promise<void> {
   );
 }
 
+async function hasRefreshPending(reposRoot: string): Promise<boolean> {
+  try {
+    await fs.access(getRefreshPendingFilePath(reposRoot));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function clearRefreshPending(reposRoot: string): Promise<void> {
   await fs.rm(getRefreshPendingFilePath(reposRoot), { force: true });
 }
 
-async function consumeRefreshPending(reposRoot: string): Promise<boolean> {
-  const filePath = getRefreshPendingFilePath(reposRoot);
-
-  try {
-    await fs.access(filePath);
-  } catch {
-    return false;
-  }
-
-  await fs.rm(filePath, { force: true });
-  return true;
-}
-
-async function acquireRefreshLock(
+async function tryAcquireRefreshLock(
   reposRoot: string,
   logger: Pick<Console, 'info' | 'warn' | 'error'>,
-): Promise<RefreshLockHandle> {
+): Promise<{ handle: RefreshLockHandle | null; busyMetadata: RefreshLockMetadata | null }> {
   const scopeKey = createScopeKey(reposRoot);
   const lockPath = getRefreshLockFilePath(reposRoot);
   const metadataPath = getLockMetadataPath(lockPath);
   const ownerId = `${process.pid}-${randomUUID()}`;
-  let waitLogged = false;
+  const resolvedReposRoot = path.resolve(reposRoot);
 
   await fs.mkdir(getRefreshLockRootDirectory(), { recursive: true });
 
   for (;;) {
     try {
       await fs.mkdir(lockPath);
-      const metadata = createLockMetadata(ownerId, reposRoot);
+      let metadata = createLockMetadata(ownerId, reposRoot);
       await writeLockMetadata(metadataPath, metadata);
 
       const heartbeat = setInterval(() => {
@@ -198,18 +198,29 @@ async function acquireRefreshLock(
         }).catch(() => undefined);
       }, REFRESH_LOCK_HEARTBEAT_MS);
 
-      logger.info(`[refresh-lock] reposRoot=${path.resolve(reposRoot)} action=lock-acquired owner=${ownerId}`);
+      logger.info(`[refresh-lock] reposRoot=${resolvedReposRoot} action=lock-acquired owner=${ownerId}`);
 
       return {
-        scopeKey,
-        lockPath,
-        metadataPath,
-        ownerId,
-        release: async () => {
-          clearInterval(heartbeat);
-          await fs.rm(lockPath, { recursive: true, force: true });
-          logger.info(`[refresh-lock] reposRoot=${path.resolve(reposRoot)} action=lock-released owner=${ownerId}`);
+        handle: {
+          scopeKey,
+          lockPath,
+          metadataPath,
+          ownerId,
+          updatePhase: async (phase) => {
+            metadata = {
+              ...metadata,
+              phase,
+              heartbeatAt: new Date().toISOString(),
+            };
+            await writeLockMetadata(metadataPath, metadata);
+          },
+          release: async () => {
+            clearInterval(heartbeat);
+            await fs.rm(lockPath, { recursive: true, force: true });
+            logger.info(`[refresh-lock] reposRoot=${resolvedReposRoot} action=lock-released owner=${ownerId}`);
+          },
         },
+        busyMetadata: null,
       };
     } catch (error) {
       const code =
@@ -225,30 +236,57 @@ async function acquireRefreshLock(
 
       if (isStaleLock(metadata)) {
         logger.warn(
-          `[refresh-lock] reposRoot=${path.resolve(reposRoot)} action=stale-lock-recovered lockPath=${lockPath}`,
+          `[refresh-lock] reposRoot=${resolvedReposRoot} action=stale-lock-recovered lockPath=${lockPath}`,
         );
         await fs.rm(lockPath, { recursive: true, force: true });
         continue;
       }
 
-      if (!waitLogged) {
-        logger.info(
-          `[refresh-lock] reposRoot=${path.resolve(reposRoot)} action=lock-busy owner=${metadata?.ownerId ?? 'unknown'} lockPath=${lockPath}`,
-        );
-        waitLogged = true;
-      }
-
-      await wait(REFRESH_LOCK_WAIT_MS);
+      return {
+        handle: null,
+        busyMetadata: metadata,
+      };
     }
+  }
+}
+
+async function waitForRefreshSettlement<TResult>(
+  reposRoot: string,
+  loadSettledResult: (() => Promise<TResult | null>) | undefined,
+): Promise<{ settled: boolean; result: TResult | null }> {
+  const lockPath = getRefreshLockFilePath(reposRoot);
+
+  for (;;) {
+    const metadata = await readLockMetadata(lockPath);
+
+    if (metadata && !isStaleLock(metadata)) {
+      await wait(REFRESH_LOCK_WAIT_MS);
+      continue;
+    }
+
+    if (metadata && isStaleLock(metadata)) {
+      return { settled: false, result: null };
+    }
+
+    if (await hasRefreshPending(reposRoot)) {
+      return { settled: false, result: null };
+    }
+
+    const result = loadSettledResult ? await loadSettledResult() : null;
+    return {
+      settled: result !== null,
+      result,
+    };
   }
 }
 
 export async function runSingleFlightRefresh<TResult>(
   reposRoot: string,
   runner: () => Promise<TResult>,
-  options: RefreshCoordinatorOptions = {},
+  options: RefreshCoordinatorOptions<TResult> = {},
 ): Promise<TResult> {
   const logger = options.logger ?? console;
+  const resolvedReposRoot = path.resolve(reposRoot);
   const scopeKey = createScopeKey(reposRoot);
   const existingFlight = localRefreshFlights.get(scopeKey) as LocalRefreshFlight<TResult> | undefined;
 
@@ -257,11 +295,11 @@ export async function runSingleFlightRefresh<TResult>(
       existingFlight.pendingRequested = true;
       await markRefreshPending(reposRoot);
       logger.info(
-        `[refresh-lock] reposRoot=${path.resolve(reposRoot)} action=follow-up-scheduled reason=active-refresh`,
+        `[refresh-lock] reposRoot=${resolvedReposRoot} action=follow-up-scheduled reason=active-local-refresh`,
       );
     } else {
       logger.info(
-        `[refresh-lock] reposRoot=${path.resolve(reposRoot)} action=join-waiting-refresh`,
+        `[refresh-lock] reposRoot=${resolvedReposRoot} action=join-waiting-refresh`,
       );
     }
 
@@ -275,37 +313,75 @@ export async function runSingleFlightRefresh<TResult>(
   };
 
   flight.promise = (async () => {
-    let iteration = 0;
-
     try {
       for (;;) {
-        iteration += 1;
-        const lockHandle = await acquireRefreshLock(reposRoot, logger);
+        const { handle: lockHandle, busyMetadata } = await tryAcquireRefreshLock(reposRoot, logger);
+
+        if (!lockHandle) {
+          logger.info(
+            `[refresh-lock] reposRoot=${resolvedReposRoot} action=refresh-skipped owner=${busyMetadata?.ownerId ?? 'unknown'} phase=${busyMetadata?.phase ?? 'unknown'}`,
+          );
+
+          if (busyMetadata?.phase === 'primary') {
+            if (!(await hasRefreshPending(reposRoot))) {
+              await markRefreshPending(reposRoot);
+              logger.info(
+                `[refresh-lock] reposRoot=${resolvedReposRoot} action=follow-up-scheduled reason=active-cross-process-refresh`,
+              );
+            } else {
+              logger.info(
+                `[refresh-lock] reposRoot=${resolvedReposRoot} action=refresh-coalesced reason=follow-up-already-pending`,
+              );
+            }
+          } else {
+            logger.info(
+              `[refresh-lock] reposRoot=${resolvedReposRoot} action=refresh-coalesced reason=active-follow-up-refresh`,
+            );
+          }
+
+          const settlement = await waitForRefreshSettlement(reposRoot, options.loadSettledResult);
+
+          if (settlement.settled && settlement.result !== null) {
+            return settlement.result;
+          }
+
+          continue;
+        }
 
         try {
+          let iteration = 1;
+          let result: TResult | null = null;
           flight.phase = 'running';
           flight.pendingRequested = false;
           await clearRefreshPending(reposRoot);
           logger.info(
-            `[refresh-lock] reposRoot=${path.resolve(reposRoot)} action=refresh-start iteration=${iteration}`,
+            `[refresh-lock] reposRoot=${resolvedReposRoot} action=refresh-start iteration=${iteration}`,
           );
-          await options.testHooks?.onSingleFlightRunStart?.({ iteration, reposRoot: path.resolve(reposRoot) });
-          const result = await runner();
-          const pendingFromMarker = await consumeRefreshPending(reposRoot);
-          const hadFollowUpRequest = flight.pendingRequested || pendingFromMarker;
+          await options.testHooks?.onSingleFlightRunStart?.({ iteration, reposRoot: resolvedReposRoot });
+          result = await runner();
+          const hadFollowUpRequest = flight.pendingRequested || (await hasRefreshPending(reposRoot));
           await options.testHooks?.onSingleFlightRunComplete?.({
             iteration,
-            reposRoot: path.resolve(reposRoot),
+            reposRoot: resolvedReposRoot,
             hadFollowUpRequest,
           });
 
           if (hadFollowUpRequest) {
-            flight.phase = 'waiting';
+            await clearRefreshPending(reposRoot);
+            await lockHandle.updatePhase('follow-up');
             flight.pendingRequested = false;
+            iteration = 2;
             logger.info(
-              `[refresh-lock] reposRoot=${path.resolve(reposRoot)} action=follow-up-refresh-start iteration=${iteration + 1}`,
+              `[refresh-lock] reposRoot=${resolvedReposRoot} action=follow-up-refresh-triggered iteration=${iteration}`,
             );
-            continue;
+            await options.testHooks?.onSingleFlightRunStart?.({ iteration, reposRoot: resolvedReposRoot });
+            result = await runner();
+            await options.testHooks?.onSingleFlightRunComplete?.({
+              iteration,
+              reposRoot: resolvedReposRoot,
+              hadFollowUpRequest: false,
+            });
+            await clearRefreshPending(reposRoot);
           }
 
           return result;

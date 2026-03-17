@@ -33,6 +33,7 @@ import {
   loadUiSemanticsIndexForGeneration,
 } from './ui-semantics.js';
 import {
+  getGenerationArtifactFilePath,
   loadCurrentGenerationState,
   initializeStagedGeneration,
   markGenerationAbandoned,
@@ -57,6 +58,7 @@ import type {
   IndexRefreshDelta,
   IndexRefreshDiagnostics,
   IndexedRepositoryDescriptor,
+  GenerationChangeSummary,
 } from './types.js';
 
 const INDEX_GENERATION_STATE_SCHEMA_VERSION = 2;
@@ -366,6 +368,45 @@ function logDiagnostics(
   for (const warning of diagnostics.warnings) {
     logger.warn(`[index-refresh] warning: ${warning}`);
   }
+}
+
+async function loadCommittedChangeSummary(generationId: string): Promise<GenerationChangeSummary> {
+  const filePath = getGenerationArtifactFilePath(generationId, 'change-summary.json');
+  const content = await fs.readFile(filePath, 'utf8');
+  return JSON.parse(content) as GenerationChangeSummary;
+}
+
+async function loadLatestRefreshResult(): Promise<
+  { symbolIndex: SymbolIndex; diagnostics: IndexRefreshDiagnostics } | null
+> {
+  const state = await loadCurrentGenerationState();
+
+  if (!state) {
+    return null;
+  }
+
+  const symbolIndex = await loadSymbolIndex();
+  const changeSummary = await loadCommittedChangeSummary(state.generationId);
+
+  return {
+    symbolIndex,
+    diagnostics: {
+      generationId: state.generationId,
+      createdAt: state.createdAt,
+      delta: {
+        added: [],
+        modified: [],
+        deleted: [],
+      },
+      changeSummary,
+      counts: state.counts,
+      rebuild: state.rebuild,
+      cleanup: state.cleanup,
+      search: state.search,
+      warnings: state.warnings,
+      status: 'committed',
+    },
+  };
 }
 
 async function refreshIndexesUnlocked(
@@ -729,6 +770,7 @@ export async function refreshIndexes(
     {
       logger: options.logger,
       testHooks: options.testHooks,
+      loadSettledResult: loadLatestRefreshResult,
     },
   );
 }
