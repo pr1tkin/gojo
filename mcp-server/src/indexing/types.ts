@@ -21,6 +21,19 @@ export type IndexHealthTrustState =
   | 'stale-search'
   | 'inconsistent'
   | 'unknown';
+export type RefreshFaultStage =
+  | 'before-snapshot'
+  | 'after-snapshot'
+  | 'after-change-detection'
+  | 'rebuild-symbols'
+  | 'rebuild-graph'
+  | 'rebuild-patterns'
+  | 'persist-artifacts'
+  | 'before-commit'
+  | 'coordination-update'
+  | 'consistency-maintenance';
+export type RefreshFaultMode = 'throw' | 'crash' | 'partial-write' | 'skip-step';
+export type RefreshFailureTrustImpact = 'degraded' | 'inconsistent';
 
 export interface IndexedRepositoryDescriptor {
   repoId: string;
@@ -298,6 +311,17 @@ export interface IndexRefreshDiagnostics {
   status: 'no-op' | 'committed';
 }
 
+export interface RefreshFailureRecord {
+  schemaVersion: number;
+  failedAt: string;
+  generationId?: string;
+  stage?: RefreshFaultStage;
+  mode?: RefreshFaultMode;
+  reason: string;
+  cleanupRequired: boolean;
+  trustImpact: RefreshFailureTrustImpact;
+}
+
 export interface SearchRefreshRequest {
   schemaVersion: number;
   generationId: string;
@@ -354,6 +378,7 @@ export interface IndexHealthSummary {
   changeSummary: GenerationChangeSummary | null;
   consistency: ConsistencyRunReport | null;
   recentActivity: IndexHealthRecentActivity;
+  lastRefreshFailure?: RefreshFailureRecord | null;
   trustState: IndexHealthTrustState;
   suitableForAgentWorkflows: boolean;
   reasons: string[];

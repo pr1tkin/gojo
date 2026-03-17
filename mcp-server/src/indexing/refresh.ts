@@ -27,6 +27,12 @@ import { getCurrentIndexHealth } from './health.js';
 import { evaluateHighRiskRefreshValidation } from './high-risk-validation.js';
 import { evaluatePatternIntegrity } from './pattern-integrity.js';
 import {
+  applyRefreshFaultInjection,
+  RefreshFaultInjectedError,
+  resolveRefreshFaultInjection,
+  type RefreshFaultInjectionConfig,
+} from './refresh-fault-injection.js';
+import {
   buildUiSemanticsIndex,
   createEmptyUiSemanticsIndex,
   getUiSemanticsArtifactFileName,
@@ -34,13 +40,16 @@ import {
 } from './ui-semantics.js';
 import {
   getGenerationArtifactFilePath,
+  clearRefreshFailure,
   loadCurrentGenerationState,
   initializeStagedGeneration,
   markGenerationAbandoned,
   markGenerationCommitted,
   publishGeneration,
+  saveRefreshFailure,
   saveGenerationArtifacts,
   saveSearchRefreshRequest,
+  updateGenerationState,
 } from './generation-store.js';
 import {
   createSearchRefreshRequest,
@@ -66,6 +75,7 @@ const INDEX_GENERATION_STATE_SCHEMA_VERSION = 2;
 export interface RefreshIndexesOptions {
   logger?: Pick<Console, 'info' | 'warn' | 'error'>;
   failBeforePublish?: boolean;
+  faultInjection?: RefreshFaultInjectionConfig | null;
   runConsistencyChecks?: 'never' | 'risky-only' | 'always';
   testHooks?: RefreshCoordinatorTestHooks & {
     afterManifestScanned?: (context: {
@@ -409,21 +419,51 @@ async function loadLatestRefreshResult(): Promise<
   };
 }
 
+async function writeMalformedJson(filePath: string, content: string): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, content, 'utf8');
+}
+
+async function recordRefreshFailure(options: {
+  failedAt: string;
+  generationId?: string;
+  stage?: RefreshFaultInjectionConfig['stage'];
+  mode?: RefreshFaultInjectionConfig['mode'];
+  reason: string;
+  cleanupRequired: boolean;
+  trustImpact: 'degraded' | 'inconsistent';
+}): Promise<void> {
+  await saveRefreshFailure(options).catch(() => undefined);
+}
+
 async function refreshIndexesUnlocked(
   reposRoot: string,
   options: RefreshIndexesOptions = {},
 ): Promise<{ symbolIndex: SymbolIndex; diagnostics: IndexRefreshDiagnostics }> {
   const logger = options.logger ?? console;
+  const faultInjection = resolveRefreshFaultInjection(options.faultInjection);
   await cleanupGenerationDebris({ logger, applyDeletes: true });
+  await applyRefreshFaultInjection(faultInjection, {
+    stage: 'before-snapshot',
+    logger,
+  });
   const previousGeneration = await loadCurrentGenerationState();
   const previousManifest = previousGeneration?.manifest ?? [];
   const { repositories, manifest } = await scanRepositoryManifest(reposRoot);
   const searchFingerprints = await buildSearchRepoFingerprints(reposRoot);
+  await applyRefreshFaultInjection(faultInjection, {
+    stage: 'after-snapshot',
+    logger,
+  });
   const delta = diffManifest(previousManifest, manifest);
   await options.testHooks?.afterManifestScanned?.({
     reposRoot: path.resolve(reposRoot),
     delta,
     hasPreviousGeneration: previousGeneration !== null,
+  });
+  await applyRefreshFaultInjection(faultInjection, {
+    stage: 'after-change-detection',
+    logger,
   });
 
   if (!hasManifestChanges(delta) && previousGeneration) {
@@ -444,6 +484,7 @@ async function refreshIndexesUnlocked(
     };
     logDiagnostics(logger, diagnostics);
     await getCurrentIndexHealth();
+    await clearRefreshFailure();
     return { symbolIndex: currentSymbolIndex, diagnostics };
   }
 
@@ -451,10 +492,16 @@ async function refreshIndexesUnlocked(
   const createdAt = new Date().toISOString();
   await initializeStagedGeneration(generationId, createdAt);
   const warnings: string[] = [];
+  const postCommitErrors: string[] = [];
   try {
     const changedOrAddedKeys = new Set([...delta.added, ...delta.modified]);
     const deletedKeys = new Set(delta.deleted);
     const freshSymbolIndex = await buildIndexedSymbols(reposRoot);
+    await applyRefreshFaultInjection(faultInjection, {
+      stage: 'rebuild-symbols',
+      generationId,
+      logger,
+    });
     const previousSymbolIndex = previousGeneration
       ? await loadSymbolIndex()
       : createEmptySymbolIndex(freshSymbolIndex.schemaVersion);
@@ -465,6 +512,11 @@ async function refreshIndexesUnlocked(
       deletedKeys,
     );
     const extractedPatternIndex = await runPatternExtractionStage(reposRoot, mergedSymbolIndex);
+    await applyRefreshFaultInjection(faultInjection, {
+      stage: 'rebuild-patterns',
+      generationId,
+      logger,
+    });
     const freshPatternIndex =
       (await options.testHooks?.mutatePatternIndex?.({
         reposRoot: path.resolve(reposRoot),
@@ -531,6 +583,11 @@ async function refreshIndexesUnlocked(
     );
     const graph = buildCodeGraphFromSymbolIndex(mergedSymbolIndex, {
       repoResolutionConfigsById: repoConfigById,
+    });
+    await applyRefreshFaultInjection(faultInjection, {
+      stage: 'rebuild-graph',
+      generationId,
+      logger,
     });
     const uiComposition = await buildUiCompositionIndex(reposRoot, mergedSymbolIndex);
     const uiProps = await buildUiPropSurfaceIndex(reposRoot, mergedSymbolIndex);
@@ -685,28 +742,121 @@ async function refreshIndexesUnlocked(
       throw new Error(`High-risk refresh validation failed: ${failureSummary}`);
     }
 
-    await saveGenerationArtifacts(
-      generationId,
-      {
-        'symbol-index.json': finalSymbolIndex,
-        'code-graph.json': finalGraph,
-        'ui-composition.json': finalUiComposition,
-        'ui-props.json': finalUiProps,
-        [getUiSemanticsArtifactFileName()]: uiSemantics,
-        'pattern-candidates.json': finalPatternIndex,
-        'change-summary.json': changeSummary,
-      },
-      generationState,
-    );
+    const artifacts: Record<string, unknown> = {
+      'symbol-index.json': finalSymbolIndex,
+      'code-graph.json': finalGraph,
+      'ui-composition.json': finalUiComposition,
+      'ui-props.json': finalUiProps,
+      [getUiSemanticsArtifactFileName()]: uiSemantics,
+      'pattern-candidates.json': finalPatternIndex,
+      'change-summary.json': changeSummary,
+    };
+    const artifactFault =
+      faultInjection?.mode === 'skip-step'
+        ? await applyRefreshFaultInjection(faultInjection, {
+            stage: 'persist-artifacts',
+            generationId,
+            logger,
+            target: faultInjection?.target,
+            onSkipStep: async () => {
+              const targetFile = faultInjection?.target ?? 'symbol-index.json';
+              delete artifacts[targetFile];
+            },
+          })
+        : { injected: false, skipped: false, warning: undefined };
+
+    if (artifactFault.warning) {
+      warnings.push(artifactFault.warning);
+    }
+
+    generationState.warnings = [...warnings];
+    await saveGenerationArtifacts(generationId, artifacts, generationState);
+    if (artifactFault.injected) {
+      throw new RefreshFaultInjectedError(
+        'persist-artifacts',
+        faultInjection?.mode ?? 'skip-step',
+        faultInjection?.target,
+      );
+    }
+    if (faultInjection?.mode === 'partial-write') {
+      const partialArtifactFault = await applyRefreshFaultInjection(faultInjection, {
+        stage: 'persist-artifacts',
+        generationId,
+        logger,
+        target: faultInjection?.target,
+        onPartialWrite: async () => {
+          const targetFile = faultInjection?.target ?? 'symbol-index.json';
+          await writeMalformedJson(
+            getGenerationArtifactFilePath(generationId, targetFile),
+            '{"fault":"partial-write"',
+          );
+        },
+      });
+
+      if (partialArtifactFault.warning) {
+        warnings.push(partialArtifactFault.warning);
+        generationState.warnings = [...warnings];
+        await updateGenerationState(generationId, generationState);
+      }
+
+      if (partialArtifactFault.injected) {
+        throw new RefreshFaultInjectedError('persist-artifacts', 'partial-write', faultInjection?.target);
+      }
+    }
 
     if (options.failBeforePublish) {
       throw new Error('Simulated refresh failure before publish.');
     }
 
-    await saveSearchRefreshRequest(searchRequest);
-    logger.info(
-      `[search-freshness] request generation=${generationId} status=${generationState.search.status} fingerprint=${generationState.search.aggregateFingerprint}`,
-    );
+    const coordinationFault =
+      faultInjection?.mode === 'skip-step'
+        ? await applyRefreshFaultInjection(faultInjection, {
+            stage: 'coordination-update',
+            generationId,
+            logger,
+            target: faultInjection?.target,
+          })
+        : { injected: false, skipped: false, warning: undefined };
+
+    if (coordinationFault.warning) {
+      warnings.push(coordinationFault.warning);
+      generationState.warnings = [...warnings];
+      await updateGenerationState(generationId, generationState);
+    }
+
+    if (!coordinationFault.skipped) {
+      await saveSearchRefreshRequest(searchRequest);
+      logger.info(
+        `[search-freshness] request generation=${generationId} status=${generationState.search.status} fingerprint=${generationState.search.aggregateFingerprint}`,
+      );
+    }
+
+    if (faultInjection?.mode === 'partial-write') {
+      const partialCoordinationFault = await applyRefreshFaultInjection(faultInjection, {
+        stage: 'coordination-update',
+        generationId,
+        logger,
+        target: faultInjection?.target,
+        onPartialWrite: async () => {
+          await writeMalformedJson(
+            path.join(process.cwd(), '.data', 'coordination', 'search-refresh-request.json'),
+            '{"fault":"partial-write"',
+          );
+        },
+      });
+
+      if (partialCoordinationFault.warning) {
+        warnings.push(partialCoordinationFault.warning);
+        generationState.warnings = [...warnings];
+        await updateGenerationState(generationId, generationState);
+      }
+    }
+
+    await applyRefreshFaultInjection(faultInjection, {
+      stage: 'before-commit',
+      generationId,
+      logger,
+    });
     await publishGeneration(generationId, createdAt);
     await markGenerationCommitted(generationId, createdAt);
 
@@ -719,13 +869,45 @@ async function refreshIndexesUnlocked(
       ((options.runConsistencyChecks ?? 'risky-only') === 'risky-only' &&
         changeSummary.overview.highRiskFiles > 0)
     ) {
-      consistency =
-        (await runCurrentGenerationConsistencyMaintenance({ logger, applyRepairs: true })) ?? undefined;
-      const refreshedState = await loadCurrentGenerationState();
+      try {
+        const consistencyFault = await applyRefreshFaultInjection(faultInjection, {
+          stage: 'consistency-maintenance',
+          generationId,
+          logger,
+        });
 
-      if (refreshedState) {
-        finalCounts = refreshedState.counts;
-        finalSearch = refreshedState.search;
+        if (consistencyFault.warning) {
+          warnings.push(consistencyFault.warning);
+        }
+
+        if (!consistencyFault.skipped) {
+          consistency =
+            (await runCurrentGenerationConsistencyMaintenance({ logger, applyRepairs: true })) ?? undefined;
+          const refreshedState = await loadCurrentGenerationState();
+
+          if (refreshedState) {
+            finalCounts = refreshedState.counts;
+            finalSearch = refreshedState.search;
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'consistency maintenance failed unexpectedly';
+        postCommitErrors.push(message);
+        warnings.push(`consistency maintenance failed after publish: ${message}`);
+        await recordRefreshFailure({
+          failedAt: new Date().toISOString(),
+          generationId,
+          stage:
+            error instanceof RefreshFaultInjectedError ? error.stage : 'consistency-maintenance',
+          mode:
+            error instanceof RefreshFaultInjectedError ? error.mode : undefined,
+          reason: message,
+          cleanupRequired: false,
+          trustImpact: 'degraded',
+        });
+        generationState.errors = [...generationState.errors, ...postCommitErrors];
+        generationState.warnings = [...warnings];
+        await updateGenerationState(generationId, generationState);
       }
     }
     await cleanupGenerationDebris({ logger, applyDeletes: true });
@@ -745,17 +927,36 @@ async function refreshIndexesUnlocked(
     };
     logDiagnostics(logger, diagnostics);
     await getCurrentIndexHealth();
+    if (postCommitErrors.length === 0) {
+      await clearRefreshFailure();
+    }
 
     return {
       symbolIndex: finalSymbolIndex,
       diagnostics,
     };
   } catch (error) {
-    await markGenerationAbandoned(
+    const failedAt = new Date().toISOString();
+    const reason = error instanceof Error ? error.message : 'refresh failed before publish';
+    const isInjectedFault = error instanceof RefreshFaultInjectedError;
+
+    if (!isInjectedFault || !error.simulatesCrash) {
+      await markGenerationAbandoned(generationId, failedAt, reason).catch(() => undefined);
+    }
+
+    await recordRefreshFailure({
+      failedAt,
       generationId,
-      new Date().toISOString(),
-      error instanceof Error ? error.message : 'refresh failed before publish',
-    ).catch(() => undefined);
+      stage: isInjectedFault ? error.stage : undefined,
+      mode: isInjectedFault ? error.mode : undefined,
+      reason,
+      cleanupRequired: isInjectedFault ? error.simulatesCrash || error.mode === 'partial-write' : true,
+      trustImpact:
+        isInjectedFault && (error.simulatesCrash || error.mode === 'partial-write')
+          ? 'inconsistent'
+          : 'degraded',
+    });
+
     throw error;
   }
 }

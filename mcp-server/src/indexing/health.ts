@@ -13,6 +13,7 @@ import {
   getGenerationArtifactFilePath,
   loadCurrentGenerationPointer,
   loadCurrentGenerationState,
+  loadRefreshFailure,
   loadSearchRefreshRequestResult,
   loadSearchRefreshSnapshotResult,
 } from './generation-store.js';
@@ -23,6 +24,7 @@ import type {
   GenerationChangeSummary,
   IndexHealthSummary,
   IndexHealthTrustState,
+  RefreshFailureRecord,
   SearchFreshnessState,
 } from './types.js';
 
@@ -89,6 +91,7 @@ function determineTrustState(input: {
   search: SearchFreshnessState | null;
   consistency: ConsistencyRunReport | null;
   changeSummary: GenerationChangeSummary | null;
+  refreshFailure: RefreshFailureRecord | null;
   warnings: string[];
   errors: string[];
   reasons: string[];
@@ -106,6 +109,14 @@ function determineTrustState(input: {
   }
 
   if (input.criticalDataTrustImpact === 'degraded') {
+    return 'degraded';
+  }
+
+  if (input.refreshFailure?.trustImpact === 'inconsistent') {
+    return 'inconsistent';
+  }
+
+  if (input.refreshFailure?.trustImpact === 'degraded') {
     return 'degraded';
   }
 
@@ -168,6 +179,8 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     }
   }
 
+  const refreshFailure = await loadRefreshFailure().catch(() => null);
+
   if (!pointer || !state) {
     const summary: IndexHealthSummary = {
       schemaVersion: INDEX_HEALTH_SCHEMA_VERSION,
@@ -187,14 +200,21 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
         unknownStructuralChangeCount: 0,
         recentChangedFiles: [],
       },
+      lastRefreshFailure: refreshFailure,
       trustState: 'unknown',
       suitableForAgentWorkflows: false,
-      reasons: ['no published generation is available'],
+      reasons: [
+        'no published generation is available',
+        ...(refreshFailure ? [`last refresh failed at ${refreshFailure.failedAt}: ${refreshFailure.reason}`] : []),
+      ],
       warnings: [],
       errors: [
         metadataLoadError
           ? `current generation metadata is unavailable or unreadable: ${metadataLoadError}`
           : 'current generation pointer or generation state is missing',
+        ...(refreshFailure
+          ? [`last refresh failed at ${refreshFailure.failedAt}: ${refreshFailure.reason}`]
+          : []),
       ],
     };
     await saveCurrentIndexHealthSnapshot(summary);
@@ -332,6 +352,18 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     reasons.push(search.details ?? `search freshness is ${search.status}`);
   }
 
+  if (refreshFailure) {
+    const failureMessage = `last refresh failed at ${refreshFailure.failedAt}: ${refreshFailure.reason}`;
+
+    if (refreshFailure.trustImpact === 'inconsistent') {
+      errors.push(failureMessage);
+    } else {
+      warnings.push(failureMessage);
+    }
+
+    reasons.push(failureMessage);
+  }
+
   const changeSummary = changeSummaryStatus.value;
   const consistency = consistencyStatus.value;
 
@@ -371,6 +403,7 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     search,
     consistency,
     changeSummary,
+    refreshFailure,
     warnings,
     errors,
     reasons,
@@ -403,6 +436,7 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     changeSummary,
     consistency,
     recentActivity,
+    lastRefreshFailure: refreshFailure,
     trustState,
     suitableForAgentWorkflows:
       (trustState === 'healthy' || trustState === 'degraded') &&

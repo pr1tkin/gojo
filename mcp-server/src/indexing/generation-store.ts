@@ -7,6 +7,7 @@ import type {
   CurrentGenerationPointer,
   GenerationLifecycleMarker,
   IndexGenerationState,
+  RefreshFailureRecord,
   SearchFreshnessState,
   SearchRefreshRequest,
   SearchRefreshSnapshot,
@@ -14,6 +15,7 @@ import type {
 
 const INDEX_GENERATION_SCHEMA_VERSION = 1;
 const GENERATION_LIFECYCLE_SCHEMA_VERSION = 1;
+const REFRESH_FAILURE_SCHEMA_VERSION = 1;
 
 export const REQUIRED_GENERATION_ARTIFACT_FILES = [
   'symbol-index.json',
@@ -76,6 +78,10 @@ export function getGenerationLifecycleFilePath(generationId: string): string {
 
 export function getCurrentHealthSnapshotFilePath(): string {
   return path.join(getDataDirectory(), 'current-health.json');
+}
+
+export function getRefreshFailureFilePath(): string {
+  return path.join(getDataDirectory(), 'maintenance', 'refresh-failures', 'latest.json');
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -145,6 +151,30 @@ function normalizeGenerationLifecycleMarker(value: unknown): GenerationLifecycle
     publishedAt: typeof value.publishedAt === 'string' ? value.publishedAt : undefined,
     abandonedAt: typeof value.abandonedAt === 'string' ? value.abandonedAt : undefined,
     reason: typeof value.reason === 'string' ? value.reason : undefined,
+  };
+}
+
+function normalizeRefreshFailureRecord(value: unknown): RefreshFailureRecord | null {
+  if (
+    !isObject(value) ||
+    typeof value.schemaVersion !== 'number' ||
+    typeof value.failedAt !== 'string' ||
+    typeof value.reason !== 'string' ||
+    typeof value.cleanupRequired !== 'boolean' ||
+    (value.trustImpact !== 'degraded' && value.trustImpact !== 'inconsistent')
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: value.schemaVersion,
+    failedAt: value.failedAt,
+    generationId: typeof value.generationId === 'string' ? value.generationId : undefined,
+    stage: typeof value.stage === 'string' ? (value.stage as RefreshFailureRecord['stage']) : undefined,
+    mode: typeof value.mode === 'string' ? (value.mode as RefreshFailureRecord['mode']) : undefined,
+    reason: value.reason,
+    cleanupRequired: value.cleanupRequired,
+    trustImpact: value.trustImpact,
   };
 }
 
@@ -407,6 +437,46 @@ export async function saveSearchRefreshRequest(request: SearchRefreshRequest): P
   await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
   await fsPromises.writeFile(filePath, JSON.stringify(request, null, 2), 'utf8');
   return filePath;
+}
+
+export async function saveRefreshFailure(record: Omit<RefreshFailureRecord, 'schemaVersion'>): Promise<string> {
+  const filePath = getRefreshFailureFilePath();
+  await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
+  await fsPromises.writeFile(
+    filePath,
+    JSON.stringify(
+      {
+        schemaVersion: REFRESH_FAILURE_SCHEMA_VERSION,
+        ...record,
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+  return filePath;
+}
+
+export async function clearRefreshFailure(): Promise<void> {
+  await fsPromises.rm(getRefreshFailureFilePath(), { force: true });
+}
+
+export async function loadRefreshFailure(): Promise<RefreshFailureRecord | null> {
+  try {
+    const content = await fsPromises.readFile(getRefreshFailureFilePath(), 'utf8');
+    return normalizeRefreshFailureRecord(JSON.parse(content) as unknown);
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: string }).code)
+        : '';
+
+    if (code === 'ENOENT') {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 function describeUnknownError(error: unknown): string {

@@ -152,6 +152,55 @@ npm run test -- precedent-discovery.service.test.ts
 npm run test -- plan-change.tool.test.ts
 ```
 
+## Refresh Fault Injection
+
+For deterministic refresh lifecycle failure testing, `mcp-server` supports
+internal fault injection through environment variables.
+
+Supported variables:
+
+- `FAULT_INJECTION_STAGE`
+- `FAULT_INJECTION_MODE`
+- `FAULT_INJECTION_TARGET`
+- `REPORADAR_FAULT_INJECTION_STAGE`
+- `REPORADAR_FAULT_INJECTION_MODE`
+- `REPORADAR_FAULT_INJECTION_TARGET`
+
+Supported stages:
+
+- `before-snapshot`
+- `after-snapshot`
+- `after-change-detection`
+- `rebuild-symbols`
+- `rebuild-graph`
+- `rebuild-patterns`
+- `persist-artifacts`
+- `before-commit`
+- `coordination-update`
+- `consistency-maintenance`
+
+Supported modes:
+
+- `throw`
+- `crash`
+- `partial-write`
+- `skip-step`
+
+Notes:
+
+- disabled by default
+- intended for deterministic testing and hardening only
+- `FAULT_INJECTION_TARGET` is optional and is used for targeted stages such as
+  `persist-artifacts`
+
+Example:
+
+```powershell
+$env:FAULT_INJECTION_STAGE='before-commit'
+$env:FAULT_INJECTION_MODE='throw'
+npm run test -- refresh-fault-injection
+```
+
 ## What Is Intentionally Out Of Scope
 
 The unit suite does not attempt to cover:
