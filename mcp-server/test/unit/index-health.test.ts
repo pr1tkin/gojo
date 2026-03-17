@@ -4,7 +4,11 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { getCurrentHealthSnapshotFilePath, loadCurrentGenerationState } from '../../src/indexing/generation-store.js';
+import {
+  getCurrentHealthSnapshotFilePath,
+  getGenerationArtifactFilePath,
+  loadCurrentGenerationState,
+} from '../../src/indexing/generation-store.js';
 import { runCurrentGenerationConsistencyMaintenance } from '../../src/indexing/consistency.js';
 import { getCurrentIndexHealth, loadCurrentIndexHealthSnapshot } from '../../src/indexing/health.js';
 import { refreshIndexes } from '../../src/indexing/refresh.js';
@@ -53,6 +57,16 @@ async function overwriteCurrentArtifact(cwd: string, fileName: string, value: un
   }
 
   await fs.writeFile(path.join(cwd, '.data', 'generations', state.generationId, fileName), JSON.stringify(value, null, 2), 'utf8');
+}
+
+async function removeCurrentArtifact(fileName: string): Promise<void> {
+  const state = await loadCurrentGenerationState();
+
+  if (!state) {
+    throw new Error('expected a current generation');
+  }
+
+  await fs.rm(getGenerationArtifactFilePath(state.generationId, fileName), { force: true });
 }
 
 const tempDirectories: string[] = [];
@@ -121,6 +135,110 @@ describe.sequential('index health', () => {
     expect(health.trustState).toBe('stale-search');
     expect(health.search?.status).toBe('pending');
     expect(health.reasons.join(' ')).toContain('coordination markers are not trustworthy');
+  });
+
+  it('downgrades trust to inconsistent when the published symbol index is missing', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export function alpha() { return "a"; }');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+    const state = await loadCurrentGenerationState();
+
+    await writeSearchSnapshot(tempRoot, {
+      schemaVersion: 1,
+      snapshotId: 'snapshot-ready-symbol-missing',
+      status: 'ready',
+      refreshedAt: '2026-03-17T10:00:00.000Z',
+      aggregateFingerprint: state?.search.aggregateFingerprint,
+      repoFingerprints: state?.search.repoFingerprints,
+    });
+    await removeCurrentArtifact('symbol-index.json');
+
+    const health = await getCurrentIndexHealth();
+
+    expect(health.trustState).toBe('inconsistent');
+    expect(health.suitableForAgentWorkflows).toBe(false);
+    expect(health.errors.join(' ')).toContain('symbol-index.json is missing');
+  });
+
+  it('downgrades trust when the published pattern artifact is missing', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export function alpha() { return "a"; }');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+    const state = await loadCurrentGenerationState();
+
+    await writeSearchSnapshot(tempRoot, {
+      schemaVersion: 1,
+      snapshotId: 'snapshot-ready-pattern-missing',
+      status: 'ready',
+      refreshedAt: '2026-03-17T10:00:00.000Z',
+      aggregateFingerprint: state?.search.aggregateFingerprint,
+      repoFingerprints: state?.search.repoFingerprints,
+    });
+    await removeCurrentArtifact('pattern-candidates.json');
+
+    const health = await getCurrentIndexHealth();
+
+    expect(['degraded', 'inconsistent']).toContain(health.trustState);
+    expect(health.suitableForAgentWorkflows).toBe(false);
+    expect([...health.warnings, ...health.errors].join(' ')).toContain('pattern artifact is missing');
+  });
+
+  it('treats unreadable coordination markers as trust-degrading instead of only stale-search', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export function alpha() { return "a"; }');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+
+    const snapshotPath = path.join(tempRoot, '.data', 'coordination', 'zoekt-refresh-state.json');
+    await fs.rm(snapshotPath, { force: true });
+    await fs.mkdir(snapshotPath, { recursive: true });
+
+    const health = await getCurrentIndexHealth();
+
+    expect(health.trustState).toBe('degraded');
+    expect(health.suitableForAgentWorkflows).toBe(false);
+    expect(health.reasons.join(' ')).toContain('Zoekt refresh snapshot coordination marker is unreadable');
+  });
+
+  it('does not overreact when a non-critical UI artifact is missing', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.tsx', 'export function Alpha() { return <div className="x" />; }');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+    const state = await loadCurrentGenerationState();
+
+    await writeSearchSnapshot(tempRoot, {
+      schemaVersion: 1,
+      snapshotId: 'snapshot-ready-ui-optional',
+      status: 'ready',
+      refreshedAt: '2026-03-17T10:00:00.000Z',
+      aggregateFingerprint: state?.search.aggregateFingerprint,
+      repoFingerprints: state?.search.repoFingerprints,
+    });
+    await removeCurrentArtifact('ui-semantics.json');
+
+    const health = await getCurrentIndexHealth();
+
+    expect(health.trustState).toBe('healthy');
+    expect(health.errors).toEqual([]);
   });
 
   it('reports inconsistent with explicit evidence when consistency checks fail', async () => {

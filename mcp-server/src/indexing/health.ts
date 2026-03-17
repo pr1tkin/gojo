@@ -5,6 +5,7 @@ import {
   evaluateCatastrophicCountRegressions,
   findPriorTrustedGenerationBaseline,
 } from './count-regressions.js';
+import { assessCriticalDataDependencies } from './critical-data.js';
 import { loadPatternIndexResult } from '../patterns/store.js';
 import {
   getCoordinationDirectory,
@@ -84,6 +85,7 @@ function dedupeStringsPreserveOrder(values: Iterable<string>): string[] {
 
 function determineTrustState(input: {
   hasGeneration: boolean;
+  criticalDataTrustImpact: 'none' | 'degraded' | 'inconsistent';
   search: SearchFreshnessState | null;
   consistency: ConsistencyRunReport | null;
   changeSummary: GenerationChangeSummary | null;
@@ -95,8 +97,16 @@ function determineTrustState(input: {
     return 'unknown';
   }
 
+  if (input.criticalDataTrustImpact === 'inconsistent') {
+    return 'inconsistent';
+  }
+
   if (input.errors.length > 0 || (input.consistency?.overview.failed ?? 0) > 0) {
     return 'inconsistent';
+  }
+
+  if (input.criticalDataTrustImpact === 'degraded') {
+    return 'degraded';
   }
 
   if ((input.consistency?.overview.repairsRecommended ?? 0) > 0) {
@@ -140,8 +150,23 @@ export async function loadCurrentIndexHealthSnapshot(): Promise<IndexHealthSumma
 }
 
 export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
-  const pointer = await loadCurrentGenerationPointer();
-  const state = await loadCurrentGenerationState();
+  let pointer = null;
+  let state = null;
+  let metadataLoadError: string | null = null;
+
+  try {
+    pointer = await loadCurrentGenerationPointer();
+  } catch (error) {
+    metadataLoadError = error instanceof Error ? error.message : 'unknown current generation pointer load failure';
+  }
+
+  if (pointer) {
+    try {
+      state = await loadCurrentGenerationState();
+    } catch (error) {
+      metadataLoadError = error instanceof Error ? error.message : 'unknown generation metadata load failure';
+    }
+  }
 
   if (!pointer || !state) {
     const summary: IndexHealthSummary = {
@@ -166,7 +191,11 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
       suitableForAgentWorkflows: false,
       reasons: ['no published generation is available'],
       warnings: [],
-      errors: ['current generation pointer or generation state is missing'],
+      errors: [
+        metadataLoadError
+          ? `current generation metadata is unavailable or unreadable: ${metadataLoadError}`
+          : 'current generation pointer or generation state is missing',
+      ],
     };
     await saveCurrentIndexHealthSnapshot(summary);
     return summary;
@@ -187,6 +216,13 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
   const requestResult = await loadSearchRefreshRequestResult();
   const snapshotResult = await loadSearchRefreshSnapshotResult();
   const patternIndexResult = await loadPatternIndexResult();
+  const criticalData = await assessCriticalDataDependencies({
+    state,
+    generationId: state.generationId,
+    requestResult,
+    snapshotResult,
+    patternIndexResult,
+  });
   const search = deriveSearchFreshness(state, requestResult.value, snapshotResult.value, {
     requestResult,
     snapshotResult,
@@ -200,6 +236,18 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
   const reasons: string[] = [];
   const warnings: string[] = [...state.warnings];
   const errors: string[] = [...state.errors];
+
+  for (const issue of criticalData.issues) {
+    const message = `${issue.summary}: ${issue.details}`;
+
+    if (issue.severity === 'error') {
+      errors.push(message);
+    } else {
+      warnings.push(message);
+    }
+
+    reasons.push(`${issue.summary}; remediation: ${issue.recommendedAction}`);
+  }
 
   for (const issue of state.patternIntegrity?.issues ?? []) {
     const message = `${issue.summary}: ${issue.details}`;
@@ -274,16 +322,6 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     warnings.push(snapshotMarkerIssue);
   }
 
-  if (patternIndexResult.status !== 'ok') {
-    const patternMessage = `pattern artifact is ${patternIndexResult.status}: ${patternIndexResult.reason}`;
-
-    if (patternIndexResult.status === 'missing') {
-      warnings.push(patternMessage);
-    } else {
-      errors.push(patternMessage);
-    }
-  }
-
   for (const issue of countRegressionIssues) {
     const message = `${issue.summary}: ${issue.details}`;
     errors.push(message);
@@ -329,6 +367,7 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
 
   const trustState = determineTrustState({
     hasGeneration: true,
+    criticalDataTrustImpact: criticalData.strongestTrustImpact,
     search,
     consistency,
     changeSummary,
@@ -367,6 +406,7 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     trustState,
     suitableForAgentWorkflows:
       (trustState === 'healthy' || trustState === 'degraded') &&
+      criticalData.strongestTrustImpact === 'none' &&
       !(
         state.highRiskRefreshValidation?.status === 'degraded' ||
         state.highRiskRefreshValidation?.status === 'failed'

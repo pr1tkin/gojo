@@ -5,6 +5,7 @@ import {
   evaluateCatastrophicCountRegressions,
   findPriorTrustedGenerationBaseline,
 } from './count-regressions.js';
+import { assessCriticalDataDependencies } from './critical-data.js';
 import { cleanupGenerationDebris } from './generation-debris.js';
 import { buildCodeGraphFromSymbolIndex } from '../graph/build-graph.js';
 import { loadRepoResolutionConfigs } from '../graph/repo-config.js';
@@ -795,6 +796,13 @@ export async function runCurrentGenerationConsistencyMaintenance(
   );
   const requestResult = await loadSearchRefreshRequestResult();
   const snapshotResult = await loadSearchRefreshSnapshotResult();
+  const criticalData = await assessCriticalDataDependencies({
+    state: generationState,
+    generationId,
+    requestResult,
+    snapshotResult,
+    patternIndexResult: patternIndexLoadResult,
+  });
   let nextSearch = deriveSearchFreshness(generationState, requestResult.value, snapshotResult.value, {
     requestResult,
     snapshotResult,
@@ -852,6 +860,36 @@ export async function runCurrentGenerationConsistencyMaintenance(
   }
 
   checks.push(coordinationCheck);
+
+  const criticalDataCheck = createCheckResult(
+    'trust-critical-data-dependencies',
+    'Trust-critical data dependencies',
+    'error',
+    'generation',
+  );
+
+  if (criticalData.issues.length > 0) {
+    criticalDataCheck.status = criticalData.strongestTrustImpact === 'inconsistent' ? 'failed' : 'warning';
+    criticalDataCheck.summary = 'trust-critical published data is missing, incomplete, or suspicious';
+    criticalDataCheck.details = criticalData.issues.map(
+      (issue) => `${issue.summary}: ${issue.details}`,
+    );
+    criticalDataCheck.targetArtifacts = sortStrings(
+      criticalData.issues.flatMap((issue) => issue.targetArtifacts),
+    );
+    criticalDataCheck.repairsRecommended.push(
+      createRepairRecord(
+        'repair-trust-critical-data',
+        'rebuild or repair missing, incomplete, or suspicious trust-critical published data before treating the generation as healthy',
+        'recommended',
+        criticalDataCheck.targetArtifacts,
+        [],
+        criticalData.issues.map((issue) => issue.recommendedAction).join('; '),
+      ),
+    );
+  }
+
+  checks.push(criticalDataCheck);
 
   const debrisCheck = createCheckResult(
     'maintenance-debris',

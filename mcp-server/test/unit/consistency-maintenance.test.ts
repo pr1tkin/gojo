@@ -255,6 +255,26 @@ describe.sequential('consistency maintenance', () => {
     expect(refreshedState?.search.status).not.toBe('ready');
   });
 
+  it('surfaces missing trust-critical published data as a dedicated consistency failure', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export function alpha() { return "a"; }');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+
+    await fs.rm(await getCurrentArtifactPath('pattern-candidates.json'));
+
+    const report = await runCurrentGenerationConsistencyMaintenance({ logger: silentLogger, applyRepairs: false });
+    const check = report?.checks.find((entry) => entry.checkId === 'trust-critical-data-dependencies');
+
+    expect(check?.status).toBe('warning');
+    expect(check?.summary).toContain('trust-critical published data');
+    expect(check?.details.join(' ')).toContain('pattern artifact is missing');
+  });
+
   it('removes temp files and incomplete generation debris when repair is enabled', async () => {
     const tempRoot = await createTempDirectory();
     const reposRoot = path.join(tempRoot, 'repos');
