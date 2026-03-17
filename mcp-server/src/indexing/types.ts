@@ -8,6 +8,7 @@ export type CoordinationMarkerParseStatus =
   | 'unreadable'
   | 'unknown';
 export type PatternIntegrityStatus = 'trusted' | 'degraded' | 'failed';
+export type HighRiskRefreshValidationStatus = 'not-applicable' | 'passed' | 'degraded' | 'failed';
 export type ConsistencyCheckSeverity = 'info' | 'warning' | 'error';
 export type ConsistencyCheckStatus = 'passed' | 'warning' | 'failed' | 'repaired';
 export type ConsistencyScope = 'generation' | 'artifact' | 'coordination' | 'maintenance';
@@ -200,6 +201,22 @@ export interface PatternIntegrityAssessment {
   issues: PatternIntegrityIssue[];
 }
 
+export interface HighRiskRefreshValidationIssue {
+  code: string;
+  severity: 'warning' | 'error';
+  summary: string;
+  details: string;
+  recommendedAction: string;
+}
+
+export interface HighRiskRefreshValidationAssessment {
+  status: HighRiskRefreshValidationStatus;
+  checkedAt: string;
+  isHighRiskRefresh: boolean;
+  triggers: string[];
+  issues: HighRiskRefreshValidationIssue[];
+}
+
 export interface IndexGenerationState {
   schemaVersion: number;
   generationId: string;
@@ -220,6 +237,7 @@ export interface IndexGenerationState {
   consistency?: ConsistencyRunOverview;
   search: SearchFreshnessState;
   patternIntegrity?: PatternIntegrityAssessment;
+  highRiskRefreshValidation?: HighRiskRefreshValidationAssessment;
   warnings: string[];
   errors: string[];
 }

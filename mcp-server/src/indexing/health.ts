@@ -213,6 +213,26 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     reasons.push(`${issue.summary}; remediation: ${issue.recommendedAction}`);
   }
 
+  if (state.highRiskRefreshValidation?.isHighRiskRefresh) {
+    if (state.highRiskRefreshValidation.status !== 'passed') {
+      reasons.push(
+        `high-risk refresh validation was triggered by ${state.highRiskRefreshValidation.triggers.join('; ')}`,
+      );
+    }
+
+    for (const issue of state.highRiskRefreshValidation.issues) {
+      const message = `${issue.summary}: ${issue.details}`;
+
+      if (issue.severity === 'error') {
+        errors.push(message);
+      } else {
+        warnings.push(message);
+      }
+
+      reasons.push(`${issue.summary}; remediation: ${issue.recommendedAction}`);
+    }
+  }
+
   if (!changeSummaryStatus.exists) {
     warnings.push('change summary artifact is unavailable for the current generation');
   }
@@ -345,7 +365,12 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     consistency,
     recentActivity,
     trustState,
-    suitableForAgentWorkflows: trustState === 'healthy' || trustState === 'degraded',
+    suitableForAgentWorkflows:
+      (trustState === 'healthy' || trustState === 'degraded') &&
+      !(
+        state.highRiskRefreshValidation?.status === 'degraded' ||
+        state.highRiskRefreshValidation?.status === 'failed'
+      ),
     reasons: dedupeStringsPreserveOrder(reasons),
     warnings: dedupeStringsPreserveOrder(warnings),
     errors: dedupeStringsPreserveOrder(errors),

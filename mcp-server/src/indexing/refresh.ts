@@ -20,8 +20,10 @@ import { buildUiPropSurfaceIndex } from '../ui-props/build-index.js';
 import { loadUiPropSurfaceIndex } from '../ui-props/store.js';
 import type { UiPropSurfaceIndex } from '../ui-props/types.js';
 import { classifyRepositoryChanges, createEmptyGenerationChangeSummary } from './change-detection.js';
+import { findPriorTrustedGenerationBaseline } from './count-regressions.js';
 import { runCurrentGenerationConsistencyMaintenance } from './consistency.js';
 import { getCurrentIndexHealth } from './health.js';
+import { evaluateHighRiskRefreshValidation } from './high-risk-validation.js';
 import { evaluatePatternIntegrity } from './pattern-integrity.js';
 import {
   loadCurrentGenerationState,
@@ -63,6 +65,28 @@ export interface RefreshIndexesOptions {
       reposRoot: string;
       patternIndex: PatternIndex;
     }) => Promise<PatternIndex> | PatternIndex;
+    mutateDerivedArtifacts?: (context: {
+      reposRoot: string;
+      symbolIndex: SymbolIndex;
+      graph: CodeGraphSnapshot;
+      uiComposition: UiCompositionIndex;
+      uiProps: UiPropSurfaceIndex;
+      patternIndex: PatternIndex;
+    }) =>
+      | Promise<{
+          symbolIndex?: SymbolIndex;
+          graph?: CodeGraphSnapshot;
+          uiComposition?: UiCompositionIndex;
+          uiProps?: UiPropSurfaceIndex;
+          patternIndex?: PatternIndex;
+        }>
+      | {
+          symbolIndex?: SymbolIndex;
+          graph?: CodeGraphSnapshot;
+          uiComposition?: UiCompositionIndex;
+          uiProps?: UiPropSurfaceIndex;
+          patternIndex?: PatternIndex;
+        };
   };
 }
 
@@ -453,24 +477,38 @@ async function refreshIndexesUnlocked(
   });
   const uiComposition = await buildUiCompositionIndex(reposRoot, mergedSymbolIndex);
   const uiProps = await buildUiPropSurfaceIndex(reposRoot, mergedSymbolIndex);
+  const mutatedArtifacts =
+    (await options.testHooks?.mutateDerivedArtifacts?.({
+      reposRoot: path.resolve(reposRoot),
+      symbolIndex: mergedSymbolIndex,
+      graph,
+      uiComposition,
+      uiProps,
+      patternIndex: mergedPatternResult.index,
+    })) ?? {};
+  const finalSymbolIndex = mutatedArtifacts.symbolIndex ?? mergedSymbolIndex;
+  const finalGraph = mutatedArtifacts.graph ?? graph;
+  const finalUiComposition = mutatedArtifacts.uiComposition ?? uiComposition;
+  const finalUiProps = mutatedArtifacts.uiProps ?? uiProps;
+  const finalPatternIndex = mutatedArtifacts.patternIndex ?? mergedPatternResult.index;
   const changeSummary = classifyRepositoryChanges({
     delta,
     previousManifest,
     manifest,
     previousSymbolIndex,
-    currentSymbolIndex: mergedSymbolIndex,
+    currentSymbolIndex: finalSymbolIndex,
     previousPatternIndex,
-    currentPatternIndex: mergedPatternResult.index,
+    currentPatternIndex: finalPatternIndex,
     previousUiComposition,
-    currentUiComposition: uiComposition,
+    currentUiComposition: finalUiComposition,
     previousUiProps,
-    currentUiProps: uiProps,
+    currentUiProps: finalUiProps,
     generatedAt: createdAt,
   });
   const patternIntegrity = evaluatePatternIntegrity({
     checkedAt: createdAt,
-    symbolIndex: mergedSymbolIndex,
-    patternIndex: mergedPatternResult.index,
+    symbolIndex: finalSymbolIndex,
+    patternIndex: finalPatternIndex,
     previousGeneration,
     previousPatternLoadResult,
     changeSummary,
@@ -490,11 +528,11 @@ async function refreshIndexesUnlocked(
   }
 
   const counts = createCounts(
-    mergedSymbolIndex,
-    graph,
-    uiComposition,
-    uiProps,
-    mergedPatternResult.index,
+    finalSymbolIndex,
+    finalGraph,
+    finalUiComposition,
+    finalUiProps,
+    finalPatternIndex,
   );
   const rebuild: IndexGenerationRebuildSummary = {
     symbolFilesRebuilt: changedOrAddedKeys.size,
@@ -548,18 +586,53 @@ async function refreshIndexesUnlocked(
     changeSummary: changeSummary.overview,
     search,
     patternIntegrity,
+    highRiskRefreshValidation: undefined,
     warnings,
     errors: [],
   };
 
+  const priorTrustedBaseline = await findPriorTrustedGenerationBaseline(generationId);
+  const highRiskRefreshValidation = evaluateHighRiskRefreshValidation({
+    checkedAt: createdAt,
+    current: generationState,
+    changeSummary,
+    baseline: priorTrustedBaseline,
+    symbolIndex: finalSymbolIndex,
+    graph: finalGraph,
+    uiComposition: finalUiComposition,
+    uiProps: finalUiProps,
+    patternIndex: finalPatternIndex,
+  });
+
+  generationState.highRiskRefreshValidation = highRiskRefreshValidation;
+
+  if (highRiskRefreshValidation.isHighRiskRefresh) {
+    logger.info(
+      `[index-refresh] high-risk validation generation=${generationId} status=${highRiskRefreshValidation.status} triggers=${highRiskRefreshValidation.triggers.join(' | ')}`,
+    );
+  }
+
+  for (const issue of highRiskRefreshValidation.issues) {
+    warnings.push(`${issue.summary}: ${issue.details}`);
+  }
+
+  if (highRiskRefreshValidation.status === 'failed') {
+    const failureSummary = highRiskRefreshValidation.issues
+      .filter((issue) => issue.severity === 'error')
+      .map((issue) => `${issue.summary} (${issue.recommendedAction})`)
+      .join('; ');
+    logger.error(`[index-refresh] high-risk validation failure: ${failureSummary}`);
+    throw new Error(`High-risk refresh validation failed: ${failureSummary}`);
+  }
+
   await saveGenerationArtifacts(
     generationId,
     {
-      'symbol-index.json': mergedSymbolIndex,
-      'code-graph.json': graph,
-      'ui-composition.json': uiComposition,
-      'ui-props.json': uiProps,
-      'pattern-candidates.json': mergedPatternResult.index,
+      'symbol-index.json': finalSymbolIndex,
+      'code-graph.json': finalGraph,
+      'ui-composition.json': finalUiComposition,
+      'ui-props.json': finalUiProps,
+      'pattern-candidates.json': finalPatternIndex,
       'change-summary.json': changeSummary,
     },
     generationState,
@@ -611,7 +684,7 @@ async function refreshIndexesUnlocked(
   await getCurrentIndexHealth();
 
   return {
-    symbolIndex: mergedSymbolIndex,
+    symbolIndex: finalSymbolIndex,
     diagnostics,
   };
 }

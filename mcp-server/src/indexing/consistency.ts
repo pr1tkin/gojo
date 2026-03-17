@@ -676,6 +676,69 @@ export async function runCurrentGenerationConsistencyMaintenance(
 
   checks.push(patternIntegrityCheck);
 
+  const highRiskValidationCheck = createCheckResult(
+    'high-risk-post-refresh-validation',
+    'High-risk post-refresh validation',
+    'error',
+    'generation',
+  );
+
+  if (generationState.highRiskRefreshValidation?.isHighRiskRefresh) {
+    highRiskValidationCheck.summary =
+      generationState.highRiskRefreshValidation.status === 'passed'
+        ? 'high-risk refresh passed enhanced post-refresh validation'
+        : 'high-risk refresh did not validate cleanly after enhanced post-refresh validation';
+    highRiskValidationCheck.details = [
+      `validation triggers: ${generationState.highRiskRefreshValidation.triggers.join('; ')}`,
+      ...generationState.highRiskRefreshValidation.issues.map(
+        (issue) => `${issue.summary}: ${issue.details}`,
+      ),
+    ];
+    highRiskValidationCheck.targetArtifacts = [
+      'index-generation.json',
+      'symbol-index.json',
+      'code-graph.json',
+      'ui-composition.json',
+      'ui-props.json',
+      'pattern-candidates.json',
+      'change-summary.json',
+    ];
+
+    if (generationState.highRiskRefreshValidation.status === 'failed') {
+      highRiskValidationCheck.status = 'failed';
+      highRiskValidationCheck.repairsRecommended.push(
+        createRepairRecord(
+          'rebuild-high-risk-refresh-generation',
+          'rebuild the generation because a high-risk refresh did not validate cleanly',
+          'recommended',
+          highRiskValidationCheck.targetArtifacts,
+          [],
+          generationState.highRiskRefreshValidation.issues
+            .map((issue) => issue.recommendedAction)
+            .join('; '),
+        ),
+      );
+    } else if (generationState.highRiskRefreshValidation.status === 'degraded') {
+      highRiskValidationCheck.status = 'warning';
+      highRiskValidationCheck.repairsRecommended.push(
+        createRepairRecord(
+          'review-high-risk-refresh-generation',
+          'review or rebuild the generation because high-risk refresh validation surfaced suspicious signals',
+          'recommended',
+          highRiskValidationCheck.targetArtifacts,
+          [],
+          generationState.highRiskRefreshValidation.issues
+            .map((issue) => issue.recommendedAction)
+            .join('; '),
+        ),
+      );
+    }
+  } else {
+    highRiskValidationCheck.summary = 'no high-risk refresh context required enhanced validation';
+  }
+
+  checks.push(highRiskValidationCheck);
+
   const countRegressionCheck = createCheckResult(
     'catastrophic-count-regressions',
     'Catastrophic count regressions',
