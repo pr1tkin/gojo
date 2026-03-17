@@ -14,9 +14,12 @@ import { createFileId } from '../symbol-index/ids.js';
 import { loadSymbolIndex } from '../symbol-index/store.js';
 import type { IndexedSymbol, SymbolFrequencyStats, SymbolIndex } from '../symbol-index/types.js';
 import { buildUiCompositionIndex } from '../ui-composition/build-index.js';
+import { loadUiCompositionIndex } from '../ui-composition/store.js';
 import type { UiCompositionIndex } from '../ui-composition/types.js';
 import { buildUiPropSurfaceIndex } from '../ui-props/build-index.js';
+import { loadUiPropSurfaceIndex } from '../ui-props/store.js';
 import type { UiPropSurfaceIndex } from '../ui-props/types.js';
+import { classifyRepositoryChanges, createEmptyGenerationChangeSummary } from './change-detection.js';
 import {
   loadCurrentGenerationState,
   publishGeneration,
@@ -40,7 +43,7 @@ import type {
   IndexedRepositoryDescriptor,
 } from './types.js';
 
-const INDEX_GENERATION_STATE_SCHEMA_VERSION = 1;
+const INDEX_GENERATION_STATE_SCHEMA_VERSION = 2;
 
 export interface RefreshIndexesOptions {
   logger?: Pick<Console, 'info' | 'warn' | 'error'>;
@@ -324,6 +327,9 @@ function logDiagnostics(
 
   if (diagnostics.status === 'committed') {
     logger.info(
+      `[index-refresh] change-summary files=${diagnostics.changeSummary.overview.filesChanged} high-risk=${diagnostics.changeSummary.overview.highRiskFiles}`,
+    );
+    logger.info(
       `[index-refresh] rebuild symbol-files=${diagnostics.rebuild.symbolFilesRebuilt} pattern-files=${diagnostics.rebuild.patternFilesRebuilt} graph=${diagnostics.rebuild.graphMode} ui-composition=${diagnostics.rebuild.uiCompositionMode} ui-props=${diagnostics.rebuild.uiPropsMode}`,
     );
     logger.info(
@@ -353,10 +359,12 @@ export async function refreshIndexes(
   if (!hasManifestChanges(delta) && previousGeneration) {
     const currentSymbolIndex = await loadSymbolIndex();
     const search = (await getCurrentSearchFreshness(logger)) ?? previousGeneration.search;
+    const changeSummary = createEmptyGenerationChangeSummary(previousGeneration.createdAt);
     const diagnostics: IndexRefreshDiagnostics = {
       generationId: previousGeneration.generationId,
       createdAt: previousGeneration.createdAt,
       delta,
+      changeSummary,
       counts: previousGeneration.counts,
       rebuild: previousGeneration.rebuild,
       cleanup: previousGeneration.cleanup,
@@ -392,6 +400,22 @@ export async function refreshIndexes(
         generatedAt: '',
         patterns: [],
       };
+  const previousUiComposition = previousGeneration
+    ? await loadUiCompositionIndex()
+    : {
+        schemaVersion: 1,
+        sourceSymbolIndexSchemaVersion: 0,
+        generatedAt: '',
+        edges: [],
+      };
+  const previousUiProps = previousGeneration
+    ? await loadUiPropSurfaceIndex()
+    : {
+        schemaVersion: 1,
+        sourceSymbolIndexSchemaVersion: 0,
+        generatedAt: '',
+        propUsages: [],
+      };
   const changedOrAddedFileIds = new Set(
     manifest
       .filter((entry) => changedOrAddedKeys.has(entry.key))
@@ -422,6 +446,20 @@ export async function refreshIndexes(
   });
   const uiComposition = await buildUiCompositionIndex(reposRoot, mergedSymbolIndex);
   const uiProps = await buildUiPropSurfaceIndex(reposRoot, mergedSymbolIndex);
+  const changeSummary = classifyRepositoryChanges({
+    delta,
+    previousManifest,
+    manifest,
+    previousSymbolIndex,
+    currentSymbolIndex: mergedSymbolIndex,
+    previousPatternIndex,
+    currentPatternIndex: mergedPatternResult.index,
+    previousUiComposition,
+    currentUiComposition: uiComposition,
+    previousUiProps,
+    currentUiProps: uiProps,
+    generatedAt: createdAt,
+  });
   const counts = createCounts(
     mergedSymbolIndex,
     graph,
@@ -478,6 +516,7 @@ export async function refreshIndexes(
     counts,
     rebuild,
     cleanup,
+    changeSummary: changeSummary.overview,
     search,
     warnings,
     errors: [],
@@ -491,6 +530,7 @@ export async function refreshIndexes(
       'ui-composition.json': uiComposition,
       'ui-props.json': uiProps,
       'pattern-candidates.json': mergedPatternResult.index,
+      'change-summary.json': changeSummary,
     },
     generationState,
   );
@@ -509,6 +549,7 @@ export async function refreshIndexes(
     generationId,
     createdAt,
     delta,
+    changeSummary,
     counts,
     rebuild,
     cleanup,

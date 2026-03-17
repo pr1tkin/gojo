@@ -5,11 +5,26 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadCodeGraph } from '../../src/graph/store.js';
-import { loadCurrentGenerationState } from '../../src/indexing/generation-store.js';
+import { getGenerationArtifactFilePath, loadCurrentGenerationState } from '../../src/indexing/generation-store.js';
 import { refreshIndexes } from '../../src/indexing/refresh.js';
 import { loadPatternIndex } from '../../src/patterns/store.js';
 import { loadSymbolIndex } from '../../src/symbol-index/store.js';
 import { loadUiCompositionIndex } from '../../src/ui-composition/store.js';
+import { loadUiPropSurfaceIndex } from '../../src/ui-props/store.js';
+
+interface PersistedChangeSummary {
+  files: Array<{
+    key: string;
+    changeKind: string;
+    signals: string[];
+    impactHints: string[];
+    confidence: string;
+  }>;
+  overview: {
+    filesChanged: number;
+    highRiskFiles: number;
+  };
+}
 
 async function createTempDirectory(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'reporadar-index-refresh-test-'));
@@ -28,6 +43,17 @@ async function writeRepositoryFile(
 
 async function ensureRepository(reposRoot: string, repositoryId: string): Promise<void> {
   await fs.mkdir(path.join(reposRoot, repositoryId, '.git'), { recursive: true });
+}
+
+async function loadPersistedChangeSummary(): Promise<PersistedChangeSummary> {
+  const state = await loadCurrentGenerationState();
+
+  if (!state) {
+    throw new Error('expected a published generation state');
+  }
+
+  const content = await fs.readFile(getGenerationArtifactFilePath(state.generationId, 'change-summary.json'), 'utf8');
+  return JSON.parse(content) as PersistedChangeSummary;
 }
 
 const tempDirectories: string[] = [];
@@ -102,8 +128,29 @@ describe.sequential('refreshIndexes', () => {
     const result = await refreshIndexes(reposRoot, { logger: silentLogger });
     const symbolIndex = await loadSymbolIndex();
     const state = await loadCurrentGenerationState();
+    const changeSummary = await loadPersistedChangeSummary();
 
     expect(result.diagnostics.delta.added).toEqual(['app-repo/src/b.ts']);
+    expect(result.diagnostics.changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/b.ts',
+        changeKind: 'added',
+        signals: expect.arrayContaining(['contentChanged', 'likelyApiBoundaryChanged', 'symbolSurfaceChanged']),
+        impactHints: expect.arrayContaining([
+          'mayAffectDependents',
+          'mayAffectSearchFreshness',
+          'requiresGraphRebuild',
+          'requiresPatternRefresh',
+          'requiresSymbolReindex',
+        ]),
+      }),
+    ]);
+    expect(changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/b.ts',
+        changeKind: 'added',
+      }),
+    ]);
     expect(symbolIndex.symbols).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -145,6 +192,27 @@ describe.sequential('refreshIndexes', () => {
     const patternIndex = await loadPatternIndex();
 
     expect(result.diagnostics.delta.modified).toEqual(['app-repo/src/util.ts']);
+    expect(result.diagnostics.changeSummary.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'app-repo/src/util.ts',
+          changeKind: 'modified',
+          signals: expect.arrayContaining([
+            'contentChanged',
+            'exportsChanged',
+            'graphRelevantChanged',
+            'likelyApiBoundaryChanged',
+            'symbolSurfaceChanged',
+          ]),
+          impactHints: expect.arrayContaining([
+            'mayAffectDependents',
+            'mayAffectSearchFreshness',
+            'requiresGraphRebuild',
+            'requiresSymbolReindex',
+          ]),
+        }),
+      ]),
+    );
     expect(symbolIndex.symbols.find((symbol) => symbol.name === 'oldName')).toBeUndefined();
     expect(symbolIndex.symbols).toEqual(
       expect.arrayContaining([
@@ -193,6 +261,27 @@ describe.sequential('refreshIndexes', () => {
     const patternIndex = await loadPatternIndex();
 
     expect(result.diagnostics.delta.deleted).toEqual(['app-repo/src/Child.tsx']);
+    expect(result.diagnostics.changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/Child.tsx',
+        changeKind: 'deleted',
+        signals: expect.arrayContaining([
+          'exportsChanged',
+          'likelyApiBoundaryChanged',
+          'patternRelevantChanged',
+          'symbolSurfaceChanged',
+          'uiStructureChanged',
+        ]),
+        impactHints: expect.arrayContaining([
+          'mayAffectDependents',
+          'mayAffectSearchFreshness',
+          'requiresGraphRebuild',
+          'requiresPatternRefresh',
+          'requiresSymbolReindex',
+          'requiresUiRefresh',
+        ]),
+      }),
+    ]);
     expect(symbolIndex.symbols.some((symbol) => symbol.filePath === 'src/Child.tsx')).toBe(false);
     expect(Object.values(symbolIndex.byFile).some((relation) => relation.filePath === 'src/Child.tsx')).toBe(false);
     expect(Object.values(graph.nodes.files).some((node) => node.filePath === 'src/Child.tsx')).toBe(false);
@@ -203,6 +292,240 @@ describe.sequential('refreshIndexes', () => {
       ),
     ).toBe(false);
     expect(patternIndex.patterns.some((pattern) => pattern.fileId.includes('Child.tsx'))).toBe(false);
+  });
+
+  it('detects import and export changes as graph-relevant', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export const a = 1;');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/b.ts', 'export const b = 2;');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/api.ts',
+      ["import { a } from './a';", 'export { a };'].join('\n'),
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/api.ts',
+      ["import { b } from './b';", 'export default b;'].join('\n'),
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+
+    expect(result.diagnostics.changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/api.ts',
+        signals: expect.arrayContaining([
+          'contentChanged',
+          'exportsChanged',
+          'graphRelevantChanged',
+          'importsChanged',
+          'likelyApiBoundaryChanged',
+        ]),
+        impactHints: expect.arrayContaining([
+          'mayAffectDependents',
+          'requiresGraphRebuild',
+          'requiresSymbolReindex',
+        ]),
+      }),
+    ]);
+  });
+
+  it('detects UI structure and prop-surface changes in TSX files', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Child.tsx',
+      'export function Child(props: { label?: string; tone?: string }) { return <span>{props.label}</span>; }',
+    );
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Other.tsx',
+      'export function Other() { return <strong>other</strong>; }',
+    );
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Parent.tsx',
+      [
+        "import { Child } from './Child';",
+        "import { Other } from './Other';",
+        '',
+        'export function Parent() {',
+        '  return <Child label=\"before\" />;',
+        '}',
+      ].join('\n'),
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Parent.tsx',
+      [
+        "import { Child } from './Child';",
+        "import { Other } from './Other';",
+        '',
+        'export function Parent() {',
+        '  return <Other><Child tone=\"primary\" /></Other>;',
+        '}',
+      ].join('\n'),
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+    const uiProps = await loadUiPropSurfaceIndex();
+
+    expect(result.diagnostics.changeSummary.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'app-repo/src/Parent.tsx',
+          signals: expect.arrayContaining(['contentChanged', 'uiPropsChanged']),
+          impactHints: expect.arrayContaining(['requiresUiRefresh']),
+        }),
+      ]),
+    );
+    expect(
+      uiProps.propUsages.some(
+        (usage) =>
+          usage.parentFilePath === 'src/Parent.tsx' &&
+          usage.childComponentName === 'Child' &&
+          usage.propName === 'tone',
+      ),
+    ).toBe(true);
+  });
+
+  it('detects pattern-relevant structural changes for derived pattern candidates', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/utils/api.ts',
+      'export function slugify(value: string): string { return value.toLowerCase(); }',
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/utils/api.ts',
+      [
+        'export async function fetchUser(): Promise<Response> {',
+        "  return fetch('/api/user');",
+        '}',
+      ].join('\n'),
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+
+    expect(result.diagnostics.changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/utils/api.ts',
+        signals: expect.arrayContaining([
+          'contentChanged',
+          'patternRelevantChanged',
+          'symbolSurfaceChanged',
+        ]),
+        impactHints: expect.arrayContaining(['requiresPatternRefresh']),
+      }),
+    ]);
+  });
+
+  it('uses a conservative fallback when content changes are not classified semantically', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/util.ts',
+      'export function stableName(): string { return "before"; }',
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/util.ts',
+      'export function stableName(): string { return "after"; }',
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+    const changeSummary = await loadPersistedChangeSummary();
+
+    expect(result.diagnostics.changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/util.ts',
+        confidence: 'low',
+        signals: expect.arrayContaining(['contentChanged', 'unknownStructuralChange']),
+        impactHints: expect.arrayContaining([
+          'highRiskStructuralChange',
+          'mayAffectSearchFreshness',
+          'requiresGraphRebuild',
+          'requiresPatternRefresh',
+          'requiresSymbolReindex',
+        ]),
+      }),
+    ]);
+    expect(changeSummary.overview.highRiskFiles).toBe(1);
+  });
+
+  it('persists change summaries into the published generation state and artifact set', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/a.ts',
+      'export function alpha(): string { return "a"; }',
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/a.ts',
+      'export function beta(): string { return "b"; }',
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+    const state = await loadCurrentGenerationState();
+    const changeSummary = await loadPersistedChangeSummary();
+
+    expect(state?.changeSummary).toEqual(result.diagnostics.changeSummary.overview);
+    expect(changeSummary.overview.filesChanged).toBe(1);
+    expect(changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/a.ts',
+        changeKind: 'modified',
+      }),
+    ]);
   });
 
   it('produces idempotent published artifacts across repeated refresh runs', async () => {
@@ -281,4 +604,3 @@ describe.sequential('refreshIndexes', () => {
     expect(symbolIndex.symbols.find((symbol) => symbol.name === 'brokenPublishAttempt')).toBeUndefined();
   });
 });
-

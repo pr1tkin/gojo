@@ -23,6 +23,60 @@ export interface IndexRefreshDelta {
   deleted: string[];
 }
 
+export type RepositoryFileChangeKind = 'added' | 'modified' | 'deleted' | 'unchanged';
+
+export type RepositoryFileChangeSignal =
+  | 'contentChanged'
+  | 'metadataOnlyChanged'
+  | 'symbolSurfaceChanged'
+  | 'importsChanged'
+  | 'exportsChanged'
+  | 'graphRelevantChanged'
+  | 'uiStructureChanged'
+  | 'uiPropsChanged'
+  | 'patternRelevantChanged'
+  | 'likelyApiBoundaryChanged'
+  | 'unknownStructuralChange';
+
+export type RepositoryFileImpactHint =
+  | 'requiresSymbolReindex'
+  | 'requiresGraphRebuild'
+  | 'requiresUiRefresh'
+  | 'requiresPatternRefresh'
+  | 'mayAffectDependents'
+  | 'mayAffectSearchFreshness'
+  | 'highRiskStructuralChange';
+
+export interface RepositoryFileChangeRecord {
+  key: string;
+  repoId: string;
+  filePath: string;
+  changeKind: RepositoryFileChangeKind;
+  classification?: 'source' | 'generated' | 'unknown';
+  language?: 'ts' | 'tsx' | 'js' | 'jsx' | 'unknown';
+  confidence: 'high' | 'medium' | 'low';
+  signals: RepositoryFileChangeSignal[];
+  impactHints: RepositoryFileImpactHint[];
+  notes: string[];
+}
+
+export interface GenerationChangeSummaryOverview {
+  filesChanged: number;
+  added: number;
+  modified: number;
+  deleted: number;
+  highRiskFiles: number;
+  signalCounts: Partial<Record<RepositoryFileChangeSignal, number>>;
+  impactHintCounts: Partial<Record<RepositoryFileImpactHint, number>>;
+}
+
+export interface GenerationChangeSummary {
+  schemaVersion: number;
+  generatedAt: string;
+  files: RepositoryFileChangeRecord[];
+  overview: GenerationChangeSummaryOverview;
+}
+
 export interface IndexGenerationCounts {
   files: number;
   symbols: number;
@@ -83,6 +137,7 @@ export interface IndexGenerationState {
   counts: IndexGenerationCounts;
   rebuild: IndexGenerationRebuildSummary;
   cleanup: IndexGenerationCleanupSummary;
+  changeSummary: GenerationChangeSummaryOverview;
   search: SearchFreshnessState;
   warnings: string[];
   errors: string[];
@@ -98,6 +153,7 @@ export interface IndexRefreshDiagnostics {
   generationId: string;
   createdAt: string;
   delta: IndexRefreshDelta;
+  changeSummary: GenerationChangeSummary;
   counts: IndexGenerationCounts;
   rebuild: IndexGenerationRebuildSummary;
   cleanup: IndexGenerationCleanupSummary;
