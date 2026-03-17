@@ -1,6 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import {
+  evaluateCatastrophicCountRegressions,
+  findPriorTrustedGenerationBaseline,
+} from './count-regressions.js';
 import { buildCodeGraphFromSymbolIndex } from '../graph/build-graph.js';
 import { loadRepoResolutionConfigs } from '../graph/repo-config.js';
 import type { CodeGraphSnapshot } from '../graph/types.js';
@@ -671,6 +675,47 @@ export async function runCurrentGenerationConsistencyMaintenance(
   }
 
   checks.push(patternIntegrityCheck);
+
+  const countRegressionCheck = createCheckResult(
+    'catastrophic-count-regressions',
+    'Catastrophic count regressions',
+    'error',
+    'generation',
+  );
+  const priorTrustedBaseline = await findPriorTrustedGenerationBaseline(generationId);
+  const countRegressionIssues = evaluateCatastrophicCountRegressions({
+    current: generationState,
+    baseline: priorTrustedBaseline,
+    changeSummary: changeSummaryStatus.value,
+  });
+
+  if (countRegressionIssues.length > 0) {
+    countRegressionCheck.status = 'failed';
+    countRegressionCheck.summary = 'critical artifact counts regressed catastrophically relative to a prior trusted generation';
+    countRegressionCheck.details = countRegressionIssues.map(
+      (issue) => `${issue.summary}: ${issue.details}`,
+    );
+    countRegressionCheck.targetArtifacts = [
+      'index-generation.json',
+      'symbol-index.json',
+      'code-graph.json',
+      'pattern-candidates.json',
+      'ui-composition.json',
+      'ui-props.json',
+    ];
+    countRegressionCheck.repairsRecommended.push(
+      createRepairRecord(
+        'rebuild-catastrophic-count-regressions',
+        'rebuild the published generation because critical artifact counts collapsed relative to a prior trusted baseline',
+        'recommended',
+        countRegressionCheck.targetArtifacts,
+        [],
+        countRegressionIssues.map((issue) => issue.recommendedAction).join('; '),
+      ),
+    );
+  }
+
+  checks.push(countRegressionCheck);
 
   const coordinationCheck = createCheckResult(
     'coordination-state-sanity',

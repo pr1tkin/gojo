@@ -1,6 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import {
+  evaluateCatastrophicCountRegressions,
+  findPriorTrustedGenerationBaseline,
+} from './count-regressions.js';
 import { loadPatternIndexResult } from '../patterns/store.js';
 import {
   getCoordinationDirectory,
@@ -62,8 +66,20 @@ function describeCoordinationMarkerIssue(
   return `${label} coordination marker is ${result.status}: ${result.reason}`;
 }
 
-function sortStrings(values: Iterable<string>): string[] {
-  return Array.from(new Set(values)).sort((left, right) => left.localeCompare(right));
+function dedupeStringsPreserveOrder(values: Iterable<string>): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    ordered.push(value);
+  }
+
+  return ordered;
 }
 
 function determineTrustState(input: {
@@ -175,13 +191,15 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     requestResult,
     snapshotResult,
   });
+  const priorTrustedBaseline = await findPriorTrustedGenerationBaseline(state.generationId);
+  const countRegressionIssues = evaluateCatastrophicCountRegressions({
+    current: state,
+    baseline: priorTrustedBaseline,
+    changeSummary: changeSummaryStatus.value,
+  });
   const reasons: string[] = [];
   const warnings: string[] = [...state.warnings];
   const errors: string[] = [...state.errors];
-
-  if (search.status !== 'ready') {
-    reasons.push(search.details ?? `search freshness is ${search.status}`);
-  }
 
   for (const issue of state.patternIntegrity?.issues ?? []) {
     const message = `${issue.summary}: ${issue.details}`;
@@ -246,6 +264,16 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     }
   }
 
+  for (const issue of countRegressionIssues) {
+    const message = `${issue.summary}: ${issue.details}`;
+    errors.push(message);
+    reasons.push(`${issue.summary}; remediation: ${issue.recommendedAction}`);
+  }
+
+  if (search.status !== 'ready') {
+    reasons.push(search.details ?? `search freshness is ${search.status}`);
+  }
+
   const changeSummary = changeSummaryStatus.value;
   const consistency = consistencyStatus.value;
 
@@ -288,7 +316,9 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     errors,
     reasons,
   });
-  const recentChangedFiles = sortStrings((changeSummary?.files ?? []).map((file) => file.key)).slice(0, 10);
+  const recentChangedFiles = dedupeStringsPreserveOrder(
+    (changeSummary?.files ?? []).map((file) => file.key),
+  ).slice(0, 10);
   const recentActivity: IndexHealthSummary['recentActivity'] = {
     lastRefreshAt: state.createdAt,
     lastRefreshStatus:
@@ -316,9 +346,9 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     recentActivity,
     trustState,
     suitableForAgentWorkflows: trustState === 'healthy' || trustState === 'degraded',
-    reasons: sortStrings(reasons),
-    warnings: sortStrings(warnings),
-    errors: sortStrings(errors),
+    reasons: dedupeStringsPreserveOrder(reasons),
+    warnings: dedupeStringsPreserveOrder(warnings),
+    errors: dedupeStringsPreserveOrder(errors),
   };
 
   await saveCurrentIndexHealthSnapshot(summary);
