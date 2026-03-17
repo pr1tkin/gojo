@@ -22,6 +22,7 @@ import type { UiPropSurfaceIndex } from '../ui-props/types.js';
 import { classifyRepositoryChanges, createEmptyGenerationChangeSummary } from './change-detection.js';
 import { findPriorTrustedGenerationBaseline } from './count-regressions.js';
 import { runCurrentGenerationConsistencyMaintenance } from './consistency.js';
+import { cleanupGenerationDebris } from './generation-debris.js';
 import { getCurrentIndexHealth } from './health.js';
 import { evaluateHighRiskRefreshValidation } from './high-risk-validation.js';
 import { evaluatePatternIntegrity } from './pattern-integrity.js';
@@ -33,6 +34,9 @@ import {
 } from './ui-semantics.js';
 import {
   loadCurrentGenerationState,
+  initializeStagedGeneration,
+  markGenerationAbandoned,
+  markGenerationCommitted,
   publishGeneration,
   saveGenerationArtifacts,
   saveSearchRefreshRequest,
@@ -369,6 +373,7 @@ async function refreshIndexesUnlocked(
   options: RefreshIndexesOptions = {},
 ): Promise<{ symbolIndex: SymbolIndex; diagnostics: IndexRefreshDiagnostics }> {
   const logger = options.logger ?? console;
+  await cleanupGenerationDebris({ logger, applyDeletes: true });
   const previousGeneration = await loadCurrentGenerationState();
   const previousManifest = previousGeneration?.manifest ?? [];
   const { repositories, manifest } = await scanRepositoryManifest(reposRoot);
@@ -403,169 +408,159 @@ async function refreshIndexesUnlocked(
 
   const generationId = randomUUID();
   const createdAt = new Date().toISOString();
+  await initializeStagedGeneration(generationId, createdAt);
   const warnings: string[] = [];
-  const changedOrAddedKeys = new Set([...delta.added, ...delta.modified]);
-  const deletedKeys = new Set(delta.deleted);
-  const freshSymbolIndex = await buildIndexedSymbols(reposRoot);
-  const previousSymbolIndex = previousGeneration
-    ? await loadSymbolIndex()
-    : createEmptySymbolIndex(freshSymbolIndex.schemaVersion);
-  const { index: mergedSymbolIndex, cleanup } = mergeSymbolIndexes(
-    previousSymbolIndex,
-    freshSymbolIndex,
-    changedOrAddedKeys,
-    deletedKeys,
-  );
-  const extractedPatternIndex = await runPatternExtractionStage(reposRoot, mergedSymbolIndex);
-  const freshPatternIndex =
-    (await options.testHooks?.mutatePatternIndex?.({
-      reposRoot: path.resolve(reposRoot),
-      patternIndex: extractedPatternIndex,
-    })) ?? extractedPatternIndex;
-  const previousPatternLoadResult = previousGeneration ? await loadPatternIndexResult() : null;
-  const previousPatternIndex = previousGeneration
-    ? previousPatternLoadResult?.value ?? {
-        schemaVersion: freshPatternIndex.schemaVersion,
-        sourceSymbolIndexSchemaVersion: 0,
-        generatedAt: '',
-        patterns: [],
-      }
-    : {
-        schemaVersion: freshPatternIndex.schemaVersion,
-        sourceSymbolIndexSchemaVersion: 0,
-        generatedAt: '',
-        patterns: [],
-      };
-  const previousUiComposition = previousGeneration
-    ? await loadUiCompositionIndex()
-    : {
-        schemaVersion: 1,
-        sourceSymbolIndexSchemaVersion: 0,
-        generatedAt: '',
-        edges: [],
-      };
-  const previousUiProps = previousGeneration
-    ? await loadUiPropSurfaceIndex()
-    : {
-        schemaVersion: 1,
-        sourceSymbolIndexSchemaVersion: 0,
-        generatedAt: '',
-        propUsages: [],
-      };
-  const previousUiSemantics = previousGeneration
-    ? (await loadUiSemanticsIndexForGeneration(previousGeneration.generationId)) ?? createEmptyUiSemanticsIndex()
-    : createEmptyUiSemanticsIndex();
-  const deletedFileIds = new Set(
-    previousManifest
-      .filter((entry) => deletedKeys.has(entry.key))
-      .map((entry) => createFileId(entry.repoId, entry.filePath)),
-  );
-  const mergedPatternResult = {
-    index: freshPatternIndex,
-    deletedPatternEntriesRemoved: previousPatternIndex.patterns.filter((pattern) =>
-      deletedFileIds.has(pattern.fileId),
-    ).length,
-  };
-  cleanup.deletedPatternEntriesRemoved = mergedPatternResult.deletedPatternEntriesRemoved;
-
-  warnings.push(
-    'code graph and UI artifacts rebuild globally on changed generations to keep cross-file resolution deterministic',
-  );
-
-  if (previousPatternLoadResult && previousPatternLoadResult.status !== 'ok') {
-    warnings.push(
-      `previous pattern artifact was ${previousPatternLoadResult.status}: ${previousPatternLoadResult.reason}; refresh rebuilt patterns from the current symbol index instead of trusting persisted pattern state`,
+  try {
+    const changedOrAddedKeys = new Set([...delta.added, ...delta.modified]);
+    const deletedKeys = new Set(delta.deleted);
+    const freshSymbolIndex = await buildIndexedSymbols(reposRoot);
+    const previousSymbolIndex = previousGeneration
+      ? await loadSymbolIndex()
+      : createEmptySymbolIndex(freshSymbolIndex.schemaVersion);
+    const { index: mergedSymbolIndex, cleanup } = mergeSymbolIndexes(
+      previousSymbolIndex,
+      freshSymbolIndex,
+      changedOrAddedKeys,
+      deletedKeys,
     );
-  }
+    const extractedPatternIndex = await runPatternExtractionStage(reposRoot, mergedSymbolIndex);
+    const freshPatternIndex =
+      (await options.testHooks?.mutatePatternIndex?.({
+        reposRoot: path.resolve(reposRoot),
+        patternIndex: extractedPatternIndex,
+      })) ?? extractedPatternIndex;
+    const previousPatternLoadResult = previousGeneration ? await loadPatternIndexResult() : null;
+    const previousPatternIndex = previousGeneration
+      ? previousPatternLoadResult?.value ?? {
+          schemaVersion: freshPatternIndex.schemaVersion,
+          sourceSymbolIndexSchemaVersion: 0,
+          generatedAt: '',
+          patterns: [],
+        }
+      : {
+          schemaVersion: freshPatternIndex.schemaVersion,
+          sourceSymbolIndexSchemaVersion: 0,
+          generatedAt: '',
+          patterns: [],
+        };
+    const previousUiComposition = previousGeneration
+      ? await loadUiCompositionIndex()
+      : {
+          schemaVersion: 1,
+          sourceSymbolIndexSchemaVersion: 0,
+          generatedAt: '',
+          edges: [],
+        };
+    const previousUiProps = previousGeneration
+      ? await loadUiPropSurfaceIndex()
+      : {
+          schemaVersion: 1,
+          sourceSymbolIndexSchemaVersion: 0,
+          generatedAt: '',
+          propUsages: [],
+        };
+    const previousUiSemantics = previousGeneration
+      ? (await loadUiSemanticsIndexForGeneration(previousGeneration.generationId)) ?? createEmptyUiSemanticsIndex()
+      : createEmptyUiSemanticsIndex();
+    const deletedFileIds = new Set(
+      previousManifest
+        .filter((entry) => deletedKeys.has(entry.key))
+        .map((entry) => createFileId(entry.repoId, entry.filePath)),
+    );
+    const mergedPatternResult = {
+      index: freshPatternIndex,
+      deletedPatternEntriesRemoved: previousPatternIndex.patterns.filter((pattern) =>
+        deletedFileIds.has(pattern.fileId),
+      ).length,
+    };
+    cleanup.deletedPatternEntriesRemoved = mergedPatternResult.deletedPatternEntriesRemoved;
 
-  const repoConfigById = await loadRepoResolutionConfigs(
-    Object.fromEntries(repositories.map((repository) => [repository.repoId, repository.repoRoot])),
-  );
-  const graph = buildCodeGraphFromSymbolIndex(mergedSymbolIndex, {
-    repoResolutionConfigsById: repoConfigById,
-  });
-  const uiComposition = await buildUiCompositionIndex(reposRoot, mergedSymbolIndex);
-  const uiProps = await buildUiPropSurfaceIndex(reposRoot, mergedSymbolIndex);
-  const uiSemantics = await buildUiSemanticsIndex(reposRoot);
-  const mutatedArtifacts =
-    (await options.testHooks?.mutateDerivedArtifacts?.({
-      reposRoot: path.resolve(reposRoot),
-      symbolIndex: mergedSymbolIndex,
-      graph,
-      uiComposition,
-      uiProps,
-      patternIndex: mergedPatternResult.index,
-    })) ?? {};
-  const finalSymbolIndex = mutatedArtifacts.symbolIndex ?? mergedSymbolIndex;
-  const finalGraph = mutatedArtifacts.graph ?? graph;
-  const finalUiComposition = mutatedArtifacts.uiComposition ?? uiComposition;
-  const finalUiProps = mutatedArtifacts.uiProps ?? uiProps;
-  const finalPatternIndex = mutatedArtifacts.patternIndex ?? mergedPatternResult.index;
-  const changeSummary = classifyRepositoryChanges({
-    delta,
-    previousManifest,
-    manifest,
-    previousSymbolIndex,
-    currentSymbolIndex: finalSymbolIndex,
-    previousPatternIndex,
-    currentPatternIndex: finalPatternIndex,
-    previousUiComposition,
-    currentUiComposition: finalUiComposition,
-    previousUiProps,
-    currentUiProps: finalUiProps,
-    previousUiSemantics,
-    currentUiSemantics: uiSemantics,
-    generatedAt: createdAt,
-  });
-  const patternIntegrity = evaluatePatternIntegrity({
-    checkedAt: createdAt,
-    symbolIndex: finalSymbolIndex,
-    patternIndex: finalPatternIndex,
-    previousGeneration,
-    previousPatternLoadResult,
-    changeSummary,
-  });
+    warnings.push(
+      'code graph and UI artifacts rebuild globally on changed generations to keep cross-file resolution deterministic',
+    );
 
-  for (const issue of patternIntegrity.issues) {
-    warnings.push(`${issue.summary}: ${issue.details}`);
-  }
+    if (previousPatternLoadResult && previousPatternLoadResult.status !== 'ok') {
+      warnings.push(
+        `previous pattern artifact was ${previousPatternLoadResult.status}: ${previousPatternLoadResult.reason}; refresh rebuilt patterns from the current symbol index instead of trusting persisted pattern state`,
+      );
+    }
 
-  if (patternIntegrity.status === 'failed') {
-    const failureSummary = patternIntegrity.issues
-      .filter((issue) => issue.severity === 'error')
-      .map((issue) => `${issue.summary} (${issue.recommendedAction})`)
-      .join('; ');
-    logger.error(`[index-refresh] pattern-integrity failure: ${failureSummary}`);
-    throw new Error(`Pattern integrity validation failed: ${failureSummary}`);
-  }
+    const repoConfigById = await loadRepoResolutionConfigs(
+      Object.fromEntries(repositories.map((repository) => [repository.repoId, repository.repoRoot])),
+    );
+    const graph = buildCodeGraphFromSymbolIndex(mergedSymbolIndex, {
+      repoResolutionConfigsById: repoConfigById,
+    });
+    const uiComposition = await buildUiCompositionIndex(reposRoot, mergedSymbolIndex);
+    const uiProps = await buildUiPropSurfaceIndex(reposRoot, mergedSymbolIndex);
+    const uiSemantics = await buildUiSemanticsIndex(reposRoot);
+    const mutatedArtifacts =
+      (await options.testHooks?.mutateDerivedArtifacts?.({
+        reposRoot: path.resolve(reposRoot),
+        symbolIndex: mergedSymbolIndex,
+        graph,
+        uiComposition,
+        uiProps,
+        patternIndex: mergedPatternResult.index,
+      })) ?? {};
+    const finalSymbolIndex = mutatedArtifacts.symbolIndex ?? mergedSymbolIndex;
+    const finalGraph = mutatedArtifacts.graph ?? graph;
+    const finalUiComposition = mutatedArtifacts.uiComposition ?? uiComposition;
+    const finalUiProps = mutatedArtifacts.uiProps ?? uiProps;
+    const finalPatternIndex = mutatedArtifacts.patternIndex ?? mergedPatternResult.index;
+    const changeSummary = classifyRepositoryChanges({
+      delta,
+      previousManifest,
+      manifest,
+      previousSymbolIndex,
+      currentSymbolIndex: finalSymbolIndex,
+      previousPatternIndex,
+      currentPatternIndex: finalPatternIndex,
+      previousUiComposition,
+      currentUiComposition: finalUiComposition,
+      previousUiProps,
+      currentUiProps: finalUiProps,
+      previousUiSemantics,
+      currentUiSemantics: uiSemantics,
+      generatedAt: createdAt,
+    });
+    const patternIntegrity = evaluatePatternIntegrity({
+      checkedAt: createdAt,
+      symbolIndex: finalSymbolIndex,
+      patternIndex: finalPatternIndex,
+      previousGeneration,
+      previousPatternLoadResult,
+      changeSummary,
+    });
 
-  const counts = createCounts(
-    finalSymbolIndex,
-    finalGraph,
-    finalUiComposition,
-    finalUiProps,
-    finalPatternIndex,
-  );
-  const rebuild: IndexGenerationRebuildSummary = {
-    symbolFilesRebuilt: changedOrAddedKeys.size,
-    patternFilesRebuilt: Object.keys(mergedSymbolIndex.byFile).length,
-    graphMode: 'full',
-    uiCompositionMode: 'full',
-    uiPropsMode: 'full',
-  };
-  const searchRequest = createSearchRefreshRequest({
-    generationId,
-    createdAt,
-    search: {
-      status: 'pending',
-      requestedAt: createdAt,
-      aggregateFingerprint: searchFingerprints.aggregateFingerprint,
-      repoFingerprints: searchFingerprints.repoFingerprints,
-      coordinationMode: 'shared-marker',
-    },
-  });
-  const search = deriveSearchFreshness(
-    {
+    for (const issue of patternIntegrity.issues) {
+      warnings.push(`${issue.summary}: ${issue.details}`);
+    }
+
+    if (patternIntegrity.status === 'failed') {
+      const failureSummary = patternIntegrity.issues
+        .filter((issue) => issue.severity === 'error')
+        .map((issue) => `${issue.summary} (${issue.recommendedAction})`)
+        .join('; ');
+      logger.error(`[index-refresh] pattern-integrity failure: ${failureSummary}`);
+      throw new Error(`Pattern integrity validation failed: ${failureSummary}`);
+    }
+
+    const counts = createCounts(
+      finalSymbolIndex,
+      finalGraph,
+      finalUiComposition,
+      finalUiProps,
+      finalPatternIndex,
+    );
+    const rebuild: IndexGenerationRebuildSummary = {
+      symbolFilesRebuilt: changedOrAddedKeys.size,
+      patternFilesRebuilt: Object.keys(mergedSymbolIndex.byFile).length,
+      graphMode: 'full',
+      uiCompositionMode: 'full',
+      uiPropsMode: 'full',
+    };
+    const searchRequest = createSearchRefreshRequest({
       generationId,
       createdAt,
       search: {
@@ -575,131 +570,153 @@ async function refreshIndexesUnlocked(
         repoFingerprints: searchFingerprints.repoFingerprints,
         coordinationMode: 'shared-marker',
       },
-    },
-    searchRequest,
-    null,
-  );
-  const generationState: IndexGenerationState = {
-    schemaVersion: INDEX_GENERATION_STATE_SCHEMA_VERSION,
-    generationId,
-    reposRoot,
-    repositories,
-    createdAt,
-    status: 'ready',
-    manifest,
-    delta: {
-      added: delta.added.length,
-      modified: delta.modified.length,
-      deleted: delta.deleted.length,
-    },
-    counts,
-    rebuild,
-    cleanup,
-    changeSummary: changeSummary.overview,
-    search,
-    patternIntegrity,
-    highRiskRefreshValidation: undefined,
-    warnings,
-    errors: [],
-  };
-
-  const priorTrustedBaseline = await findPriorTrustedGenerationBaseline(generationId);
-  const highRiskRefreshValidation = evaluateHighRiskRefreshValidation({
-    checkedAt: createdAt,
-    current: generationState,
-    changeSummary,
-    baseline: priorTrustedBaseline,
-    symbolIndex: finalSymbolIndex,
-    graph: finalGraph,
-    uiComposition: finalUiComposition,
-    uiProps: finalUiProps,
-    patternIndex: finalPatternIndex,
-  });
-
-  generationState.highRiskRefreshValidation = highRiskRefreshValidation;
-
-  if (highRiskRefreshValidation.isHighRiskRefresh) {
-    logger.info(
-      `[index-refresh] high-risk validation generation=${generationId} status=${highRiskRefreshValidation.status} triggers=${highRiskRefreshValidation.triggers.join(' | ')}`,
+    });
+    const search = deriveSearchFreshness(
+      {
+        generationId,
+        createdAt,
+        search: {
+          status: 'pending',
+          requestedAt: createdAt,
+          aggregateFingerprint: searchFingerprints.aggregateFingerprint,
+          repoFingerprints: searchFingerprints.repoFingerprints,
+          coordinationMode: 'shared-marker',
+        },
+      },
+      searchRequest,
+      null,
     );
-  }
+    const generationState: IndexGenerationState = {
+      schemaVersion: INDEX_GENERATION_STATE_SCHEMA_VERSION,
+      generationId,
+      reposRoot,
+      repositories,
+      createdAt,
+      status: 'ready',
+      manifest,
+      delta: {
+        added: delta.added.length,
+        modified: delta.modified.length,
+        deleted: delta.deleted.length,
+      },
+      counts,
+      rebuild,
+      cleanup,
+      changeSummary: changeSummary.overview,
+      search,
+      patternIntegrity,
+      highRiskRefreshValidation: undefined,
+      warnings,
+      errors: [],
+    };
 
-  for (const issue of highRiskRefreshValidation.issues) {
-    warnings.push(`${issue.summary}: ${issue.details}`);
-  }
+    const priorTrustedBaseline = await findPriorTrustedGenerationBaseline(generationId);
+    const highRiskRefreshValidation = evaluateHighRiskRefreshValidation({
+      checkedAt: createdAt,
+      current: generationState,
+      changeSummary,
+      baseline: priorTrustedBaseline,
+      symbolIndex: finalSymbolIndex,
+      graph: finalGraph,
+      uiComposition: finalUiComposition,
+      uiProps: finalUiProps,
+      patternIndex: finalPatternIndex,
+    });
 
-  if (highRiskRefreshValidation.status === 'failed') {
-    const failureSummary = highRiskRefreshValidation.issues
-      .filter((issue) => issue.severity === 'error')
-      .map((issue) => `${issue.summary} (${issue.recommendedAction})`)
-      .join('; ');
-    logger.error(`[index-refresh] high-risk validation failure: ${failureSummary}`);
-    throw new Error(`High-risk refresh validation failed: ${failureSummary}`);
-  }
+    generationState.highRiskRefreshValidation = highRiskRefreshValidation;
 
-  await saveGenerationArtifacts(
-    generationId,
-    {
-      'symbol-index.json': finalSymbolIndex,
-      'code-graph.json': finalGraph,
-      'ui-composition.json': finalUiComposition,
-      'ui-props.json': finalUiProps,
-      [getUiSemanticsArtifactFileName()]: uiSemantics,
-      'pattern-candidates.json': finalPatternIndex,
-      'change-summary.json': changeSummary,
-    },
-    generationState,
-  );
-
-  if (options.failBeforePublish) {
-    throw new Error('Simulated refresh failure before publish.');
-  }
-
-  await saveSearchRefreshRequest(searchRequest);
-  logger.info(
-    `[search-freshness] request generation=${generationId} status=${generationState.search.status} fingerprint=${generationState.search.aggregateFingerprint}`,
-  );
-  await publishGeneration(generationId, createdAt);
-
-  let consistency: IndexRefreshDiagnostics['consistency'];
-  let finalCounts = counts;
-  let finalSearch = generationState.search;
-
-  if (
-    options.runConsistencyChecks === 'always' ||
-    ((options.runConsistencyChecks ?? 'risky-only') === 'risky-only' &&
-      changeSummary.overview.highRiskFiles > 0)
-  ) {
-    consistency =
-      (await runCurrentGenerationConsistencyMaintenance({ logger, applyRepairs: true })) ?? undefined;
-    const refreshedState = await loadCurrentGenerationState();
-
-    if (refreshedState) {
-      finalCounts = refreshedState.counts;
-      finalSearch = refreshedState.search;
+    if (highRiskRefreshValidation.isHighRiskRefresh) {
+      logger.info(
+        `[index-refresh] high-risk validation generation=${generationId} status=${highRiskRefreshValidation.status} triggers=${highRiskRefreshValidation.triggers.join(' | ')}`,
+      );
     }
+
+    for (const issue of highRiskRefreshValidation.issues) {
+      warnings.push(`${issue.summary}: ${issue.details}`);
+    }
+
+    if (highRiskRefreshValidation.status === 'failed') {
+      const failureSummary = highRiskRefreshValidation.issues
+        .filter((issue) => issue.severity === 'error')
+        .map((issue) => `${issue.summary} (${issue.recommendedAction})`)
+        .join('; ');
+      logger.error(`[index-refresh] high-risk validation failure: ${failureSummary}`);
+      throw new Error(`High-risk refresh validation failed: ${failureSummary}`);
+    }
+
+    await saveGenerationArtifacts(
+      generationId,
+      {
+        'symbol-index.json': finalSymbolIndex,
+        'code-graph.json': finalGraph,
+        'ui-composition.json': finalUiComposition,
+        'ui-props.json': finalUiProps,
+        [getUiSemanticsArtifactFileName()]: uiSemantics,
+        'pattern-candidates.json': finalPatternIndex,
+        'change-summary.json': changeSummary,
+      },
+      generationState,
+    );
+
+    if (options.failBeforePublish) {
+      throw new Error('Simulated refresh failure before publish.');
+    }
+
+    await saveSearchRefreshRequest(searchRequest);
+    logger.info(
+      `[search-freshness] request generation=${generationId} status=${generationState.search.status} fingerprint=${generationState.search.aggregateFingerprint}`,
+    );
+    await publishGeneration(generationId, createdAt);
+    await markGenerationCommitted(generationId, createdAt);
+
+    let consistency: IndexRefreshDiagnostics['consistency'];
+    let finalCounts = counts;
+    let finalSearch = generationState.search;
+
+    if (
+      options.runConsistencyChecks === 'always' ||
+      ((options.runConsistencyChecks ?? 'risky-only') === 'risky-only' &&
+        changeSummary.overview.highRiskFiles > 0)
+    ) {
+      consistency =
+        (await runCurrentGenerationConsistencyMaintenance({ logger, applyRepairs: true })) ?? undefined;
+      const refreshedState = await loadCurrentGenerationState();
+
+      if (refreshedState) {
+        finalCounts = refreshedState.counts;
+        finalSearch = refreshedState.search;
+      }
+    }
+    await cleanupGenerationDebris({ logger, applyDeletes: true });
+
+    const diagnostics: IndexRefreshDiagnostics = {
+      generationId,
+      createdAt,
+      delta,
+      changeSummary,
+      consistency,
+      counts: finalCounts,
+      rebuild,
+      cleanup,
+      search: finalSearch,
+      warnings,
+      status: 'committed',
+    };
+    logDiagnostics(logger, diagnostics);
+    await getCurrentIndexHealth();
+
+    return {
+      symbolIndex: finalSymbolIndex,
+      diagnostics,
+    };
+  } catch (error) {
+    await markGenerationAbandoned(
+      generationId,
+      new Date().toISOString(),
+      error instanceof Error ? error.message : 'refresh failed before publish',
+    ).catch(() => undefined);
+    throw error;
   }
-
-  const diagnostics: IndexRefreshDiagnostics = {
-    generationId,
-    createdAt,
-    delta,
-    changeSummary,
-    consistency,
-    counts: finalCounts,
-    rebuild,
-    cleanup,
-    search: finalSearch,
-    warnings,
-    status: 'committed',
-  };
-  logDiagnostics(logger, diagnostics);
-  await getCurrentIndexHealth();
-
-  return {
-    symbolIndex: finalSymbolIndex,
-    diagnostics,
-  };
 }
 
 export async function refreshIndexes(

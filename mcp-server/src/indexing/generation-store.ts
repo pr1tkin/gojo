@@ -5,6 +5,7 @@ import path from 'node:path';
 import type {
   CoordinationMarkerParseResult,
   CurrentGenerationPointer,
+  GenerationLifecycleMarker,
   IndexGenerationState,
   SearchFreshnessState,
   SearchRefreshRequest,
@@ -12,6 +13,18 @@ import type {
 } from './types.js';
 
 const INDEX_GENERATION_SCHEMA_VERSION = 1;
+const GENERATION_LIFECYCLE_SCHEMA_VERSION = 1;
+
+export const REQUIRED_GENERATION_ARTIFACT_FILES = [
+  'symbol-index.json',
+  'code-graph.json',
+  'ui-composition.json',
+  'ui-props.json',
+  'ui-semantics.json',
+  'pattern-candidates.json',
+  'change-summary.json',
+  'index-generation.json',
+] as const;
 
 export function getDataDirectory(): string {
   return path.resolve(process.cwd(), '.data');
@@ -55,6 +68,10 @@ export function getGenerationArtifactFilePath(generationId: string, fileName: st
 
 export function getGenerationStateFilePath(generationId: string): string {
   return getGenerationArtifactFilePath(generationId, 'index-generation.json');
+}
+
+export function getGenerationLifecycleFilePath(generationId: string): string {
+  return getGenerationArtifactFilePath(generationId, 'generation-lifecycle.json');
 }
 
 export function getCurrentHealthSnapshotFilePath(): string {
@@ -104,6 +121,30 @@ function normalizeGenerationState(value: unknown): IndexGenerationState | null {
     search: isObject(value.search)
       ? ((value.search as unknown) as SearchFreshnessState)
       : createDefaultSearchFreshnessState(),
+  };
+}
+
+function normalizeGenerationLifecycleMarker(value: unknown): GenerationLifecycleMarker | null {
+  if (
+    !isObject(value) ||
+    typeof value.schemaVersion !== 'number' ||
+    typeof value.generationId !== 'string' ||
+    (value.status !== 'staged' && value.status !== 'committed' && value.status !== 'abandoned') ||
+    typeof value.createdAt !== 'string' ||
+    typeof value.updatedAt !== 'string'
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: value.schemaVersion,
+    generationId: value.generationId,
+    status: value.status,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    publishedAt: typeof value.publishedAt === 'string' ? value.publishedAt : undefined,
+    abandonedAt: typeof value.abandonedAt === 'string' ? value.abandonedAt : undefined,
+    reason: typeof value.reason === 'string' ? value.reason : undefined,
   };
 }
 
@@ -191,6 +232,95 @@ export async function saveGenerationArtifacts(
   );
 
   return generationDirectory;
+}
+
+async function saveGenerationLifecycleMarker(marker: GenerationLifecycleMarker): Promise<string> {
+  const filePath = getGenerationLifecycleFilePath(marker.generationId);
+  await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
+  await fsPromises.writeFile(filePath, JSON.stringify(marker, null, 2), 'utf8');
+  return filePath;
+}
+
+export async function loadGenerationLifecycleMarker(
+  generationId: string,
+): Promise<GenerationLifecycleMarker | null> {
+  try {
+    const content = await fsPromises.readFile(getGenerationLifecycleFilePath(generationId), 'utf8');
+    return normalizeGenerationLifecycleMarker(JSON.parse(content) as unknown);
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: string }).code)
+        : '';
+
+    if (code === 'ENOENT') {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+export async function initializeStagedGeneration(
+  generationId: string,
+  createdAt: string,
+): Promise<string> {
+  await fsPromises.mkdir(getGenerationDirectory(generationId), { recursive: true });
+  return saveGenerationLifecycleMarker({
+    schemaVersion: GENERATION_LIFECYCLE_SCHEMA_VERSION,
+    generationId,
+    status: 'staged',
+    createdAt,
+    updatedAt: createdAt,
+  });
+}
+
+export async function markGenerationCommitted(
+  generationId: string,
+  publishedAt: string,
+): Promise<string> {
+  const existing =
+    (await loadGenerationLifecycleMarker(generationId)) ?? {
+      schemaVersion: GENERATION_LIFECYCLE_SCHEMA_VERSION,
+      generationId,
+      status: 'staged' as const,
+      createdAt: publishedAt,
+      updatedAt: publishedAt,
+    };
+
+  return saveGenerationLifecycleMarker({
+    ...existing,
+    schemaVersion: GENERATION_LIFECYCLE_SCHEMA_VERSION,
+    status: 'committed',
+    updatedAt: publishedAt,
+    publishedAt,
+    reason: undefined,
+    abandonedAt: undefined,
+  });
+}
+
+export async function markGenerationAbandoned(
+  generationId: string,
+  abandonedAt: string,
+  reason: string,
+): Promise<string> {
+  const existing =
+    (await loadGenerationLifecycleMarker(generationId)) ?? {
+      schemaVersion: GENERATION_LIFECYCLE_SCHEMA_VERSION,
+      generationId,
+      status: 'staged' as const,
+      createdAt: abandonedAt,
+      updatedAt: abandonedAt,
+    };
+
+  return saveGenerationLifecycleMarker({
+    ...existing,
+    schemaVersion: GENERATION_LIFECYCLE_SCHEMA_VERSION,
+    status: 'abandoned',
+    updatedAt: abandonedAt,
+    abandonedAt,
+    reason,
+  });
 }
 
 export async function updateGenerationState(

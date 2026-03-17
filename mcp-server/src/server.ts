@@ -9,6 +9,7 @@ import {
 import { exploreComponentToolDefinition, runExploreComponentTool } from './tools/explore-component.js';
 import { planChangeToolDefinition, runPlanChangeTool } from './tools/plan-change.js';
 import { loadConfig } from './config.js';
+import { cleanupGenerationDebris } from './indexing/generation-debris.js';
 import { buildSymbolIndex } from './symbol-index/indexer.js';
 import { runSearchPatternsTool, searchPatternsToolDefinition } from './tools/search-patterns.js';
 import { findRelatedFilesToolDefinition, runFindRelatedFilesTool } from './tools/find-related-files.js';
@@ -21,6 +22,7 @@ import { runSearchCodeTool, searchCodeToolDefinition } from './tools/search-code
 async function main(): Promise<void> {
   const config = loadConfig();
   const shouldBuildSymbolIndex = process.env.BUILD_SYMBOL_INDEX_ON_STARTUP === 'true';
+  await cleanupGenerationDebris({ logger: console, applyDeletes: true });
 
   if (shouldBuildSymbolIndex) {
     await buildSymbolIndex(config.reposRoot);

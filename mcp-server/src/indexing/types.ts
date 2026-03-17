@@ -1,4 +1,5 @@
 export type IndexGenerationStatus = 'ready';
+export type GenerationLifecycleStatus = 'staged' | 'committed' | 'abandoned';
 export type SearchFreshnessStatus = 'pending' | 'ready' | 'stale' | 'failed' | 'unknown';
 export type CoordinationMarkerParseStatus =
   | 'ok'
@@ -248,6 +249,17 @@ export interface CurrentGenerationPointer {
   schemaVersion: number;
   generationId: string;
   publishedAt: string;
+}
+
+export interface GenerationLifecycleMarker {
+  schemaVersion: number;
+  generationId: string;
+  status: GenerationLifecycleStatus;
+  createdAt: string;
+  updatedAt: string;
+  publishedAt?: string;
+  abandonedAt?: string;
+  reason?: string;
 }
 
 export interface IndexRefreshDiagnostics {

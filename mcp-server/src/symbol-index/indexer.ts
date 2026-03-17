@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 
 import { loadConfig } from '../config.js';
+import { cleanupGenerationDebris } from '../indexing/generation-debris.js';
 import { refreshIndexes } from '../indexing/refresh.js';
 import type { SymbolIndex } from './types.js';
 
@@ -11,6 +12,7 @@ export async function buildSymbolIndex(reposRoot: string): Promise<SymbolIndex> 
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  await cleanupGenerationDebris({ logger: console, applyDeletes: true });
   const result = await refreshIndexes(config.reposRoot);
   console.log(`Indexed generation ${result.diagnostics.generationId}.`);
   console.log(`Indexed ${result.diagnostics.counts.symbols} symbols.`);

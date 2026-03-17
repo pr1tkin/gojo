@@ -5,6 +5,7 @@ import {
   evaluateCatastrophicCountRegressions,
   findPriorTrustedGenerationBaseline,
 } from './count-regressions.js';
+import { cleanupGenerationDebris } from './generation-debris.js';
 import { buildCodeGraphFromSymbolIndex } from '../graph/build-graph.js';
 import { loadRepoResolutionConfigs } from '../graph/repo-config.js';
 import type { CodeGraphSnapshot } from '../graph/types.js';
@@ -865,38 +866,17 @@ export async function runCurrentGenerationConsistencyMaintenance(
       exists: await fileExists(path.join(getDataDirectory(), fileName)),
     })),
   );
-  const generationDirEntries = await fs.readdir(getGenerationsDirectory(), { withFileTypes: true }).catch(() => []);
-  const incompleteGenerationDirectories: string[] = [];
-
-  for (const entry of generationDirEntries) {
-    if (!entry.isDirectory()) {
-      continue;
-    }
-
-    if (entry.name === generationId) {
-      continue;
-    }
-
-    const stateFilePath = getGenerationStateFilePath(entry.name);
-    const stateFileExists = await fileExists(stateFilePath);
-
-    if (!stateFileExists) {
-      incompleteGenerationDirectories.push(path.join(getGenerationsDirectory(), entry.name));
-      continue;
-    }
-
-    const missingRequiredArtifact = await Promise.all(
-      REQUIRED_GENERATION_ARTIFACTS.map((fileName) => fileExists(getGenerationArtifactFilePath(entry.name, fileName))),
-    );
-
-    if (missingRequiredArtifact.some((exists) => !exists)) {
-      incompleteGenerationDirectories.push(path.join(getGenerationsDirectory(), entry.name));
-    }
-  }
+  const debrisReport = await cleanupGenerationDebris({
+    logger,
+    applyDeletes: applyRepairs,
+  });
 
   const debrisArtifacts = [
     ...rootTempFilePaths.filter((entry) => entry.exists).map((entry) => entry.filePath),
-    ...incompleteGenerationDirectories,
+    ...debrisReport.removed.map((entry) => entry.directoryPath),
+    ...debrisReport.preserved
+      .filter((entry) => entry.status === 'abandoned')
+      .map((entry) => entry.directoryPath),
   ];
 
   if (debrisArtifacts.length > 0) {
@@ -913,7 +893,7 @@ export async function runCurrentGenerationConsistencyMaintenance(
       debrisCheck.repairsApplied.push(
         createRepairRecord(
           'cleanup-maintenance-debris',
-          'removed temporary files and incomplete unpublished generation directories',
+          'removed temporary files and abandoned unpublished generation directories',
           'applied',
           debrisArtifacts,
           [],
@@ -923,7 +903,7 @@ export async function runCurrentGenerationConsistencyMaintenance(
       debrisCheck.repairsRecommended.push(
         createRepairRecord(
           'cleanup-maintenance-debris',
-          'remove temporary files and incomplete unpublished generation directories',
+          'remove temporary files and abandoned unpublished generation directories',
           'recommended',
           debrisArtifacts,
           [],
