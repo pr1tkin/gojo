@@ -20,6 +20,7 @@ import { buildUiPropSurfaceIndex } from '../ui-props/build-index.js';
 import { loadUiPropSurfaceIndex } from '../ui-props/store.js';
 import type { UiPropSurfaceIndex } from '../ui-props/types.js';
 import { classifyRepositoryChanges, createEmptyGenerationChangeSummary } from './change-detection.js';
+import { runCurrentGenerationConsistencyMaintenance } from './consistency.js';
 import {
   loadCurrentGenerationState,
   publishGeneration,
@@ -48,6 +49,7 @@ const INDEX_GENERATION_STATE_SCHEMA_VERSION = 2;
 export interface RefreshIndexesOptions {
   logger?: Pick<Console, 'info' | 'warn' | 'error'>;
   failBeforePublish?: boolean;
+  runConsistencyChecks?: 'never' | 'risky-only' | 'always';
 }
 
 function normalizeRelativePath(filePath: string): string {
@@ -545,15 +547,35 @@ export async function refreshIndexes(
   );
   await publishGeneration(generationId, createdAt);
 
+  let consistency: IndexRefreshDiagnostics['consistency'];
+  let finalCounts = counts;
+  let finalSearch = generationState.search;
+
+  if (
+    options.runConsistencyChecks === 'always' ||
+    ((options.runConsistencyChecks ?? 'risky-only') === 'risky-only' &&
+      changeSummary.overview.highRiskFiles > 0)
+  ) {
+    consistency =
+      (await runCurrentGenerationConsistencyMaintenance({ logger, applyRepairs: true })) ?? undefined;
+    const refreshedState = await loadCurrentGenerationState();
+
+    if (refreshedState) {
+      finalCounts = refreshedState.counts;
+      finalSearch = refreshedState.search;
+    }
+  }
+
   const diagnostics: IndexRefreshDiagnostics = {
     generationId,
     createdAt,
     delta,
     changeSummary,
-    counts,
+    consistency,
+    counts: finalCounts,
     rebuild,
     cleanup,
-    search: generationState.search,
+    search: finalSearch,
     warnings,
     status: 'committed',
   };

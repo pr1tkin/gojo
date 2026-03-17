@@ -12,11 +12,11 @@ import type {
 
 const INDEX_GENERATION_SCHEMA_VERSION = 1;
 
-function getDataDirectory(): string {
+export function getDataDirectory(): string {
   return path.resolve(process.cwd(), '.data');
 }
 
-function getCoordinationDirectory(): string {
+export function getCoordinationDirectory(): string {
   return path.join(getDataDirectory(), 'coordination');
 }
 
@@ -32,7 +32,7 @@ function getLegacyArtifactFilePath(fileName: string): string {
   return path.join(getDataDirectory(), fileName);
 }
 
-function getGenerationsDirectory(): string {
+export function getGenerationsDirectory(): string {
   return path.join(getDataDirectory(), 'generations');
 }
 

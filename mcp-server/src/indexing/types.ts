@@ -1,5 +1,9 @@
 export type IndexGenerationStatus = 'ready';
 export type SearchFreshnessStatus = 'pending' | 'ready' | 'stale' | 'failed' | 'unknown';
+export type ConsistencyCheckSeverity = 'info' | 'warning' | 'error';
+export type ConsistencyCheckStatus = 'passed' | 'warning' | 'failed' | 'repaired';
+export type ConsistencyScope = 'generation' | 'artifact' | 'coordination' | 'maintenance';
+export type ConsistencyRepairDisposition = 'applied' | 'recommended' | 'skipped' | 'failed';
 
 export interface IndexedRepositoryDescriptor {
   repoId: string;
@@ -77,6 +81,47 @@ export interface GenerationChangeSummary {
   overview: GenerationChangeSummaryOverview;
 }
 
+export interface ConsistencyRepairRecord {
+  actionId: string;
+  description: string;
+  disposition: ConsistencyRepairDisposition;
+  targetArtifacts: string[];
+  affectedFiles: string[];
+  details?: string;
+}
+
+export interface ConsistencyCheckResult {
+  checkId: string;
+  name: string;
+  severity: ConsistencyCheckSeverity;
+  scope: ConsistencyScope;
+  status: ConsistencyCheckStatus;
+  summary: string;
+  details: string[];
+  targetArtifacts: string[];
+  affectedFiles: string[];
+  repairsApplied: ConsistencyRepairRecord[];
+  repairsRecommended: ConsistencyRepairRecord[];
+}
+
+export interface ConsistencyRunOverview {
+  checksExecuted: number;
+  passed: number;
+  warnings: number;
+  failed: number;
+  repaired: number;
+  repairsApplied: number;
+  repairsRecommended: number;
+}
+
+export interface ConsistencyRunReport {
+  schemaVersion: number;
+  generationId: string;
+  generatedAt: string;
+  overview: ConsistencyRunOverview;
+  checks: ConsistencyCheckResult[];
+}
+
 export interface IndexGenerationCounts {
   files: number;
   symbols: number;
@@ -138,6 +183,7 @@ export interface IndexGenerationState {
   rebuild: IndexGenerationRebuildSummary;
   cleanup: IndexGenerationCleanupSummary;
   changeSummary: GenerationChangeSummaryOverview;
+  consistency?: ConsistencyRunOverview;
   search: SearchFreshnessState;
   warnings: string[];
   errors: string[];
@@ -154,6 +200,7 @@ export interface IndexRefreshDiagnostics {
   createdAt: string;
   delta: IndexRefreshDelta;
   changeSummary: GenerationChangeSummary;
+  consistency?: ConsistencyRunReport;
   counts: IndexGenerationCounts;
   rebuild: IndexGenerationRebuildSummary;
   cleanup: IndexGenerationCleanupSummary;
