@@ -74,6 +74,37 @@ describe('search fingerprint contract', () => {
     expect(right).toEqual(left);
   });
 
+  it('uses canonical byte-order sorting rather than locale-sensitive path ordering', async () => {
+    const leftRoot = await createTempDirectory();
+    const rightRoot = await createTempDirectory();
+    tempDirectories.push(leftRoot, rightRoot);
+    const leftReposRoot = path.join(leftRoot, 'repos');
+    const rightReposRoot = path.join(rightRoot, 'repos');
+
+    await ensureRepository(leftReposRoot, 'app-repo');
+    await ensureRepository(rightReposRoot, 'app-repo');
+
+    const files = [
+      ['src/_alpha.ts', 'export const under = 1;\n'],
+      ['src/-alpha.ts', 'export const dash = 1;\n'],
+      ['src/0alpha.ts', 'export const zero = 1;\n'],
+      ['src/alpha.ts', 'export const plain = 1;\n'],
+    ] as const;
+
+    for (const [relativePath, content] of files) {
+      await writeRepositoryFile(leftReposRoot, 'app-repo', relativePath, content);
+    }
+
+    for (const [relativePath, content] of [...files].reverse()) {
+      await writeRepositoryFile(rightReposRoot, 'app-repo', relativePath, content);
+    }
+
+    const left = await buildSearchRepoFingerprints(leftReposRoot);
+    const right = await buildSearchRepoFingerprints(rightReposRoot);
+
+    expect(right).toEqual(left);
+  });
+
   it('ignores generated, temp, and excluded-path files', async () => {
     const tempRoot = await createTempDirectory();
     const reposRoot = path.join(tempRoot, 'repos');
@@ -88,6 +119,23 @@ describe('search fingerprint contract', () => {
     await writeRepositoryFile(reposRoot, 'app-repo', 'generated/api.generated.ts', 'export const generated = true;\n');
     await writeRepositoryFile(reposRoot, 'app-repo', 'types/index.d.ts', 'export declare const x: string;\n');
     await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts.tmp', 'scratch');
+
+    const next = await buildSearchRepoFingerprints(reposRoot);
+
+    expect(next).toEqual(baseline);
+  });
+
+  it('treats ignored directories case-insensitively under the canonical contract', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export const a = 1;\n');
+    const baseline = await buildSearchRepoFingerprints(reposRoot);
+
+    await writeRepositoryFile(reposRoot, 'app-repo', 'Dist/bundle.js', 'compiled');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'NODE_MODULES/pkg/index.js', 'compiled');
 
     const next = await buildSearchRepoFingerprints(reposRoot);
 

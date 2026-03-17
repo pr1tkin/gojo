@@ -276,6 +276,44 @@ describe.sequential('cross-index refresh coordination', () => {
     expect(freshness?.snapshotId).toBe('snapshot-ready-2');
   });
 
+  it('stays ready across a no-op refresh when the repository state and Zoekt snapshot are unchanged', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/util.ts',
+      'export function greet(): string { return "hi"; }',
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    const firstState = await loadCurrentGenerationState();
+
+    await writeSearchSnapshot(tempRoot, {
+      schemaVersion: 1,
+      snapshotId: 'snapshot-ready-stable',
+      status: 'ready',
+      refreshedAt: '2026-03-17T10:00:00.000Z',
+      aggregateFingerprint: firstState?.search.aggregateFingerprint,
+      repoFingerprints: firstState?.search.repoFingerprints,
+      details: 'Zoekt indexing pass completed successfully.',
+    });
+
+    await getCurrentSearchFreshness(silentLogger);
+    const secondRefresh = await refreshIndexes(reposRoot, { logger: silentLogger });
+    const secondState = await loadCurrentGenerationState();
+    const secondFreshness = await getCurrentSearchFreshness(silentLogger);
+
+    expect(secondRefresh.diagnostics.status).toBe('no-op');
+    expect(secondState?.generationId).toBe(firstState?.generationId);
+    expect(secondFreshness?.status).toBe('ready');
+    expect(secondFreshness?.aggregateFingerprint).toBe(firstState?.search.aggregateFingerprint);
+  });
+
   it('reports stale when a known Zoekt snapshot does not match the current generation fingerprint', async () => {
     const tempRoot = await createTempDirectory();
     const reposRoot = path.join(tempRoot, 'repos');

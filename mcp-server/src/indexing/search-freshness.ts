@@ -1,6 +1,7 @@
 import {
   buildSearchRepoFingerprints,
   compareSearchFingerprintSets,
+  SEARCH_FINGERPRINT_CONTRACT_VERSION,
 } from './search-fingerprint.js';
 import {
   loadCurrentGenerationState,
@@ -23,6 +24,7 @@ export function createSearchRefreshRequest(
 ): SearchRefreshRequest {
   return {
     schemaVersion: SEARCH_COORDINATION_SCHEMA_VERSION,
+    fingerprintContractVersion: SEARCH_FINGERPRINT_CONTRACT_VERSION,
     generationId: generationState.generationId,
     requestedAt: generationState.createdAt,
     aggregateFingerprint: generationState.search.aggregateFingerprint,

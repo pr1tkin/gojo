@@ -186,6 +186,14 @@ export interface SearchRepoFingerprint {
   fileCount: number;
 }
 
+export interface SearchFingerprintRepoMismatch {
+  repoId: string;
+  expectedFingerprint?: string;
+  actualFingerprint?: string;
+  expectedFileCount?: number;
+  actualFileCount?: number;
+}
+
 export interface SearchFingerprintComparisonIssue {
   severity: 'warning' | 'error';
   code:
@@ -199,10 +207,16 @@ export interface SearchFingerprintComparisonIssue {
 
 export interface SearchFingerprintComparison {
   equivalent: boolean;
+  contractVersion: number;
   expectedAggregateFingerprint?: string;
   actualAggregateFingerprint?: string;
+  normalizedExpectedAggregateFingerprint: string;
+  normalizedActualAggregateFingerprint: string;
   expectedRepoFingerprints: SearchRepoFingerprint[];
   actualRepoFingerprints: SearchRepoFingerprint[];
+  missingRepoIds: string[];
+  unexpectedRepoIds: string[];
+  mismatchedRepos: SearchFingerprintRepoMismatch[];
   issues: SearchFingerprintComparisonIssue[];
   summary: string;
 }
@@ -324,6 +338,7 @@ export interface RefreshFailureRecord {
 
 export interface SearchRefreshRequest {
   schemaVersion: number;
+  fingerprintContractVersion?: number;
   generationId: string;
   requestedAt: string;
   aggregateFingerprint: string;
@@ -332,6 +347,7 @@ export interface SearchRefreshRequest {
 
 export interface SearchRefreshSnapshot {
   schemaVersion: number;
+  fingerprintContractVersion?: number;
   snapshotId: string;
   status: 'ready' | 'failed';
   refreshedAt: string;

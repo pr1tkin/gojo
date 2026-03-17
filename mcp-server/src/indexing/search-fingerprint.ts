@@ -6,8 +6,11 @@ import { listRepositories } from '../repositories.js';
 import type {
   SearchFingerprintComparison,
   SearchFingerprintComparisonIssue,
+  SearchFingerprintRepoMismatch,
   SearchRepoFingerprint,
 } from './types.js';
+
+export const SEARCH_FINGERPRINT_CONTRACT_VERSION = 1;
 
 const SEARCH_IGNORED_DIRECTORIES = new Set([
   '.git',
@@ -42,12 +45,21 @@ function normalizeRelativePath(filePath: string): string {
   return filePath.split(path.sep).join('/');
 }
 
+function compareCanonicalText(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
+}
+
+export function sortCanonicalText(values: Iterable<string>): string[] {
+  return Array.from(values).sort(compareCanonicalText);
+}
+
 function shouldIgnoreFile(relativePath: string): boolean {
   const normalizedPath = normalizeRelativePath(relativePath);
   const segments = normalizedPath.split('/').filter(Boolean);
-  const fileName = segments[segments.length - 1]?.toLowerCase() ?? '';
+  const lowerSegments = segments.map((segment) => segment.toLowerCase());
+  const fileName = lowerSegments[lowerSegments.length - 1] ?? '';
 
-  if (segments.some((segment) => SEARCH_IGNORED_DIRECTORIES.has(segment))) {
+  if (lowerSegments.some((segment) => SEARCH_IGNORED_DIRECTORIES.has(segment))) {
     return true;
   }
 
@@ -119,7 +131,7 @@ export async function buildSearchRepoFingerprints(reposRoot: string): Promise<{
     }
 
     const fileEntries = await collectSearchFingerprintEntries(repository.rootPath);
-    fileEntries.sort((left, right) => left.filePath.localeCompare(right.filePath));
+    fileEntries.sort((left, right) => compareCanonicalText(left.filePath, right.filePath));
     const fingerprint = createCanonicalFingerprint(
       fileEntries.map((entry) => `${entry.filePath}\t${entry.contentHash}`),
     );
@@ -130,7 +142,7 @@ export async function buildSearchRepoFingerprints(reposRoot: string): Promise<{
     });
   }
 
-  repoFingerprints.sort((left, right) => left.repoId.localeCompare(right.repoId));
+  repoFingerprints.sort((left, right) => compareCanonicalText(left.repoId, right.repoId));
 
   return {
     aggregateFingerprint: createCanonicalFingerprint(
@@ -147,7 +159,13 @@ function normalizeRepoFingerprints(entries: SearchRepoFingerprint[]): SearchRepo
       fingerprint: entry.fingerprint,
       fileCount: entry.fileCount,
     }))
-    .sort((left, right) => left.repoId.localeCompare(right.repoId));
+    .sort((left, right) => compareCanonicalText(left.repoId, right.repoId));
+}
+
+function createAggregateFingerprintFromRepos(entries: SearchRepoFingerprint[]): string {
+  return createCanonicalFingerprint(
+    normalizeRepoFingerprints(entries).map((entry) => `${entry.repoId}\t${entry.fingerprint}\t${entry.fileCount}`),
+  );
 }
 
 function addIssue(
@@ -178,16 +196,34 @@ export function compareSearchFingerprintSets(
   const expectedByRepo = new Map(normalizedExpected.map((entry) => [entry.repoId, entry]));
   const actualByRepo = new Map(normalizedActual.map((entry) => [entry.repoId, entry]));
   const issues: SearchFingerprintComparisonIssue[] = [];
+  const missingRepoIds: string[] = [];
+  const unexpectedRepoIds: string[] = [];
+  const mismatchedRepos: SearchFingerprintRepoMismatch[] = [];
+  const normalizedExpectedAggregateFingerprint = createAggregateFingerprintFromRepos(normalizedExpected);
+  const normalizedActualAggregateFingerprint = createAggregateFingerprintFromRepos(normalizedActual);
 
   for (const expected of normalizedExpected) {
     const actual = actualByRepo.get(expected.repoId);
 
     if (!actual) {
+      missingRepoIds.push(expected.repoId);
+      mismatchedRepos.push({
+        repoId: expected.repoId,
+        expectedFingerprint: expected.fingerprint,
+        expectedFileCount: expected.fileCount,
+      });
       addIssue(issues, 'error', 'missing-repo', `Zoekt snapshot is missing repo "${expected.repoId}".`);
       continue;
     }
 
     if (expected.fileCount !== actual.fileCount) {
+      mismatchedRepos.push({
+        repoId: expected.repoId,
+        expectedFingerprint: expected.fingerprint,
+        actualFingerprint: actual.fingerprint,
+        expectedFileCount: expected.fileCount,
+        actualFileCount: actual.fileCount,
+      });
       addIssue(
         issues,
         'error',
@@ -197,6 +233,22 @@ export function compareSearchFingerprintSets(
     }
 
     if (expected.fingerprint !== actual.fingerprint) {
+      if (
+        !mismatchedRepos.some(
+          (entry) =>
+            entry.repoId === expected.repoId &&
+            entry.expectedFingerprint === expected.fingerprint &&
+            entry.actualFingerprint === actual.fingerprint,
+        )
+      ) {
+        mismatchedRepos.push({
+          repoId: expected.repoId,
+          expectedFingerprint: expected.fingerprint,
+          actualFingerprint: actual.fingerprint,
+          expectedFileCount: expected.fileCount,
+          actualFileCount: actual.fileCount,
+        });
+      }
       addIssue(
         issues,
         'error',
@@ -208,6 +260,12 @@ export function compareSearchFingerprintSets(
 
   for (const actual of normalizedActual) {
     if (!expectedByRepo.has(actual.repoId)) {
+      unexpectedRepoIds.push(actual.repoId);
+      mismatchedRepos.push({
+        repoId: actual.repoId,
+        actualFingerprint: actual.fingerprint,
+        actualFileCount: actual.fileCount,
+      });
       addIssue(issues, 'error', 'unexpected-repo', `Zoekt snapshot contains unexpected repo "${actual.repoId}".`);
     }
   }
@@ -227,12 +285,17 @@ export function compareSearchFingerprintSets(
 
   return {
     equivalent: issues.every((issue) => issue.severity !== 'error'),
+    contractVersion: SEARCH_FINGERPRINT_CONTRACT_VERSION,
     expectedAggregateFingerprint,
     actualAggregateFingerprint,
+    normalizedExpectedAggregateFingerprint,
+    normalizedActualAggregateFingerprint,
     expectedRepoFingerprints: normalizedExpected,
     actualRepoFingerprints: normalizedActual,
+    missingRepoIds,
+    unexpectedRepoIds,
+    mismatchedRepos,
     issues,
     summary: summarizeIssues(issues),
   };
 }
-

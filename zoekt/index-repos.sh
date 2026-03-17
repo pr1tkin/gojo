@@ -8,6 +8,7 @@ COORDINATION_ROOT="${COORDINATION_ROOT:-/data/coordination}"
 SEARCH_STATE_FILE="${SEARCH_STATE_FILE:-${COORDINATION_ROOT}/zoekt-refresh-state.json}"
 DEFAULT_INTERVAL_SECONDS="${DEFAULT_INTERVAL_SECONDS:-300}"
 SEARCH_STATE_SCHEMA_VERSION="${SEARCH_STATE_SCHEMA_VERSION:-1}"
+SEARCH_FINGERPRINT_CONTRACT_VERSION="${SEARCH_FINGERPRINT_CONTRACT_VERSION:-1}"
 
 log_info() {
   echo "[zoekt-coordination] $*" >&2
@@ -130,9 +131,25 @@ resolve_interval_seconds() {
   echo "${DEFAULT_INTERVAL_SECONDS}"
 }
 
-should_ignore_relative_path() {
+normalize_relative_path() {
   local relative_path="$1"
   local normalized_path="${relative_path#./}"
+  normalized_path="${normalized_path//\\//}"
+  printf '%s' "${normalized_path}"
+}
+
+sort_canonical_lines() {
+  LC_ALL=C sort "$@"
+}
+
+sort_canonical_lines_zero_delimited() {
+  LC_ALL=C sort -z "$@"
+}
+
+should_ignore_relative_path() {
+  local relative_path="$1"
+  local normalized_path
+  normalized_path="$(normalize_relative_path "${relative_path}")"
   local lower_path
   local file_name
   local segment
@@ -225,7 +242,7 @@ count_repo_files() {
   local relative_path
 
   while IFS= read -r -d '' file_path; do
-    relative_path="${file_path#${repo_path}/}"
+    relative_path="$(normalize_relative_path "${file_path#${repo_path}/}")"
 
     if should_ignore_relative_path "${relative_path}"; then
       continue
@@ -244,14 +261,14 @@ compute_repo_fingerprint() {
 
   while IFS= read -r -d '' file_path; do
     local relative_path
-    relative_path="${file_path#${repo_path}/}"
+    relative_path="$(normalize_relative_path "${file_path#${repo_path}/}")"
 
     if should_ignore_relative_path "${relative_path}"; then
       continue
     fi
 
     printf '%s\t%s\n' "${relative_path}" "$(sha256sum "${file_path}" | awk '{print $1}')" >> "${tmp_file}"
-  done < <(find "${repo_path}" -type f -print0 | sort -z)
+  done < <(find "${repo_path}" -type f -print0 | sort_canonical_lines_zero_delimited)
 
   if [[ ! -s "${tmp_file}" ]]; then
     rm -f "${tmp_file}"
@@ -275,7 +292,7 @@ compute_aggregate_fingerprint() {
   fi
 
   normalized_file="$(mktemp)"
-  sort "${repo_fingerprint_file}" > "${normalized_file}"
+  sort_canonical_lines "${repo_fingerprint_file}" > "${normalized_file}"
 
   local aggregate_fingerprint
   aggregate_fingerprint="$(sha256sum "${normalized_file}" | awk '{print $1}')"
@@ -296,11 +313,12 @@ build_search_state_ready_payload() {
   aggregate_fingerprint="$(compute_aggregate_fingerprint "${repo_fingerprint_file}")"
   payload_file="$(create_temp_file_in_directory "${COORDINATION_ROOT}" "zoekt-refresh-payload")"
   sorted_repo_fingerprint_file="$(create_temp_file_in_directory "${COORDINATION_ROOT}" "zoekt-repo-fingerprints.sorted")"
-  sort "${repo_fingerprint_file}" > "${sorted_repo_fingerprint_file}"
+  sort_canonical_lines "${repo_fingerprint_file}" > "${sorted_repo_fingerprint_file}"
 
   {
     printf '{\n'
     printf '  "schemaVersion": %s,\n' "${SEARCH_STATE_SCHEMA_VERSION}"
+    printf '  "fingerprintContractVersion": %s,\n' "${SEARCH_FINGERPRINT_CONTRACT_VERSION}"
     printf '  "snapshotId": "%s",\n' "$(json_escape "${snapshot_id}")"
     printf '  "status": "ready",\n'
     printf '  "refreshedAt": "%s",\n' "$(json_escape "${refreshed_at}")"
@@ -362,6 +380,7 @@ build_search_state_failed_payload() {
   {
     printf '{\n'
     printf '  "schemaVersion": %s,\n' "${SEARCH_STATE_SCHEMA_VERSION}"
+    printf '  "fingerprintContractVersion": %s,\n' "${SEARCH_FINGERPRINT_CONTRACT_VERSION}"
     printf '  "snapshotId": "%s",\n' "$(json_escape "${failed_at}-$$")"
     printf '  "status": "failed",\n'
     printf '  "refreshedAt": "%s",\n' "$(json_escape "${failed_at}")"

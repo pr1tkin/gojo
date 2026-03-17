@@ -72,6 +72,7 @@ test_valid_write() {
   write_search_state_ready "snapshot-ready" "2026-03-17T11:00:00Z" "${repo_fingerprints_file}"
   assert_json_valid "${SEARCH_STATE_FILE}"
   assert_file_contains "${SEARCH_STATE_FILE}" '"status": "ready"' "ready marker should be written"
+  assert_file_contains "${SEARCH_STATE_FILE}" '"fingerprintContractVersion": 1' "fingerprint contract version should be written"
   assert_file_contains "${SEARCH_STATE_FILE}" '"repoId":"repo-a"' "repo-a fingerprint should be present"
 }
 
@@ -205,11 +206,41 @@ test_repo_fingerprint_is_order_independent_and_ignores_noise() {
   assert_eq "2" "${file_count}" "ignored files must not affect repo file count"
 }
 
+test_repo_fingerprint_uses_canonical_byte_order() {
+  local repo_root_a
+  local repo_root_b
+  local fingerprint_a
+  local fingerprint_b
+
+  create_test_environment "fingerprint-byte-order"
+  repo_root_a="${TEST_ROOT}/fingerprint-byte-a"
+  repo_root_b="${TEST_ROOT}/fingerprint-byte-b"
+  create_test_repo "${repo_root_a}"
+  create_test_repo "${repo_root_b}"
+
+  mkdir -p "${repo_root_a}/src" "${repo_root_b}/src"
+  printf 'export const under = 1;\n' > "${repo_root_a}/src/_alpha.ts"
+  printf 'export const dash = 1;\n' > "${repo_root_a}/src/-alpha.ts"
+  printf 'export const upper = 1;\n' > "${repo_root_a}/src/A.ts"
+  printf 'export const lower = 1;\n' > "${repo_root_a}/src/a.ts"
+
+  printf 'export const lower = 1;\n' > "${repo_root_b}/src/a.ts"
+  printf 'export const upper = 1;\n' > "${repo_root_b}/src/A.ts"
+  printf 'export const dash = 1;\n' > "${repo_root_b}/src/-alpha.ts"
+  printf 'export const under = 1;\n' > "${repo_root_b}/src/_alpha.ts"
+
+  fingerprint_a="$(compute_repo_fingerprint "${repo_root_a}")"
+  fingerprint_b="$(compute_repo_fingerprint "${repo_root_b}")"
+
+  assert_eq "${fingerprint_b}" "${fingerprint_a}" "repo fingerprint should use canonical byte-order sorting"
+}
+
 test_valid_write
 test_atomicity_preserves_previous_marker_on_failure
 test_concurrent_writes_remain_valid
 test_serialization_failure_does_not_overwrite_marker
 test_schema_integrity
 test_repo_fingerprint_is_order_independent_and_ignores_noise
+test_repo_fingerprint_uses_canonical_byte_order
 
 echo "zoekt/index-repos.test.sh: PASS"
