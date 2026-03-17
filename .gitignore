@@ -42,5 +42,5 @@ zoekt-index/
 zoekt-data/
 
 # Local MCP symbol index
-mcp-server/.data/*.json
+mcp-server/.data/*
 !mcp-server/.data/.gitkeep

@@ -34,6 +34,7 @@ import {
   deriveSearchFreshness,
   getCurrentSearchFreshness,
 } from './search-freshness.js';
+import { runSingleFlightRefresh, type RefreshCoordinatorTestHooks } from './refresh-coordinator.js';
 import type {
   FileFingerprintManifestEntry,
   IndexGenerationCleanupSummary,
@@ -51,6 +52,13 @@ export interface RefreshIndexesOptions {
   logger?: Pick<Console, 'info' | 'warn' | 'error'>;
   failBeforePublish?: boolean;
   runConsistencyChecks?: 'never' | 'risky-only' | 'always';
+  testHooks?: RefreshCoordinatorTestHooks & {
+    afterManifestScanned?: (context: {
+      reposRoot: string;
+      delta: IndexRefreshDelta;
+      hasPreviousGeneration: boolean;
+    }) => Promise<void> | void;
+  };
 }
 
 function normalizeRelativePath(filePath: string): string {
@@ -348,7 +356,7 @@ function logDiagnostics(
   }
 }
 
-export async function refreshIndexes(
+async function refreshIndexesUnlocked(
   reposRoot: string,
   options: RefreshIndexesOptions = {},
 ): Promise<{ symbolIndex: SymbolIndex; diagnostics: IndexRefreshDiagnostics }> {
@@ -358,6 +366,11 @@ export async function refreshIndexes(
   const { repositories, manifest } = await scanRepositoryManifest(reposRoot);
   const searchFingerprints = await buildSearchRepoFingerprints(reposRoot);
   const delta = diffManifest(previousManifest, manifest);
+  await options.testHooks?.afterManifestScanned?.({
+    reposRoot: path.resolve(reposRoot),
+    delta,
+    hasPreviousGeneration: previousGeneration !== null,
+  });
 
   if (!hasManifestChanges(delta) && previousGeneration) {
     const currentSymbolIndex = await loadSymbolIndex();
@@ -588,4 +601,18 @@ export async function refreshIndexes(
     symbolIndex: mergedSymbolIndex,
     diagnostics,
   };
+}
+
+export async function refreshIndexes(
+  reposRoot: string,
+  options: RefreshIndexesOptions = {},
+): Promise<{ symbolIndex: SymbolIndex; diagnostics: IndexRefreshDiagnostics }> {
+  return runSingleFlightRefresh(
+    reposRoot,
+    () => refreshIndexesUnlocked(reposRoot, options),
+    {
+      logger: options.logger,
+      testHooks: options.testHooks,
+    },
+  );
 }
