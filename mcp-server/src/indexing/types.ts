@@ -4,6 +4,13 @@ export type ConsistencyCheckSeverity = 'info' | 'warning' | 'error';
 export type ConsistencyCheckStatus = 'passed' | 'warning' | 'failed' | 'repaired';
 export type ConsistencyScope = 'generation' | 'artifact' | 'coordination' | 'maintenance';
 export type ConsistencyRepairDisposition = 'applied' | 'recommended' | 'skipped' | 'failed';
+export type IndexHealthTrustState =
+  | 'healthy'
+  | 'degraded'
+  | 'repair-recommended'
+  | 'stale-search'
+  | 'inconsistent'
+  | 'unknown';
 
 export interface IndexedRepositoryDescriptor {
   repoId: string;
@@ -226,4 +233,39 @@ export interface SearchRefreshSnapshot {
   repoFingerprints: SearchRepoFingerprint[];
   details?: string;
   error?: string;
+}
+
+export interface IndexHealthRecentActivity {
+  lastRefreshAt?: string;
+  lastRefreshStatus: 'committed' | 'no-op' | 'unknown';
+  delta: {
+    added: number;
+    modified: number;
+    deleted: number;
+  };
+  maintenanceRan: boolean;
+  repairsApplied: number;
+  repairsRecommended: number;
+  riskyChangeCount: number;
+  unknownStructuralChangeCount: number;
+  recentChangedFiles: string[];
+}
+
+export interface IndexHealthSummary {
+  schemaVersion: number;
+  generatedAt: string;
+  generationId?: string;
+  generationStatus: IndexGenerationStatus | 'missing';
+  publishedAt?: string;
+  repositories: IndexedRepositoryDescriptor[];
+  reposRoot?: string;
+  search: SearchFreshnessState | null;
+  changeSummary: GenerationChangeSummary | null;
+  consistency: ConsistencyRunReport | null;
+  recentActivity: IndexHealthRecentActivity;
+  trustState: IndexHealthTrustState;
+  suitableForAgentWorkflows: boolean;
+  reasons: string[];
+  warnings: string[];
+  errors: string[];
 }

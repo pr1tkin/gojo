@@ -24,6 +24,7 @@ import {
   loadSearchRefreshSnapshot,
   updateGenerationState,
 } from './generation-store.js';
+import { getCurrentIndexHealth } from './health.js';
 import { deriveSearchFreshness } from './search-freshness.js';
 import type {
   ConsistencyCheckResult,
@@ -832,6 +833,8 @@ export async function runCurrentGenerationConsistencyMaintenance(
   if (isRiskyChangeSummary(changeSummaryStatus.value)) {
     logger.info(`[consistency] generation=${generationId} post-refresh validation ran because the change summary was high risk`);
   }
+
+  await getCurrentIndexHealth();
 
   return report;
 }

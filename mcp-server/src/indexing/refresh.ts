@@ -21,6 +21,7 @@ import { loadUiPropSurfaceIndex } from '../ui-props/store.js';
 import type { UiPropSurfaceIndex } from '../ui-props/types.js';
 import { classifyRepositoryChanges, createEmptyGenerationChangeSummary } from './change-detection.js';
 import { runCurrentGenerationConsistencyMaintenance } from './consistency.js';
+import { getCurrentIndexHealth } from './health.js';
 import {
   loadCurrentGenerationState,
   publishGeneration,
@@ -375,6 +376,7 @@ export async function refreshIndexes(
       status: 'no-op',
     };
     logDiagnostics(logger, diagnostics);
+    await getCurrentIndexHealth();
     return { symbolIndex: currentSymbolIndex, diagnostics };
   }
 
@@ -580,6 +582,7 @@ export async function refreshIndexes(
     status: 'committed',
   };
   logDiagnostics(logger, diagnostics);
+  await getCurrentIndexHealth();
 
   return {
     symbolIndex: mergedSymbolIndex,

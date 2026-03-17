@@ -56,6 +56,10 @@ export function getGenerationStateFilePath(generationId: string): string {
   return getGenerationArtifactFilePath(generationId, 'index-generation.json');
 }
 
+export function getCurrentHealthSnapshotFilePath(): string {
+  return path.join(getDataDirectory(), 'current-health.json');
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
