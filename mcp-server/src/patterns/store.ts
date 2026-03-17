@@ -2,6 +2,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getGenerationArtifactFilePath,
+  resolveArtifactFilePath,
+  resolveArtifactFilePathSync,
+} from '../indexing/generation-store.js';
+import {
   PATTERN_INDEX_SCHEMA_VERSION,
   type PatternCandidate,
   type PatternFingerprint,
@@ -128,7 +133,7 @@ function normalizeLoadedIndex(value: unknown): PatternIndex {
 
 export async function loadPatternIndex(): Promise<PatternIndex> {
   try {
-    const content = await fs.readFile(getPatternFilePathInternal(), 'utf8');
+    const content = await fs.readFile(await resolveArtifactFilePath('pattern-candidates.json'), 'utf8');
     return normalizeLoadedIndex(JSON.parse(content) as unknown);
   } catch (error) {
     const code =
@@ -144,18 +149,28 @@ export async function loadPatternIndex(): Promise<PatternIndex> {
   }
 }
 
-export async function savePatternIndex(index: PatternIndex): Promise<string> {
+export async function savePatternIndex(
+  index: PatternIndex,
+  options: { generationId?: string } = {},
+): Promise<string> {
   const directory = getPatternDirectory();
   const tempFilePath = getPatternTempFilePath();
-  const filePath = getPatternFilePathInternal();
+  const filePath = options.generationId
+    ? getGenerationArtifactFilePath(options.generationId, 'pattern-candidates.json')
+    : getPatternFilePathInternal();
 
-  await fs.mkdir(directory, { recursive: true });
-  await fs.writeFile(tempFilePath, JSON.stringify(index, null, 2), 'utf8');
-  await fs.rename(tempFilePath, filePath);
+  if (options.generationId) {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(index, null, 2), 'utf8');
+  } else {
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(tempFilePath, JSON.stringify(index, null, 2), 'utf8');
+    await fs.rename(tempFilePath, filePath);
+  }
 
   return filePath;
 }
 
 export function getPatternIndexFilePath(): string {
-  return getPatternFilePathInternal();
+  return resolveArtifactFilePathSync('pattern-candidates.json');
 }

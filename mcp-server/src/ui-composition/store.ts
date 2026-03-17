@@ -2,6 +2,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getGenerationArtifactFilePath,
+  resolveArtifactFilePath,
+  resolveArtifactFilePathSync,
+} from '../indexing/generation-store.js';
+import {
   UI_COMPOSITION_SCHEMA_VERSION,
   type UiCompositionEdge,
   type UiCompositionIndex,
@@ -71,7 +76,7 @@ function normalizeLoadedIndex(value: unknown): UiCompositionIndex {
 
 export async function loadUiCompositionIndex(): Promise<UiCompositionIndex> {
   try {
-    const content = await fs.readFile(getUiCompositionFilePathInternal(), 'utf8');
+    const content = await fs.readFile(await resolveArtifactFilePath('ui-composition.json'), 'utf8');
     return normalizeLoadedIndex(JSON.parse(content) as unknown);
   } catch (error) {
     const code =
@@ -87,18 +92,28 @@ export async function loadUiCompositionIndex(): Promise<UiCompositionIndex> {
   }
 }
 
-export async function saveUiCompositionIndex(index: UiCompositionIndex): Promise<string> {
+export async function saveUiCompositionIndex(
+  index: UiCompositionIndex,
+  options: { generationId?: string } = {},
+): Promise<string> {
   const directory = getUiCompositionDirectory();
   const tempFilePath = getUiCompositionTempFilePath();
-  const filePath = getUiCompositionFilePathInternal();
+  const filePath = options.generationId
+    ? getGenerationArtifactFilePath(options.generationId, 'ui-composition.json')
+    : getUiCompositionFilePathInternal();
 
-  await fs.mkdir(directory, { recursive: true });
-  await fs.writeFile(tempFilePath, JSON.stringify(index, null, 2), 'utf8');
-  await fs.rename(tempFilePath, filePath);
+  if (options.generationId) {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(index, null, 2), 'utf8');
+  } else {
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(tempFilePath, JSON.stringify(index, null, 2), 'utf8');
+    await fs.rename(tempFilePath, filePath);
+  }
 
   return filePath;
 }
 
 export function getUiCompositionFilePath(): string {
-  return getUiCompositionFilePathInternal();
+  return resolveArtifactFilePathSync('ui-composition.json');
 }

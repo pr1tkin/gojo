@@ -2,6 +2,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getGenerationArtifactFilePath,
+  resolveArtifactFilePath,
+  resolveArtifactFilePathSync,
+} from '../indexing/generation-store.js';
+import {
   UI_PROP_SURFACE_SCHEMA_VERSION,
   type UiPropSurfaceIndex,
   type UiPropUsage,
@@ -80,7 +85,7 @@ function normalizeLoadedIndex(value: unknown): UiPropSurfaceIndex {
 
 export async function loadUiPropSurfaceIndex(): Promise<UiPropSurfaceIndex> {
   try {
-    const content = await fs.readFile(getUiPropsFilePathInternal(), 'utf8');
+    const content = await fs.readFile(await resolveArtifactFilePath('ui-props.json'), 'utf8');
     return normalizeLoadedIndex(JSON.parse(content) as unknown);
   } catch (error) {
     const code =
@@ -96,18 +101,28 @@ export async function loadUiPropSurfaceIndex(): Promise<UiPropSurfaceIndex> {
   }
 }
 
-export async function saveUiPropSurfaceIndex(index: UiPropSurfaceIndex): Promise<string> {
+export async function saveUiPropSurfaceIndex(
+  index: UiPropSurfaceIndex,
+  options: { generationId?: string } = {},
+): Promise<string> {
   const directory = getUiPropsDirectory();
   const tempFilePath = getUiPropsTempFilePath();
-  const filePath = getUiPropsFilePathInternal();
+  const filePath = options.generationId
+    ? getGenerationArtifactFilePath(options.generationId, 'ui-props.json')
+    : getUiPropsFilePathInternal();
 
-  await fs.mkdir(directory, { recursive: true });
-  await fs.writeFile(tempFilePath, JSON.stringify(index, null, 2), 'utf8');
-  await fs.rename(tempFilePath, filePath);
+  if (options.generationId) {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(index, null, 2), 'utf8');
+  } else {
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(tempFilePath, JSON.stringify(index, null, 2), 'utf8');
+    await fs.rename(tempFilePath, filePath);
+  }
 
   return filePath;
 }
 
 export function getUiPropSurfaceFilePath(): string {
-  return getUiPropsFilePathInternal();
+  return resolveArtifactFilePathSync('ui-props.json');
 }

@@ -93,6 +93,7 @@ Current structured data includes:
 
 - stable `fileId`
 - stable `symbolId`
+- generation-scoped file manifests and refresh state
 - symbol names and kinds
 - export markers
 - file-level import/export metadata
@@ -103,10 +104,14 @@ Current structured data includes:
 
 Persisted files:
 
-- `mcp-server/.data/symbol-index.json`
-- `mcp-server/.data/ui-composition.json`
-- `mcp-server/.data/ui-props.json`
-- `mcp-server/.data/pattern-candidates.json`
+- published via `mcp-server/.data/current-generation.json`
+- materialized under `mcp-server/.data/generations/<generationId>/`
+- including:
+- `symbol-index.json`
+- `ui-composition.json`
+- `ui-props.json`
+- `pattern-candidates.json`
+- `index-generation.json`
 
 ### Graph Layer
 
@@ -128,7 +133,7 @@ Edge creation stays conservative:
 
 The persisted graph snapshot lives at:
 
-- `mcp-server/.data/code-graph.json`
+- `mcp-server/.data/generations/<generationId>/code-graph.json`
 
 ### Analysis Layer
 
@@ -356,11 +361,10 @@ This is planning support, not automatic refactoring or patch generation.
 
 ```text
 repos/ -> zoekt-indexer -> zoekt index volume -> zoekt
-repos/ -> mcp-server indexing -> symbol-index.json
-                              -> code-graph.json
-                              -> ui-composition.json
-                              -> ui-props.json
-                              -> pattern-candidates.json
+repos/ -> mcp-server indexing -> repository scan + manifest
+                              -> delta detection
+                              -> staged generation artifacts
+                              -> current generation publish
 ```
 
 1. Repositories are placed under `./repos`.
@@ -368,6 +372,8 @@ repos/ -> mcp-server indexing -> symbol-index.json
 3. The MCP server builds a persisted symbol index from repository files.
 4. The MCP server derives graph, UI-structure, and pattern artifacts from the
    indexed repository set.
+5. A refresh only publishes a new current generation after all staged artifacts
+   and generation metadata are written successfully.
 
 ### Retrieval And Analysis
 
@@ -404,11 +410,13 @@ target resolution
   - Docker named volume shared by `zoekt` and `zoekt-indexer`
 - `mcp-server/.data/`
   - persisted MCP-side artifacts including:
-  - `symbol-index.json`
-  - `code-graph.json`
-  - `ui-composition.json`
-  - `ui-props.json`
-  - `pattern-candidates.json`
+  - `current-generation.json`
+  - `generations/<generationId>/index-generation.json`
+  - `generations/<generationId>/symbol-index.json`
+  - `generations/<generationId>/code-graph.json`
+  - `generations/<generationId>/ui-composition.json`
+  - `generations/<generationId>/ui-props.json`
+  - `generations/<generationId>/pattern-candidates.json`
 
 ## Compose Layout
 

@@ -1,6 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import {
+  getGenerationArtifactFilePath,
+  resolveArtifactFilePath,
+  resolveArtifactFilePathSync,
+} from '../indexing/generation-store.js';
 import { createDeclarationFingerprint, createFileId, createSymbolId } from './ids.js';
 import type { FileRelation, IndexedSymbol, SymbolFrequencyStats, SymbolIndex } from './types.js';
 
@@ -313,7 +318,7 @@ function normalizeLoadedIndex(value: unknown): SymbolIndex {
 
 export async function loadSymbolIndex(): Promise<SymbolIndex> {
   try {
-    const content = await fs.readFile(getSymbolIndexFilePathInternal(), 'utf8');
+    const content = await fs.readFile(await resolveArtifactFilePath('symbol-index.json'), 'utf8');
     const parsed = JSON.parse(content) as unknown;
 
     return normalizeLoadedIndex(parsed);
@@ -333,7 +338,7 @@ export async function loadSymbolIndex(): Promise<SymbolIndex> {
 
 export async function loadRequiredSymbolIndex(): Promise<SymbolIndex> {
   try {
-    await fs.access(getSymbolIndexFilePathInternal());
+    await fs.access(await resolveArtifactFilePath('symbol-index.json'));
   } catch (error) {
     const code =
       typeof error === 'object' && error !== null && 'code' in error
@@ -350,17 +355,28 @@ export async function loadRequiredSymbolIndex(): Promise<SymbolIndex> {
   return loadSymbolIndex();
 }
 
-export async function saveSymbolIndex(index: SymbolIndex): Promise<string> {
+export async function saveSymbolIndex(
+  index: SymbolIndex,
+  options: { generationId?: string } = {},
+): Promise<string> {
   const symbolIndexDirectory = getSymbolIndexDirectory();
   const tempFilePath = getSymbolIndexTempFilePath();
-  const filePath = getSymbolIndexFilePathInternal();
+  const filePath = options.generationId
+    ? getGenerationArtifactFilePath(options.generationId, 'symbol-index.json')
+    : getSymbolIndexFilePathInternal();
 
-  await fs.mkdir(symbolIndexDirectory, { recursive: true });
-  await fs.writeFile(tempFilePath, JSON.stringify(index, null, 2), 'utf8');
-  await fs.rename(tempFilePath, filePath);
+  if (options.generationId) {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(index, null, 2), 'utf8');
+  } else {
+    await fs.mkdir(symbolIndexDirectory, { recursive: true });
+    await fs.writeFile(tempFilePath, JSON.stringify(index, null, 2), 'utf8');
+    await fs.rename(tempFilePath, filePath);
+  }
+
   return filePath;
 }
 
 export function getSymbolIndexFilePath(): string {
-  return getSymbolIndexFilePathInternal();
+  return resolveArtifactFilePathSync('symbol-index.json');
 }

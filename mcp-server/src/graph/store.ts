@@ -1,6 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import {
+  getGenerationArtifactFilePath,
+  resolveArtifactFilePath,
+  resolveArtifactFilePathSync,
+} from '../indexing/generation-store.js';
 import { CODE_GRAPH_SCHEMA_VERSION, type CodeGraphSnapshot, type GraphEdge, type GraphEdgeType } from './types.js';
 
 function getCodeGraphDirectory(): string {
@@ -94,7 +99,7 @@ function normalizeGraphSnapshot(value: unknown): CodeGraphSnapshot {
 
 export async function loadCodeGraph(): Promise<CodeGraphSnapshot> {
   try {
-    const content = await fs.readFile(getCodeGraphFilePathInternal(), 'utf8');
+    const content = await fs.readFile(await resolveArtifactFilePath('code-graph.json'), 'utf8');
     return normalizeGraphSnapshot(JSON.parse(content) as unknown);
   } catch (error) {
     const code =
@@ -110,18 +115,28 @@ export async function loadCodeGraph(): Promise<CodeGraphSnapshot> {
   }
 }
 
-export async function saveCodeGraph(graph: CodeGraphSnapshot): Promise<string> {
+export async function saveCodeGraph(
+  graph: CodeGraphSnapshot,
+  options: { generationId?: string } = {},
+): Promise<string> {
   const directory = getCodeGraphDirectory();
   const tempFilePath = getCodeGraphTempFilePath();
-  const filePath = getCodeGraphFilePathInternal();
+  const filePath = options.generationId
+    ? getGenerationArtifactFilePath(options.generationId, 'code-graph.json')
+    : getCodeGraphFilePathInternal();
 
-  await fs.mkdir(directory, { recursive: true });
-  await fs.writeFile(tempFilePath, JSON.stringify(graph, null, 2), 'utf8');
-  await fs.rename(tempFilePath, filePath);
+  if (options.generationId) {
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, JSON.stringify(graph, null, 2), 'utf8');
+  } else {
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(tempFilePath, JSON.stringify(graph, null, 2), 'utf8');
+    await fs.rename(tempFilePath, filePath);
+  }
 
   return filePath;
 }
 
 export function getCodeGraphFilePath(): string {
-  return getCodeGraphFilePathInternal();
+  return resolveArtifactFilePathSync('code-graph.json');
 }
