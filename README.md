@@ -1,197 +1,135 @@
 # RepoRadar
 
-RepoRadar is a local code-intelligence stack designed for coding agents.
+RepoRadar is a local code-intelligence stack for coding agents and developers.
 
-It sits between raw code search and compiler-driven refactoring systems.
+It combines:
 
-RepoRadar indexes repositories, extracts symbols and relationships, builds a deterministic code graph, and uses structural pattern intelligence to help an agent:
+- Zoekt for repository-scale full-text search
+- Tree-sitter for syntax-aware symbol extraction
+- generation-based persisted MCP artifacts under `/app/.data`
+- deterministic file-level graph construction from imports and exports
+- conservative impact, ownership, and planning workflows
+- MCP tools exposed over stdio for agent-facing repository work
 
-- understand repository structure
-- compare existing implementations
-- find strong internal precedents
-- estimate safe change scope
-- plan conservative edits
+RepoRadar is practical rather than compiler-complete. It aims to provide fast,
+explainable repository context for real codebases without claiming semantic
+refactor guarantees.
 
-Instead of pretending to fully understand a program like a compiler, RepoRadar focuses on **practical repository intelligence** that works across real-world codebases.
+## Runtime Model
 
-The system combines:
+RepoRadar runs as three services against the same `repos/` mount:
 
-- indexed search (Zoekt)
-- syntax-aware symbol extraction (Tree-sitter)
-- deterministic code graphs
-- impact and ownership analysis
-- change-planning workflows
-- internal pattern similarity and precedent discovery
+- `zoekt`
+  - serves indexed search over HTTP on port `6070`
+  - reads Zoekt shards from `/data/index`
+- `zoekt-indexer`
+  - scans `/repos`
+  - writes Zoekt shards to `/data/index`
+  - writes search freshness snapshots to `/data/coordination/zoekt-refresh-state.json`
+- `mcp-server`
+  - runs over stdio
+  - scans `/repos`
+  - publishes generation-scoped MCP artifacts under `/app/.data/generations/<generationId>/`
+  - writes search refresh requests to `/app/.data/coordination/search-refresh-request.json`
 
-All exposed through **agent-oriented MCP tools**.
-
-## System Architecture
-
-```text
-                AI Agent / Copilot
-                        │
-                        ▼
-                   MCP Tools
-     ┌───────────────────────────────────┐
-     │ explore_component                 │
-     │ search_patterns                   │
-     │ analyze_symbol                    │
-     │ collect_refactor_context          │
-     │ plan_change                       │
-     └───────────────────────────────────┘
-                        │
-                        ▼
-                 Orchestrator Layer
-                        │
-        ┌───────────────┼───────────────┐
-        ▼               ▼               ▼
-    Search Layer   Structure Layer   Graph Layer
-      (Zoekt)        (Tree-sitter)    (imports/exports)
-
-                        ▼
-                 Analysis Layer
-        ┌───────────────┼───────────────┐
-        ▼               ▼               ▼
-     Impact         Ownership        Planning
-
-                        ▼
-             Internal Pattern Intelligence
-        extraction → fingerprints → similarity
-              → clustering → precedents
-```
-
-## Architecture Summary
-
-RepoRadar uses a layered analysis model:
-
-`Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
-
-Supporting that stack are two internal capability groups:
-
-- UI structure signals for JSX and TSX composition and prop usage
-- pattern intelligence for structural pattern extraction, similarity, and
-  precedent discovery
-
-These capabilities enrich the system without turning it into a compiler-backed
-refactoring engine.
-
-## Capabilities
-
-- indexed repository search with Zoekt
-- Tree-sitter symbol extraction with stable `fileId` and `symbolId`
-- deterministic import and re-export graph construction
-- ranked related-file and context assembly
-- blast-radius estimation for direct and transitive dependents
-- ownership and API-boundary approximation
-- conservative change planning with ordered edit and review targets
-- JSX and TSX UI hierarchy signals for exploration workflows
-- internal pattern extraction, similarity, clustering, and precedent discovery
-- agent-oriented retrieval through MCP tools
-
-## MCP Tools
-
-High-level agent workflows:
-
-- `explore_component`
-  - resolve a component or symbol and inspect related context
-- `search_patterns`
-  - find structurally related files and implementation precedents
-- `analyze_symbol`
-  - explain symbol role, export shape, and usage context
-- `collect_refactor_context`
-  - assemble bounded dependency context before editing
-- `plan_change`
-  - estimate safe change scope, risk, and ordered edit/review steps
-
-RepoRadar also exposes lower-level retrieval tools such as `search_code`,
-`open_file`, `list_symbols`, `find_symbol`, `find_references`, and
-`find_related_files`.
-
-## Example Workflow
-
-```text
-explore_component("AudioHero")
-analyze_symbol("AudioHero")
-collect_refactor_context("AudioHero")
-plan_change("AudioHero")
-```
-
-Outcome:
-
-- grounded symbol and file context
-- likely collaborators and nearby structure
-- conservative blast-radius and ownership hints
-- safe change scope
-- likely edit targets
-- likely review targets
-- ordered edit and review guidance
+The MCP server owns the structured repository model. Zoekt owns search shards.
+They are coordinated through shared fingerprints and marker files rather than a
+single shared transaction.
 
 ## Quick Start
 
 ### 1. Add repositories
 
-RepoRadar expects local Git repositories under `./repos`.
+RepoRadar indexes first-level Git repositories under `./repos`.
 
 ```bash
-mkdir repos
-ln -s /path/to/my-project repos/my-project
+mkdir -p repos
+ln -s /path/to/repo-alpha repos/repo-alpha
+ln -s /path/to/repo-beta repos/repo-beta
 ```
 
 ### 2. Start the stack
 
-```bash
+```powershell
 docker compose up -d --build
 ```
 
-This starts:
+This uses the current Compose runtime layout:
 
-- `zoekt`
-- `zoekt-indexer`
-- `mcp-server`
+- `mcp-server-data:/app/.data`
+- `refresh-coordination:/app/.data/coordination`
+- `zoekt-index:/data/index`
 
-### 3. Build and test the MCP server
+### 3. Check the services
 
-```bash
-cd mcp-server
+```powershell
+docker compose logs zoekt
+docker compose logs zoekt-indexer
+docker compose logs mcp-server
+```
+
+Open `http://localhost:6070` to confirm Zoekt is serving search.
+
+### 4. Build and run the MCP server locally
+
+From `mcp-server/`:
+
+```powershell
 npm install
 npm run build
 npm run test
-```
-
-### 4. Run the MCP server
-
-```bash
 npm run start
 ```
 
-### 5. Call MCP tools
+This is useful for local MCP development. For containerized runtime behavior,
+prefer the Compose-managed service and its named volumes.
+
+## MCP Tool Surface
+
+High-level workflows:
+
+- `explore_component`
+- `search_patterns`
+- `analyze_symbol`
+- `collect_refactor_context`
+- `plan_change`
+
+Lower-level tools:
+
+- `search_code`
+- `open_file`
+- `list_symbols`
+- `find_symbol`
+- `find_references`
+- `find_related_files`
+
+Example workflow:
 
 ```text
-explore_component("Button")
-search_patterns({ "name": "Button", "mode": "component" })
-analyze_symbol({ "name": "Button" })
-collect_refactor_context({ "name": "Button", "mode": "component" })
-plan_change({ "symbol": "Button", "filePath": "src/components/Button.tsx" })
+explore_component("LandingHero")
+analyze_symbol({ "name": "LandingHero" })
+collect_refactor_context({ "name": "LandingHero", "mode": "component" })
+plan_change({ "symbol": "LandingHero", "filePath": "src/components/LandingHero.tsx" })
 ```
 
 ## Documentation
 
 - [Architecture](./docs/architecture.md)
-- [Pattern Intelligence](./docs/architecture/pattern-intelligence.md)
-- [Tools](./docs/tools.md)
 - [Operations](./docs/operations.md)
+- [Tools](./docs/tools.md)
 - [Testing](./docs/testing.md)
+- [Pattern Intelligence](./docs/architecture/pattern-intelligence.md)
 
 ## Repository Layout
 
 - `mcp-server/`
-  - MCP server, indexers, graph logic, orchestrator services, and tools
+  - MCP server, refresh pipeline, indexing, orchestration, and tools
 - `zoekt/`
   - Zoekt image and indexing entrypoint
 - `repos/`
   - local repositories mounted into the stack
 - `docs/`
-  - architecture and operational documentation
+  - architecture, operations, testing, and tool reference docs
 
 ## Boundaries
 
@@ -200,9 +138,8 @@ RepoRadar does not claim:
 - compiler-complete semantic understanding
 - guaranteed safe refactors
 - automatic patch generation
-- full runtime UI dependency analysis
-
-It aims to be useful, conservative, and explainable.
+- runtime-complete UI dependency analysis
+- cross-repo semantic inference beyond the mounted repositories
 
 ## License
 

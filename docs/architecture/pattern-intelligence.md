@@ -141,7 +141,7 @@ Current behavior:
 - inspects indexed files, symbols, and imports
 - applies rule-based TypeScript and TSX detectors
 - emits `PatternCandidate` records only when evidence is strong enough
-- persists results to `mcp-server/.data/pattern-candidates.json`
+- persists results to `/app/.data/generations/<generationId>/pattern-candidates.json`
 
 The stage stays conservative. Files without strong evidence emit no patterns.
 
@@ -202,7 +202,7 @@ Current responsibilities:
 
 Patterns are stored in:
 
-- `mcp-server/.data/pattern-candidates.json`
+- `/app/.data/generations/<generationId>/pattern-candidates.json`
 
 Pattern storage remains separate from the symbol index, code graph, and UI
 artifacts while following the same persistence conventions.

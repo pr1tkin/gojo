@@ -8,35 +8,60 @@ It combines:
 
 - Zoekt for repository-scale search
 - Tree-sitter for TypeScript and TSX symbol extraction
-- a persisted symbol index with stable `fileId` and `symbolId`
-- structured import/export metadata and symbol frequency statistics
-- a deterministic file-level code graph
-- UI structure signals for JSX and TSX composition and prop usage
-- higher-level analysis for impact, ownership, and change planning
-- internal pattern intelligence for extraction, similarity, clustering, and
-  precedent discovery
-- MCP tools for agent-facing repository workflows
+- generation-based persisted MCP artifacts with stable `fileId` and `symbolId`
+- deterministic file-level import and re-export graph construction
+- additive UI structure and prop-surface signals
+- conservative analysis for impact, ownership, and change planning
+- internal pattern intelligence for similarity, clustering, and precedent discovery
+- MCP tools exposed over stdio for agent-facing workflows
 
 RepoRadar does not attempt full semantic program understanding. It provides
-practical, graph-aware retrieval and conservative analysis for real repository
-work.
+practical, graph-aware retrieval and conservative planning support for real
+repository work.
 
 ## Runtime Services
 
-RepoRadar runs as three runtime services plus a shared repository mount:
+RepoRadar runs as three services plus a shared repository mount:
 
 - `zoekt`
   - serves indexed full-text search over HTTP on port `6070`
-  - reads index data from `/data/index`
+  - reads index shards from `/data/index`
 - `zoekt-indexer`
   - scans `/repos`
-  - builds and refreshes Zoekt indexes in `/data/index`
-  - uses `INDEX_INTERVAL_SECONDS`, default `300`
+  - builds and refreshes Zoekt shards in `/data/index`
+  - writes search freshness snapshots to `/data/coordination/zoekt-refresh-state.json`
+  - runs either continuously with `INDEX_INTERVAL_SECONDS` or once with `INDEX_ONCE=true`
 - `mcp-server`
   - runs over stdio
   - reads repositories from `/repos`
-  - persists MCP-side data in `/app/.data`
-  - exposes MCP tools to clients
+  - publishes generation-scoped artifacts under `/app/.data`
+  - writes search refresh requests to `/app/.data/coordination/search-refresh-request.json`
+  - serves MCP tools backed by the published generation
+
+## Compose Persistence Model
+
+The current `docker-compose.yml` uses Docker named volumes for runtime state:
+
+- `mcp-server-data:/app/.data`
+- `refresh-coordination:/app/.data/coordination`
+- `zoekt-index:/data/index`
+
+Those mounts have different jobs:
+
+- `mcp-server-data`
+  - current generation pointer
+  - generation directories and artifacts
+  - health snapshots
+  - refresh failure history and maintenance state
+- `refresh-coordination`
+  - MCP search refresh requests
+  - Zoekt refresh snapshots
+- `zoekt-index`
+  - Zoekt shard storage
+
+A bind mount such as `/absolute/path:/app/.data` is not the same runtime mode.
+Use it only when you explicitly want a debug or inspection-oriented setup.
+The normal Compose runtime should use the named volumes above.
 
 ## Layered Architecture
 
@@ -47,9 +72,9 @@ Agent / MCP Client
     MCP Tools
         |
         v
-Orchestrator Services
+  Orchestrator Layer
         |
-        +-------------------+-------------------+-------------------+-------------------+
+        +-------------------+-------------------+-------------------+
         |                   |                   |                   |
         v                   v                   v                   v
    Search Layer       Structure Layer       Graph Layer       Analysis Layer
@@ -66,9 +91,8 @@ RepoRadar is easiest to think about as a progressive stack:
 
 `Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
 
-Pattern intelligence and UI structure signals are supporting capabilities that
-reuse the same indexed repository data without changing that main analysis
-model.
+UI structure and pattern intelligence are additive capabilities built on the
+same published generation.
 
 ## Layer Responsibilities
 
@@ -82,9 +106,8 @@ It is used for:
 - candidate discovery when exact file or symbol context is not yet known
 - low-level search-oriented MCP tools
 
-Zoekt does not parse syntax and does not own symbol or graph relationships.
-Its freshness relative to the published MCP generation is tracked explicitly
-rather than assumed.
+Zoekt does not own symbol, graph, or planning state. Its freshness relative to
+the current MCP generation is tracked explicitly through coordination markers.
 
 ### Structure Layer
 
@@ -96,38 +119,38 @@ Current structured data includes:
 - stable `fileId`
 - stable `symbolId`
 - generation-scoped file manifests and refresh state
-- symbol names and kinds
-- export markers
-- file-level import/export metadata
-- additive JSX and TSX UI composition signals
-- additive JSX and TSX prop-surface signals
-- aggregate symbol frequency statistics
-- deterministic pattern-candidate extraction for TypeScript and TSX files
+- symbol names, kinds, and export markers
+- file-level import and export metadata
+- JSX and TSX composition signals
+- JSX and TSX prop-surface signals
+- symbol frequency statistics
+- deterministic pattern candidates
 
-Persisted files:
+Published artifacts live under:
 
-- published via `mcp-server/.data/current-generation.json`
-- materialized under `mcp-server/.data/generations/<generationId>/`
-- including:
-- `symbol-index.json`
-- `ui-composition.json`
-- `ui-props.json`
-- `pattern-candidates.json`
-- `index-generation.json`
-- coordination files under `mcp-server/.data/coordination/` for Zoekt freshness
+- `/app/.data/current-generation.json`
+- `/app/.data/current-health.json`
+- `/app/.data/generations/<generationId>/index-generation.json`
+- `/app/.data/generations/<generationId>/symbol-index.json`
+- `/app/.data/generations/<generationId>/ui-composition.json`
+- `/app/.data/generations/<generationId>/ui-props.json`
+- `/app/.data/generations/<generationId>/ui-semantics.json`
+- `/app/.data/generations/<generationId>/pattern-candidates.json`
+- `/app/.data/generations/<generationId>/change-summary.json`
+- `/app/.data/generations/<generationId>/consistency-report.json` when generated
 
 ### Graph Layer
 
-The graph layer builds file-level relationships from indexed import/export
-metadata.
+The graph layer builds deterministic file-level relationships from indexed
+import and export metadata.
 
 Current graph capabilities:
 
-- deterministic file import edges
-- deterministic re-export edges
+- local import edges
+- re-export edges
 - relative import resolution
-- deterministic `tsconfig` and `jsconfig` alias resolution
-- deterministic repo-root `baseUrl` local import resolution
+- `tsconfig` and `jsconfig` alias resolution
+- repo-root `baseUrl` local import resolution
 
 Edge creation stays conservative:
 
@@ -136,11 +159,11 @@ Edge creation stays conservative:
 
 The persisted graph snapshot lives at:
 
-- `mcp-server/.data/generations/<generationId>/code-graph.json`
+- `/app/.data/generations/<generationId>/code-graph.json`
 
 ### Analysis Layer
 
-The analysis layer derives higher-level change understanding from the indexed
+The analysis layer derives higher-level change understanding from the published
 structure and graph.
 
 It currently provides:
@@ -152,33 +175,35 @@ It currently provides:
 This layer remains heuristic and conservative. It is designed to improve agent
 workflows, not to provide semantic guarantees.
 
-#### UI Structure Signals
+### Health, Consistency, And Trust
 
-RepoRadar persists additive UI-structure signals from JSX and TSX component
-composition and prop usage.
+Phase 6 hardening added explicit health and trust tracking around the published
+generation.
 
-These signals capture:
+Key concepts:
 
-- parent-child rendering relationships
-- parent pages and layout-like surfaces
-- coarse observed prop surfaces such as passed prop names and broad value kinds
+- health
+  - the current published generation has a machine-readable summary at
+    `/app/.data/current-health.json`
+  - it reflects refresh state, search freshness, recent activity, consistency,
+    and trust status
+- consistency
+  - post-publish maintenance can validate the current generation and optionally
+    repair conservative state degradations
+  - reports are written per generation as `consistency-report.json`
+- trust
+  - RepoRadar distinguishes between healthy, degraded, inconsistent, and
+    unknown states instead of silently assuming artifacts are reliable
+  - malformed or missing coordination markers, suspicious artifact regressions,
+    and refresh failures degrade trust rather than being hidden
 
-Current usage:
-
-- `explore_component` can expose a lightweight `uiHierarchy` summary
-- impact analysis can add supplementary UI-aware blast-radius hints
-- ownership analysis can use UI reuse and page-surface evidence as secondary
-  classification hints
-- change planning can surface UI review hints such as rendering components,
-  page-like surfaces, and observed props
-
-These signals remain additive. They do not replace graph-based reasoning or
-claim runtime UI dependency analysis.
+This does not make the system transactional. It makes the current state honest
+about what is and is not trustworthy.
 
 ### Pattern Intelligence
 
 RepoRadar also includes an internal pattern-intelligence capability that builds
-on the structured index.
+on the published structure artifacts.
 
 It currently provides:
 
@@ -186,35 +211,11 @@ It currently provides:
 - normalized pattern fingerprints
 - same-kind similarity scoring
 - same-kind clustering
-- internal precedent discovery
+- repository-local precedent discovery
 
-Pattern intelligence stays internal. It does not currently expose a dedicated
-public MCP tool. For the detailed design, see
+Pattern intelligence remains internal. It does not currently expose a separate
+public precedent tool. For the detailed design, see
 [Pattern Intelligence](./architecture/pattern-intelligence.md).
-
-### Orchestrator Services
-
-The orchestrator layer turns indexed data into practical workflows.
-
-Current internal services include:
-
-- `getFileExplorationContext(...)`
-- `getSymbolExplorationContext(...)`
-- `getPatternMatchesForFile(...)`
-- `getPatternMatchesForSymbol(...)`
-- `getPatternMatchesForComponent(...)`
-- `getRefactorContextForFile(...)`
-- `getRefactorContextForSymbol(...)`
-- `getRefactorContextForComponent(...)`
-- `getAnalyzeSymbolContext(...)`
-- `analyzeSymbolImpact(...)`
-- `analyzeSymbolOwnership(...)`
-- `planSymbolChange(...)`
-- `findPrecedentsForSymbol(...)`
-- `findPrecedentsForPattern(...)`
-- `findPrecedentsForFile(...)`
-
-These services compose the underlying layers rather than reimplementing them.
 
 ### MCP Tool Layer
 
@@ -234,235 +235,72 @@ Current tools:
 - `analyze_symbol`
 - `plan_change`
 
-The higher-level tools are built on top of the orchestrator layer and return
-structured results rather than raw primitives.
+The higher-level tools compose the published structure, graph, search, and
+analysis layers instead of reimplementing them.
 
-## How The Public Tools Build On The Stack
+## Generation Lifecycle
 
-### `explore_component`
+A refresh is generation-based rather than in-place.
 
-Purpose:
+Lifecycle:
 
-- understand the structure and context of a component or symbol in a repository
+1. scan repositories under `/repos` and build a file manifest
+2. compare the manifest with the current published generation
+3. if nothing changed, keep the current generation and recompute search freshness and health
+4. if files changed, stage a new generation directory under `/app/.data/generations/<generationId>/`
+5. rebuild symbols and pattern candidates for changed content
+6. rebuild graph and UI artifacts conservatively from the updated structure state
+7. write generation artifacts and `index-generation.json`
+8. write a search refresh request into `/app/.data/coordination/`
+9. publish the new current-generation pointer
+10. run consistency maintenance when configured or when the change set is high risk
+11. recompute current health
 
-Builds on:
+If a refresh fails before publish, the prior published generation remains the
+active one. Failure history is recorded under `/app/.data/maintenance/`.
 
-- symbol resolution
-- graph-derived neighboring files
-- related-file ranking
-- file-level defined and exported symbols
-- optional UI hierarchy aggregation
+## Coordination With Zoekt
 
-Returns:
+The MCP generation and Zoekt search shards are coordinated through shared
+fingerprints, not a shared commit.
 
-- resolved primary symbol and file
-- related files
-- defined symbols
-- exported symbols
-- optional UI hierarchy summary with rendered children, parent components, and
-  observed prop names
-- a concise exploration summary
-
-### `search_patterns`
-
-Purpose:
-
-- discover repository precedents and structurally similar implementations
-
-Builds on:
-
-- symbol and file resolution
-- graph neighbor signals
-- naming and file-family heuristics
-- explainable ranking signals
-
-Returns:
-
-- resolved target
-- ranked matches
-- reasons for each match
-- symbol and export summaries for the matched files
-
-This is heuristic pattern discovery, not full semantic similarity.
-
-### `collect_refactor_context`
-
-Purpose:
-
-- assemble a bounded refactor context for a file, component, or symbol
-
-Builds on:
-
-- direct importers and imports
-- direct re-export chains
-- graph neighbors
-- related-file ranking
-- nearby same-directory or bundle-family files
-
-Returns:
-
-- the primary file
-- importing and imported files
-- graph neighbors
-- related files
-- nearby files
-- summary counts that help estimate local impact
-
-### `analyze_symbol`
-
-Purpose:
-
-- explain a symbol's identity, role, and surrounding usage context
-
-Builds on:
-
-- symbol resolution
-- export status and symbol kind
-- file-level graph relationships
-- related-file ranking
-- nearby and sibling symbols in the defining file
-
-Returns:
-
-- the primary symbol and file
-- symbol kind and export status
-- a grounded role summary
-- nearby and sibling symbols
-- importer and import context
-- usage summary fields that distinguish file-level proxy usage from verified
-  symbol-level references when reference data is unavailable
-
-### `plan_change`
-
-Purpose:
-
-- expose safe-change planning as an agent-facing workflow
-
-Builds on:
-
-- impact analysis
-- ownership and API-boundary analysis
-- graph-derived dependency ordering
-- existing orchestrator composition
-
-Returns:
-
-- conservative change scope
-- conservative risk level
-- explicit planning signals
-- primary edit files
-- secondary edit files
-- review files
-- ordered edit/review steps
-- optional UI-aware review hints when relevant
-
-This is planning support, not automatic refactoring or patch generation.
-
-## Data Flow
-
-### Indexing
+Flow:
 
 ```text
-repos/ -> zoekt-indexer -> zoekt index volume -> zoekt
-repos/ -> mcp-server indexing -> repository scan + manifest
-                              -> delta detection
-                              -> staged generation artifacts
-                              -> current generation publish
-                              -> explicit search refresh request
-zoekt-indexer -> coordination marker -> MCP search freshness reconciliation
+/repos -> mcp-server refresh -> published generation + search refresh request
+/repos -> zoekt-indexer -> Zoekt shards + search refresh snapshot
+mcp-server health/search freshness -> compare request and snapshot fingerprints
 ```
 
-1. Repositories are placed under `./repos`.
-2. `zoekt-indexer` scans and refreshes Zoekt indexes.
-3. The MCP server builds a persisted symbol index from repository files.
-4. The MCP server derives graph, UI-structure, and pattern artifacts from the
-   indexed repository set.
-5. A refresh only publishes a new current generation after all staged artifacts
-   and generation metadata are written successfully.
-6. Search freshness remains separately coordinated: MCP marks Zoekt as pending
-   or stale until a shared Zoekt snapshot marker matches the current generation
-   fingerprint.
+Practical meaning:
 
-Canonical repository fingerprint contract for search freshness:
+- MCP can publish a new generation before Zoekt finishes reindexing
+- search freshness can therefore be `pending`, `ready`, `stale`, `failed`, or `unknown`
+- MCP tools that depend on the structured generation remain usable even when
+  search is catching up
+- search-oriented answers should be interpreted using the reported freshness,
+  not assumed to match the latest generation automatically
 
-- include first-level Git repositories directly under `./repos`
-- include repository files after normalizing relative paths to `/`
-- exclude ignored noise paths such as `.git`, `node_modules`, `dist`, `build`,
-  `coverage`, `.next`, `.turbo`, `.cache`, `out`, `storybook-static`,
-  `generated`, `.d.ts`, `*.generated.ts[x]`, and common temp/editor files
-- hash each included file as `SHA256(raw file bytes)`
-- sort file records lexicographically by normalized relative path
-- compute the repo fingerprint as `SHA256` over LF-terminated
-  `path<TAB>contentHash` lines
-- sort repo fingerprints lexicographically by `repoId`
-- compute the aggregate fingerprint as `SHA256` over LF-terminated
-  `repoId<TAB>repoFingerprint<TAB>fileCount` lines
+The fingerprint contract is deterministic and content-based. It is designed to
+avoid drift caused by timestamps or filesystem iteration order.
 
-This fingerprint is deterministic, content-based, process-stable, and does not
-depend on filesystem iteration order or timestamps.
-
-### Retrieval And Analysis
+## Operational Flow
 
 ```text
-MCP client -> MCP tools -> orchestrator services
-                                  |
-                  +---------------+---------------+-------------------+
-                  |                               |                   |
-                  v                               v                   v
-             symbol / graph                  UI / pattern data    analysis services
-                  |                               |                   |
-                  +---------------+---------------+-------------------+
-                                  |
-                                  v
-                      structured agent-ready result
+repos/ -> zoekt-indexer -> zoekt-index:/data/index -> zoekt
+repos/ -> mcp-server refresh -> /app/.data/generations/<generationId>/
+                              -> current-generation.json
+                              -> coordination/search-refresh-request.json
+zoekt-indexer -> coordination/zoekt-refresh-state.json
+mcp-server -> current-health.json + trust/consistency interpretation
 ```
 
-For planning-oriented workflows, the internal flow is:
+The normal runtime model is:
 
-```text
-target resolution
-  -> impact analysis
-  -> ownership analysis
-  -> change planning
-  -> MCP result
-```
-
-## Repository And Storage Layout
-
-- `./repos`
-  - host directory for local Git repositories
-  - first-level symlinks are supported if they resolve correctly
-- `zoekt-index`
-  - Docker named volume shared by `zoekt` and `zoekt-indexer`
-- `refresh-coordination`
-  - Docker named volume shared by `zoekt-indexer` and `mcp-server`
-  - carries Zoekt refresh requests and the latest Zoekt freshness snapshot
-- `mcp-server/.data/`
-  - persisted MCP-side artifacts including:
-  - `current-generation.json`
-  - `generations/<generationId>/index-generation.json`
-  - `generations/<generationId>/symbol-index.json`
-  - `generations/<generationId>/code-graph.json`
-  - `generations/<generationId>/ui-composition.json`
-  - `generations/<generationId>/ui-props.json`
-  - `generations/<generationId>/pattern-candidates.json`
-  - `coordination/search-refresh-request.json`
-  - `coordination/zoekt-refresh-state.json`
-
-## Compose Layout
-
-The current `docker-compose.yml` defines:
-
-- `zoekt`
-  - serves Zoekt search over `6070`
-- `zoekt-indexer`
-  - performs periodic indexing of `/repos`
-  - writes explicit Zoekt freshness markers for MCP-side coordination
-- `mcp-server`
-  - runs the MCP server over stdio
-  - mounts `/repos`
-  - reads the shared refresh coordination marker volume
-  - depends on `zoekt`
+- Compose mounts the repositories read-only into all relevant services
+- MCP state survives restarts through `mcp-server-data`
+- Zoekt shards survive restarts through `zoekt-index`
+- coordination markers survive restarts through `refresh-coordination`
 
 ## Boundaries
 
@@ -477,23 +315,21 @@ The current `docker-compose.yml` defines:
 - ownership and API-boundary approximation
 - ordered change planning for safer refactor workflows
 - internal pattern extraction, similarity, clustering, and precedent discovery
-- public MCP tools for component exploration, pattern search, refactor context,
-  symbol analysis, and change planning
+- public MCP tools for exploration, refactor context, symbol analysis, and planning
 
 ### Not In Scope Today
 
 - full semantic program analysis
 - compiler-complete rename or refactor support
-- broad speculative package or workspace inference
 - runtime UI behavior modeling
 - automatic code generation from precedents
 - public precedent-discovery tooling
-- deeper cross-repo graph inference
+- deeper cross-repo semantic inference beyond the mounted repositories
 
 ## Related Documents
 
 - [README](../README.md)
-- [Pattern Intelligence](./architecture/pattern-intelligence.md)
-- [Tools](./tools.md)
 - [Operations](./operations.md)
 - [Testing](./testing.md)
+- [Tools](./tools.md)
+- [Pattern Intelligence](./architecture/pattern-intelligence.md)

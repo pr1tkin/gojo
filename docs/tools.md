@@ -2,46 +2,85 @@
 
 ## Overview
 
-RepoRadar exposes a small MCP toolset on top of a layered code-intelligence
-stack:
+RepoRadar exposes a focused MCP toolset on top of the current runtime model:
 
 `Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
 
-The public tools are designed for agent-assisted repository understanding and
-safe change planning. They return structured context instead of raw search
-results whenever possible.
+The MCP server is the agent-facing entry point. It serves stdio tools backed by
+published generation artifacts under `/app/.data`, while search-oriented tools
+query Zoekt and interpret freshness through the shared coordination state.
 
-High-level public tools:
+Public tools:
 
+- `search_code`
+- `open_file`
+- `list_symbols`
+- `find_symbol`
+- `find_references`
+- `find_related_files`
 - `explore_component`
 - `search_patterns`
-- `analyze_symbol`
 - `collect_refactor_context`
+- `analyze_symbol`
 - `plan_change`
 
-RepoRadar also includes lower-level support tools such as `search_code`,
-`open_file`, `list_symbols`, `find_symbol`, `find_references`, and
-`find_related_files`.
+## Lower-Level Retrieval Tools
 
-## `explore_component`
+### `search_code`
 
 Purpose:
 
-- entry-point repository exploration for a component, file, or symbol
+- query Zoekt for fast repository-scale search
 
-Typical use cases:
+Notes:
 
-- identify the main implementation file
-- inspect nearby collaborators
-- understand what a file exports
-- inspect lightweight UI hierarchy context when available
+- uses the Zoekt service rather than MCP-persisted structure artifacts
+- search results should be interpreted together with the current search freshness state
 
-Input:
+### `open_file`
 
-- `name`
-- optional `repo`
-- optional `limit`
-- optional `relatedLimit`
+Purpose:
+
+- read a file from the mounted repositories
+
+### `list_symbols`
+
+Purpose:
+
+- list symbols discovered in a file or repository context
+
+### `find_symbol`
+
+Purpose:
+
+- resolve symbol candidates from the published symbol index
+
+### `find_references`
+
+Purpose:
+
+- retrieve conservative symbol reference context
+
+### `find_related_files`
+
+Purpose:
+
+- rank nearby or structurally related files for exploration
+
+## High-Level Workflow Tools
+
+### `explore_component`
+
+Purpose:
+
+- entry-point exploration for a component, file, or symbol
+
+Builds on:
+
+- symbol resolution
+- related-file ranking
+- file-level defined and exported symbols
+- optional UI hierarchy aggregation
 
 Output summary:
 
@@ -49,68 +88,54 @@ Output summary:
 - related files
 - defined symbols
 - exported symbols
-- optional `uiHierarchy` summary with:
-  - rendered child components
-  - parent components that render the target
-  - commonly observed prop names
+- optional `uiHierarchy` summary with rendered children, parent components, and observed prop names
 - concise exploration summary
 
 Example:
 
 ```text
-explore_component("AudioHero")
+explore_component("LandingHero")
 ```
 
-## `search_patterns`
+### `search_patterns`
 
 Purpose:
 
 - find repository-local precedents and structurally similar implementations
 
-Typical use cases:
+Builds on:
 
-- look for existing implementations to imitate
-- compare feature bundles or similar components
-- ground code generation in repository conventions
-
-Input:
-
-- `name`
-- optional `repo`
-- optional `mode`
-- optional `limit`
+- symbol and file resolution
+- graph neighbor signals
+- naming and file-family heuristics
+- explainable ranking signals
 
 Output summary:
 
 - resolved target
 - ranked matches
-- explainable reasons for each match
+- reasons for each match
 - symbol and export summaries for matched files
 
 Example:
 
 ```text
-search_patterns({ "name": "AudioHero", "mode": "component" })
+search_patterns({ "name": "LandingHero", "mode": "component" })
 ```
 
-## `analyze_symbol`
+### `analyze_symbol`
 
 Purpose:
 
-- explain a symbol's identity, role, and usage shape
+- explain a symbol's identity, role, and surrounding usage context
 
-Typical use cases:
+Builds on:
 
-- determine whether a symbol is local or exported
-- inspect nearby symbols and surrounding context
-- understand whether a symbol looks feature-local or broadly shared
-
-Input:
-
-- `name`
-- optional `repo`
-- optional `file`
-- optional `limit`
+- symbol resolution
+- export status and symbol kind
+- file-level graph relationships
+- related-file ranking
+- nearby and sibling symbols in the defining file
 
 Output summary:
 
@@ -124,27 +149,22 @@ Output summary:
 Example:
 
 ```text
-analyze_symbol({ "name": "AudioHero", "file": "src/components/AudioHero.tsx" })
+analyze_symbol({ "name": "LandingHero", "file": "src/components/LandingHero.tsx" })
 ```
 
-## `collect_refactor_context`
+### `collect_refactor_context`
 
 Purpose:
 
 - assemble bounded refactor context before a change
 
-Typical use cases:
+Builds on:
 
-- inspect what depends on a target
-- inspect what the target depends on
-- collect nearby files before editing
-
-Input:
-
-- `name`
-- optional `repo`
-- optional `mode`
-- optional `limit`
+- direct importers and imports
+- direct re-export chains
+- graph neighbors
+- related-file ranking
+- nearby same-directory or bundle-family files
 
 Output summary:
 
@@ -159,28 +179,21 @@ Output summary:
 Example:
 
 ```text
-collect_refactor_context({ "name": "AudioHero", "mode": "component" })
+collect_refactor_context({ "name": "LandingHero", "mode": "component" })
 ```
 
-## `plan_change`
+### `plan_change`
 
 Purpose:
 
 - expose the planning layer as an agent-facing workflow
 
-Typical use cases:
+Builds on:
 
-- estimate the safest expected scope of a change
-- separate likely edit targets from review-only files
-- understand change risk before modifying code
-- follow an ordered edit and review sequence
-
-Input:
-
-- `symbol`
-- optional `filePath`
-- optional `repo`
-- optional `mode`
+- impact analysis
+- ownership detection
+- graph-derived dependency ordering
+- additive UI review hints when available
 
 Output summary:
 
@@ -194,56 +207,35 @@ Output summary:
 - ordered edit and review plan
 - compact agent summary
 
-`plan_change` does not rewrite code or guarantee refactor safety. It exposes a
-conservative plan built from impact analysis, ownership detection, graph
-signals, and additive UI review hints when available.
+`plan_change` does not rewrite code or guarantee refactor safety.
 
 Example:
 
 ```text
-plan_change({ "symbol": "AudioHero", "filePath": "src/components/AudioHero.tsx" })
+plan_change({ "symbol": "LandingHero", "filePath": "src/components/LandingHero.tsx" })
 ```
 
 ## Typical Workflow
 
-A practical high-level workflow is:
+A practical workflow is:
 
-1. `explore_component`
-   - find the main implementation and nearby collaborators
-2. `search_patterns`
-   - find repository precedents
-3. `analyze_symbol`
-   - clarify symbol role and usage
-4. `collect_refactor_context`
-   - inspect bounded dependency context
-5. `plan_change`
-   - estimate safe scope, risk, and ordered edit/review steps
+1. `explore_component` to resolve the target and nearby structure.
+2. `search_patterns` to find local precedents.
+3. `analyze_symbol` to understand role and usage.
+4. `collect_refactor_context` to bound the dependency surface.
+5. `plan_change` to estimate safe scope and review order.
 
-## Lower-Level Tools
+## Practical Limits
 
-RepoRadar also exposes lower-level MCP primitives:
-
-- `search_code`
-- `open_file`
-- `list_symbols`
-- `find_symbol`
-- `find_references`
-- `find_related_files`
-
-These are useful when an agent needs direct retrieval rather than a higher-level
-workflow result.
-
-## Scope And Limits
-
-RepoRadar tools are intentionally practical and bounded.
+RepoRadar tools are intentionally conservative.
 
 They do not claim:
 
 - full semantic program understanding
 - compiler-complete rename or refactor support
-- full reference completeness
+- complete reference precision in every repository shape
 - automatic safe refactors
-- guaranteed correctness of all change plans
+- guaranteed correctness of every heuristic plan
 
-They are designed to provide conservative, explainable code intelligence for
-real repository workflows.
+They are designed to provide useful, explainable repository intelligence over
+the currently published MCP generation and the current Zoekt snapshot.

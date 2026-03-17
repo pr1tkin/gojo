@@ -1,135 +1,150 @@
 # Testing
 
-## Philosophy
+## Purpose
 
-RepoRadar relies on focused unit tests for the deterministic parts of the
-code-intelligence stack.
+This document describes the current validation workflow for RepoRadar.
 
-The test strategy follows the same layered model used throughout the
-architecture docs:
+It focuses on:
 
-`Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
+- fast local verification for development
+- evaluation-driven refinement against the real stack
+- focused follow-up checks after targeted changes
+- refresh fault-injection and recovery validation
 
-Pattern intelligence is tested alongside that stack because it reuses the same
-indexed repository data for extraction, similarity, clustering, and precedent
-retrieval.
+For runtime setup, see [Operations](./operations.md). For system design, see
+[Architecture](./architecture.md).
 
-Tests are intended to verify:
+## Current Testing Model
 
-- deterministic indexing and graph behavior
-- stable orchestrator service behavior
-- conservative analysis outputs
-- deterministic pattern-intelligence behavior
-- thin MCP tool wrappers
+RepoRadar uses a mix of:
 
-The suite does not try to claim compiler-complete correctness or full runtime
-integration coverage.
+- unit tests for deterministic logic and tool contracts
+- focused real-system checks against the running stack when behavior depends on runtime coordination
+- standalone evaluation reports stored under `docs/evaluations/`
 
-## Running Tests
+Evaluation reports are intentionally kept out of the main documentation flow.
+They are working records, not user-facing reference docs.
+
+## Day-To-Day Development Workflow
 
 From `mcp-server/`:
 
 ```powershell
 npm install
 npm run test
-npm run test:coverage
 npm run build
 ```
 
-## Unit Test Layout
+Use `npm run test:coverage` when you need broader coverage inspection rather
+than routine iteration.
+
+## What To Validate First
+
+Use local unit tests for:
+
+- deterministic indexing and graph logic
+- search fingerprint and coordination derivation
+- orchestration services
+- MCP tool wrappers and schemas
+- conservative analysis behavior
+- pattern extraction and integrity checks
+- refresh lifecycle, fault injection, and consistency behavior
 
 Primary test directory:
 
 - `mcp-server/test/unit`
 
-Typical coverage areas:
+## Focused Real-System Checks
 
-- search and request formatting
-- file and repository access
-- Tree-sitter parsing and symbol extraction
-- symbol-index persistence and querying
-- graph build and query helpers
-- ranking and context assembly
-- orchestrator services
-- pattern extraction and similarity
-- precedent discovery
-- MCP tool wrappers
+Use focused runtime checks when the change depends on the real containerized
+stack rather than isolated module behavior.
 
-## What The Tests Cover
+Typical examples:
 
-### Symbol Analysis
+- verifying Compose volume behavior
+- validating one-shot Zoekt runs with `INDEX_ONCE=true`
+- checking coordination marker behavior across `mcp-server` and `zoekt-indexer`
+- confirming health or freshness interpretation after recovery scenarios
+- validating a high-level MCP workflow against a mounted repository
 
-Tests verify:
+Prefer narrow checks over full end-to-end reruns when the change is local and
+the affected behavior is obvious.
 
-- symbol resolution
-- export and local-role interpretation
-- nearby symbol and file context
-- conservative usage summaries
+## Fault Injection And Recovery Validation
 
-### Impact Analysis
+Phase 6 introduced refresh fault-injection and recovery validation for the MCP
+refresh lifecycle.
 
-Tests verify:
+Relevant environment variables:
 
-- direct impact detection
-- bounded transitive impact expansion
-- confidence and grouping behavior
-- conservative blast-radius summaries
-- additive UI-aware impact hints when relevant
+- `FAULT_INJECTION_STAGE`
+- `FAULT_INJECTION_MODE`
+- `FAULT_INJECTION_TARGET`
+- `REPORADAR_FAULT_INJECTION_STAGE`
+- `REPORADAR_FAULT_INJECTION_MODE`
+- `REPORADAR_FAULT_INJECTION_TARGET`
 
-### Ownership Detection
+Supported stages include:
 
-Tests verify:
+- `before-snapshot`
+- `after-snapshot`
+- `after-change-detection`
+- `rebuild-symbols`
+- `rebuild-graph`
+- `rebuild-patterns`
+- `persist-artifacts`
+- `before-commit`
+- `coordination-update`
+- `consistency-maintenance`
 
-- export-surface heuristics
-- path and boundary heuristics
-- usage fan-out heuristics
-- barrel and entry-surface heuristics
-- conservative ownership and API-boundary classification
-- additive UI-aware ownership signals when available
+Supported modes include:
 
-### Change Planning
+- `throw`
+- `crash`
+- `partial-write`
+- `skip-step`
 
-Tests verify:
+Example:
 
-- scope classification
-- risk classification
-- edit vs review separation
-- local helper containment
-- framework entry planning
-- ordered edit and review steps
-- additive UI review hints without edit-target expansion
+```powershell
+$env:FAULT_INJECTION_STAGE='before-commit'
+$env:FAULT_INJECTION_MODE='throw'
+npm run test -- refresh-fault-injection
+```
 
-### Pattern Intelligence
+Use these only for hardening and recovery validation, not normal development.
 
-Tests verify:
+## When To Re-Run A Full Evaluation
 
-- deterministic pattern extraction
-- detector calibration for common false-positive cases
-- stable pattern repository behavior
-- deterministic similarity scoring and clustering
-- precedent ranking and candidate filtering
-- responsibility-aware similarity and precedent refinement
+Use a broader evaluation pass when changes affect:
 
-### MCP Tool Wrappers
+- refresh lifecycle semantics
+- search freshness or coordination logic
+- trust or consistency interpretation
+- cross-layer orchestration behavior
+- multiple MCP workflows at once
 
-Tool-level tests verify:
+Also use a full evaluation when a targeted fix changes assumptions that earlier
+reports were based on.
 
-- public input schema acceptance
-- stable output structure
-- delegation to orchestrator services
-- safe behavior for missing or ambiguous inputs
+## When Focused Re-Checks Are Enough
 
-High-level tool wrappers covered in the test suite:
+Use focused re-checks when the change is clearly bounded, for example:
 
-- `explore_component`
-- `search_patterns`
-- `analyze_symbol`
-- `collect_refactor_context`
-- `plan_change`
+- a single tool schema or formatter
+- a localized ranking rule
+- a documentation-aligned runtime command fix
+- a recovery fix that only changes one stage or marker path
+
+In those cases, prefer:
+
+- the relevant unit tests
+- one or two runtime checks that exercise the affected path
+- a quick build verification
 
 ## Example Commands
 
-Run the full test suite:
+Full local unit suite:
 
 ```powershell
 npm run test
@@ -144,94 +159,32 @@ npm run build
 Targeted examples:
 
 ```powershell
+npm run test -- cross-index-refresh.test.ts
+npm run test -- coordination-marker-resilience.test.ts
+npm run test -- refresh-fault-injection.test.ts
+npm run test -- consistency-maintenance.test.ts
 npm run test -- impact-analysis.service.test.ts
-npm run test -- symbol-ownership.service.test.ts
-npm run test -- change-planning.service.test.ts
-npm run test -- pattern-similarity.test.ts
-npm run test -- precedent-discovery.service.test.ts
 npm run test -- plan-change.tool.test.ts
 ```
 
-## Refresh Fault Injection
+## What This Documentation Does Not Do
 
-For deterministic refresh lifecycle failure testing, `mcp-server` supports
-internal fault injection through environment variables.
+This document does not try to catalog every historical test flow.
 
-Supported variables:
+It intentionally avoids over-documenting:
 
-- `FAULT_INJECTION_STAGE`
-- `FAULT_INJECTION_MODE`
-- `FAULT_INJECTION_TARGET`
-- `REPORADAR_FAULT_INJECTION_STAGE`
-- `REPORADAR_FAULT_INJECTION_MODE`
-- `REPORADAR_FAULT_INJECTION_TARGET`
+- obsolete pre-hardening workflows
+- manual steps that are no longer part of normal refinement
+- direct links to specific evaluation reports under `docs/evaluations/`
 
-Supported stages:
+## Scope Limits
 
-- `before-snapshot`
-- `after-snapshot`
-- `after-change-detection`
-- `rebuild-symbols`
-- `rebuild-graph`
-- `rebuild-patterns`
-- `persist-artifacts`
-- `before-commit`
-- `coordination-update`
-- `consistency-maintenance`
+RepoRadar validation does not claim:
 
-Supported modes:
+- Docker-perfect end-to-end coverage for every environment
+- compiler-complete semantic correctness
+- guaranteed correctness of all heuristic planning outputs
+- exhaustive performance benchmarking
 
-- `throw`
-- `crash`
-- `partial-write`
-- `skip-step`
-
-Notes:
-
-- disabled by default
-- intended for deterministic testing and hardening only
-- `FAULT_INJECTION_TARGET` is optional and is used for targeted stages such as
-  `persist-artifacts`
-
-Example:
-
-```powershell
-$env:FAULT_INJECTION_STAGE='before-commit'
-$env:FAULT_INJECTION_MODE='throw'
-npm run test -- refresh-fault-injection
-```
-
-## What Is Intentionally Out Of Scope
-
-The unit suite does not attempt to cover:
-
-- Docker or Compose integration
-- end-to-end MCP stdio sessions
-- live Zoekt container integration
-- performance benchmarking
-- compiler-complete semantic refactors
-- guaranteed correctness of all impact, ownership, planning, or precedent
-  results
-
-`server.ts` remains lightly tested indirectly because it is mostly MCP SDK
-bootstrap and tool registration glue.
-
-## Validation Strategy
-
-Use unit tests for:
-
-- deterministic correctness
-- conservative heuristic behavior
-- stable MCP tool contracts
-- safe failure modes
-
-Use manual runtime checks for:
-
-- Docker Compose startup
-- Zoekt availability
-- repository indexing
-- MCP client integration
-- workflow quality on local repositories
-
-For runtime setup, see [Operations](./operations.md). For system design, see
-[Architecture](./architecture.md).
+The goal is confidence in the real implemented system, with honest limits and
+fast feedback for continued refinement.
