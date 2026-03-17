@@ -2,12 +2,92 @@
 
 set -euo pipefail
 
-INDEX_ROOT="/data/index"
-REPOS_ROOT="/repos"
-COORDINATION_ROOT="/data/coordination"
-SEARCH_STATE_FILE="${COORDINATION_ROOT}/zoekt-refresh-state.json"
-SEARCH_STATE_TMP_FILE="${COORDINATION_ROOT}/zoekt-refresh-state.tmp.json"
-DEFAULT_INTERVAL_SECONDS=300
+INDEX_ROOT="${INDEX_ROOT:-/data/index}"
+REPOS_ROOT="${REPOS_ROOT:-/repos}"
+COORDINATION_ROOT="${COORDINATION_ROOT:-/data/coordination}"
+SEARCH_STATE_FILE="${SEARCH_STATE_FILE:-${COORDINATION_ROOT}/zoekt-refresh-state.json}"
+DEFAULT_INTERVAL_SECONDS="${DEFAULT_INTERVAL_SECONDS:-300}"
+SEARCH_STATE_SCHEMA_VERSION="${SEARCH_STATE_SCHEMA_VERSION:-1}"
+
+log_info() {
+  echo "[zoekt-coordination] $*" >&2
+}
+
+log_error() {
+  echo "[zoekt-coordination] $*" >&2
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  value="${value//$'\b'/\\b}"
+  value="${value//$'\f'/\\f}"
+  printf '%s' "${value}"
+}
+
+sync_path_if_possible() {
+  local target_path="$1"
+
+  if command -v sync >/dev/null 2>&1; then
+    sync -f "${target_path}" >/dev/null 2>&1 || true
+  fi
+}
+
+create_temp_file_in_directory() {
+  local directory_path="$1"
+  local prefix="$2"
+
+  mkdir -p "${directory_path}"
+  mktemp "${directory_path}/${prefix}.XXXXXX"
+}
+
+validate_search_state_payload() {
+  local payload="$1"
+
+  [[ "${payload}" == \{* ]] || return 1
+  [[ "${payload}" == *\} ]] || return 1
+  [[ "${payload}" == *'"schemaVersion":'* ]] || return 1
+  [[ "${payload}" == *'"snapshotId":'* ]] || return 1
+  [[ "${payload}" == *'"status":'* ]] || return 1
+  [[ "${payload}" == *'"refreshedAt":'* ]] || return 1
+  [[ "${payload}" == *'"repoFingerprints":'* ]] || return 1
+  [[ "${payload}" == *'"details":'* ]] || return 1
+
+  return 0
+}
+
+write_search_state_payload() {
+  local payload="$1"
+  local write_description="$2"
+  local temp_file
+
+  if ! validate_search_state_payload "${payload}"; then
+    log_error "refusing to overwrite ${SEARCH_STATE_FILE}: ${write_description} payload failed validation"
+    return 1
+  fi
+
+  temp_file="$(create_temp_file_in_directory "${COORDINATION_ROOT}" "zoekt-refresh-state.tmp")"
+
+  {
+    printf '%s\n' "${payload}"
+  } > "${temp_file}"
+
+  sync_path_if_possible "${temp_file}"
+
+  if [[ "${REPORADAR_ZOEKT_FAIL_AFTER_TEMP_WRITE:-false}" == "true" ]]; then
+    rm -f "${temp_file}"
+    log_error "simulated failure after temporary write for ${write_description}; keeping previous marker"
+    return 1
+  fi
+
+  mv "${temp_file}" "${SEARCH_STATE_FILE}"
+  sync_path_if_possible "${COORDINATION_ROOT}"
+  log_info "wrote ${SEARCH_STATE_FILE} (${write_description})"
+}
 
 resolve_interval_seconds() {
   local configured_interval="${INDEX_INTERVAL_SECONDS:-${DEFAULT_INTERVAL_SECONDS}}"
@@ -24,11 +104,12 @@ resolve_interval_seconds() {
 run_index_pass() {
   local indexed_any=false
   local refresh_started_at
-  local repo_fingerprint_lines=""
+  local repo_fingerprint_file
   local snapshot_id
 
   refresh_started_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   snapshot_id="$(date -u +"%Y%m%dT%H%M%SZ")-$$"
+  repo_fingerprint_file="$(create_temp_file_in_directory "${COORDINATION_ROOT}" "zoekt-repo-fingerprints")"
 
   echo "Starting Zoekt indexing pass..."
 
@@ -59,7 +140,7 @@ run_index_pass() {
     repo_fingerprint="$(compute_repo_fingerprint "${repo_path}")"
     local repo_file_count
     repo_file_count="$(count_repo_files "${repo_path}")"
-    repo_fingerprint_lines+=$(printf '%s\t%s\t%s\n' "${repo_name}" "${repo_fingerprint}" "${repo_file_count}")
+    printf '%s\t%s\t%s\n' "${repo_name}" "${repo_fingerprint}" "${repo_file_count}" >> "${repo_fingerprint_file}"
     indexed_any=true
   done
 
@@ -67,7 +148,8 @@ run_index_pass() {
     echo "No Git repositories found directly under ${REPOS_ROOT}."
   fi
 
-  write_search_state_ready "${snapshot_id}" "${refresh_started_at}" "${repo_fingerprint_lines}"
+  write_search_state_ready "${snapshot_id}" "${refresh_started_at}" "${repo_fingerprint_file}"
+  rm -f "${repo_fingerprint_file}"
   echo "Zoekt indexing pass finished."
 }
 
@@ -107,42 +189,39 @@ compute_repo_fingerprint() {
 }
 
 compute_aggregate_fingerprint() {
-  local repo_fingerprint_lines="$1"
-  local tmp_file
-  tmp_file="$(mktemp)"
-  printf '%s' "${repo_fingerprint_lines}" > "${tmp_file}"
+  local repo_fingerprint_file="$1"
 
-  if [[ ! -s "${tmp_file}" ]]; then
-    rm -f "${tmp_file}"
+  if [[ ! -s "${repo_fingerprint_file}" ]]; then
     printf '%s' "empty"
     return
   fi
 
   local aggregate_fingerprint
-  aggregate_fingerprint="$(sha256sum "${tmp_file}" | awk '{print $1}')"
-  rm -f "${tmp_file}"
+  aggregate_fingerprint="$(sha256sum "${repo_fingerprint_file}" | awk '{print $1}')"
   printf '%s' "${aggregate_fingerprint}"
 }
 
-write_search_state_ready() {
+build_search_state_ready_payload() {
   local snapshot_id="$1"
   local refreshed_at="$2"
-  local repo_fingerprint_lines="$3"
+  local repo_fingerprint_file="$3"
   local aggregate_fingerprint
+  local payload_file
+  local payload
+  local is_first=true
 
-  mkdir -p "${COORDINATION_ROOT}"
-  aggregate_fingerprint="$(compute_aggregate_fingerprint "${repo_fingerprint_lines}")"
+  aggregate_fingerprint="$(compute_aggregate_fingerprint "${repo_fingerprint_file}")"
+  payload_file="$(create_temp_file_in_directory "${COORDINATION_ROOT}" "zoekt-refresh-payload")"
 
   {
     printf '{\n'
-    printf '  "schemaVersion": 1,\n'
-    printf '  "snapshotId": "%s",\n' "${snapshot_id}"
+    printf '  "schemaVersion": %s,\n' "${SEARCH_STATE_SCHEMA_VERSION}"
+    printf '  "snapshotId": "%s",\n' "$(json_escape "${snapshot_id}")"
     printf '  "status": "ready",\n'
-    printf '  "refreshedAt": "%s",\n' "${refreshed_at}"
-    printf '  "aggregateFingerprint": "%s",\n' "${aggregate_fingerprint}"
+    printf '  "refreshedAt": "%s",\n' "$(json_escape "${refreshed_at}")"
+    printf '  "aggregateFingerprint": "%s",\n' "$(json_escape "${aggregate_fingerprint}")"
     printf '  "repoFingerprints": [\n'
-    if [[ -n "${repo_fingerprint_lines}" ]]; then
-      local is_first=true
+    if [[ -s "${repo_fingerprint_file}" ]]; then
       while IFS=$'\t' read -r repo_id fingerprint file_count; do
         if [[ -z "${repo_id}" ]]; then
           continue
@@ -150,39 +229,80 @@ write_search_state_ready() {
         if [[ "${is_first}" == "false" ]]; then
           printf ',\n'
         fi
-        printf '    {"repoId":"%s","fingerprint":"%s","fileCount":%s}' "${repo_id}" "${fingerprint}" "${file_count}"
+        printf '    {"repoId":"%s","fingerprint":"%s","fileCount":%s}' \
+          "$(json_escape "${repo_id}")" \
+          "$(json_escape "${fingerprint}")" \
+          "${file_count}"
         is_first=false
-      done <<< "${repo_fingerprint_lines}"
+      done < "${repo_fingerprint_file}"
       printf '\n'
     fi
     printf '  ],\n'
     printf '  "details": "Zoekt indexing pass completed successfully."\n'
     printf '}\n'
-  } > "${SEARCH_STATE_TMP_FILE}"
+  } > "${payload_file}"
 
-  mv "${SEARCH_STATE_TMP_FILE}" "${SEARCH_STATE_FILE}"
+  payload="$(cat "${payload_file}")"
+  rm -f "${payload_file}"
+  printf '%s' "${payload}"
+}
+
+write_search_state_ready() {
+  local snapshot_id="$1"
+  local refreshed_at="$2"
+  local repo_fingerprint_file="$3"
+  local payload
+
+  payload="$(build_search_state_ready_payload "${snapshot_id}" "${refreshed_at}" "${repo_fingerprint_file}")" || {
+    log_error "failed to build ready search state payload"
+    return 1
+  }
+
+  write_search_state_payload "${payload}" "status=ready snapshotId=${snapshot_id}" || {
+    log_error "keeping previous marker after failed ready-state write"
+    return 1
+  }
+}
+
+build_search_state_failed_payload() {
+  local error_message="$1"
+  local failed_at
+  local payload_file
+  local payload
+
+  failed_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  payload_file="$(create_temp_file_in_directory "${COORDINATION_ROOT}" "zoekt-refresh-payload")"
+
+  {
+    printf '{\n'
+    printf '  "schemaVersion": %s,\n' "${SEARCH_STATE_SCHEMA_VERSION}"
+    printf '  "snapshotId": "%s",\n' "$(json_escape "${failed_at}-$$")"
+    printf '  "status": "failed",\n'
+    printf '  "refreshedAt": "%s",\n' "$(json_escape "${failed_at}")"
+    printf '  "repoFingerprints": [],\n'
+    printf '  "error": "%s",\n' "$(json_escape "${error_message}")"
+    printf '  "details": "Zoekt indexing pass failed before producing a refreshed snapshot."\n'
+    printf '}\n'
+  } > "${payload_file}"
+
+  payload="$(cat "${payload_file}")"
+  rm -f "${payload_file}"
+  printf '%s' "${payload}"
 }
 
 write_search_state_failed() {
   local error_message="$1"
-  local failed_at
+  local payload
 
-  failed_at="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  mkdir -p "${COORDINATION_ROOT}"
+  payload="$(build_search_state_failed_payload "${error_message}")" || {
+    log_error "failed to build failed search state payload"
+    return 1
+  }
 
-  {
-    printf '{\n'
-    printf '  "schemaVersion": 1,\n'
-    printf '  "snapshotId": "%s",\n' "${failed_at}-$$"
-    printf '  "status": "failed",\n'
-    printf '  "refreshedAt": "%s",\n' "${failed_at}"
-    printf '  "repoFingerprints": [],\n'
-    printf '  "error": "%s",\n' "${error_message//\"/\\\"}"
-    printf '  "details": "Zoekt indexing pass failed before producing a refreshed snapshot."\n'
-    printf '}\n'
-  } > "${SEARCH_STATE_TMP_FILE}"
-
-  mv "${SEARCH_STATE_TMP_FILE}" "${SEARCH_STATE_FILE}"
+  write_search_state_payload "${payload}" "status=failed" || {
+    log_error "keeping previous marker after failed failure-state write"
+    return 1
+  }
 }
 
 main() {
@@ -205,4 +325,6 @@ main() {
   done
 }
 
-main "$@"
+if [[ "${REPORADAR_ZOEKT_TEST_MODE:-false}" != "true" ]]; then
+  main "$@"
+fi
