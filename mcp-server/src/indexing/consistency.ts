@@ -4,7 +4,7 @@ import path from 'node:path';
 import { buildCodeGraphFromSymbolIndex } from '../graph/build-graph.js';
 import { loadRepoResolutionConfigs } from '../graph/repo-config.js';
 import type { CodeGraphSnapshot } from '../graph/types.js';
-import { loadPatternIndex, savePatternIndex } from '../patterns/store.js';
+import { loadPatternIndexResult, savePatternIndex } from '../patterns/store.js';
 import type { PatternIndex } from '../patterns/types.js';
 import { loadSymbolIndex, saveSymbolIndex } from '../symbol-index/store.js';
 import type { IndexedSymbol, SymbolFrequencyStats, SymbolIndex } from '../symbol-index/types.js';
@@ -332,7 +332,8 @@ export async function runCurrentGenerationConsistencyMaintenance(
   let graph = currentGraph;
   let uiComposition = await loadUiCompositionIndex();
   let uiProps = await loadUiPropSurfaceIndex();
-  let patternIndex = await loadPatternIndex();
+  const patternIndexLoadResult = await loadPatternIndexResult();
+  let patternIndex = patternIndexLoadResult.value;
   let generationState = state;
   let symbolIndexChanged = false;
   let graphChanged = false;
@@ -629,6 +630,47 @@ export async function runCurrentGenerationConsistencyMaintenance(
   }
 
   checks.push(mismatchCheck);
+
+  const patternIntegrityCheck = createCheckResult(
+    'pattern-state-integrity',
+    'Pattern state integrity',
+    'error',
+    'artifact',
+  );
+  const patternIssues = [
+    ...(patternIndexLoadResult.status !== 'ok'
+      ? [
+          `pattern artifact ${patternIndexLoadResult.status} at ${patternIndexLoadResult.path}: ${patternIndexLoadResult.reason}`,
+        ]
+      : []),
+    ...((generationState.patternIntegrity?.issues ?? []).map(
+      (issue) => `${issue.summary}: ${issue.details}`,
+    )),
+  ];
+
+  if (patternIssues.length > 0) {
+    patternIntegrityCheck.status =
+      patternIndexLoadResult.status !== 'ok' ||
+      generationState.patternIntegrity?.status === 'failed'
+        ? 'failed'
+        : 'warning';
+    patternIntegrityCheck.summary = 'pattern artifact state is suspicious or untrustworthy';
+    patternIntegrityCheck.details = patternIssues;
+    patternIntegrityCheck.targetArtifacts = ['pattern-candidates.json', 'index-generation.json'];
+    patternIntegrityCheck.repairsRecommended.push(
+      createRepairRecord(
+        'rebuild-pattern-state',
+        'rebuild the published generation or pattern artifacts because the pattern substrate is untrustworthy',
+        'recommended',
+        patternIntegrityCheck.targetArtifacts,
+        [],
+        generationState.patternIntegrity?.issues.map((issue) => issue.recommendedAction).join('; ') ||
+          'recommended action: run a full generation rebuild',
+      ),
+    );
+  }
+
+  checks.push(patternIntegrityCheck);
 
   const coordinationCheck = createCheckResult(
     'coordination-state-sanity',

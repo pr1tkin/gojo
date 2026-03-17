@@ -5,7 +5,7 @@ import path from 'node:path';
 import { buildCodeGraphFromSymbolIndex } from '../graph/build-graph.js';
 import { loadRepoResolutionConfigs } from '../graph/repo-config.js';
 import type { CodeGraphSnapshot } from '../graph/types.js';
-import { loadPatternIndex } from '../patterns/store.js';
+import { loadPatternIndexResult } from '../patterns/store.js';
 import { runPatternExtractionStage } from '../patterns/stage.js';
 import type { PatternIndex } from '../patterns/types.js';
 import { listRepositories } from '../repositories.js';
@@ -22,6 +22,7 @@ import type { UiPropSurfaceIndex } from '../ui-props/types.js';
 import { classifyRepositoryChanges, createEmptyGenerationChangeSummary } from './change-detection.js';
 import { runCurrentGenerationConsistencyMaintenance } from './consistency.js';
 import { getCurrentIndexHealth } from './health.js';
+import { evaluatePatternIntegrity } from './pattern-integrity.js';
 import {
   loadCurrentGenerationState,
   publishGeneration,
@@ -58,6 +59,10 @@ export interface RefreshIndexesOptions {
       delta: IndexRefreshDelta;
       hasPreviousGeneration: boolean;
     }) => Promise<void> | void;
+    mutatePatternIndex?: (context: {
+      reposRoot: string;
+      patternIndex: PatternIndex;
+    }) => Promise<PatternIndex> | PatternIndex;
   };
 }
 
@@ -281,33 +286,6 @@ function mergeSymbolIndexes(
   };
 }
 
-function mergePatternIndexes(
-  previousIndex: PatternIndex,
-  freshIndex: PatternIndex,
-  changedOrAddedFileIds: Set<string>,
-  deletedFileIds: Set<string>,
-): { index: PatternIndex; deletedPatternEntriesRemoved: number } {
-  const retainedPatterns = previousIndex.patterns.filter(
-    (pattern) => !changedOrAddedFileIds.has(pattern.fileId) && !deletedFileIds.has(pattern.fileId),
-  );
-  const deletedPatternEntriesRemoved = previousIndex.patterns.filter((pattern) =>
-    deletedFileIds.has(pattern.fileId),
-  ).length;
-
-  return {
-    index: {
-      schemaVersion: freshIndex.schemaVersion,
-      sourceSymbolIndexSchemaVersion: freshIndex.sourceSymbolIndexSchemaVersion,
-      generatedAt: freshIndex.generatedAt,
-      patterns: [
-        ...retainedPatterns,
-        ...freshIndex.patterns.filter((pattern) => changedOrAddedFileIds.has(pattern.fileId)),
-      ].sort((left, right) => left.patternId.localeCompare(right.patternId)),
-    },
-    deletedPatternEntriesRemoved,
-  };
-}
-
 function createCounts(
   symbolIndex: SymbolIndex,
   graph: CodeGraphSnapshot,
@@ -408,9 +386,20 @@ async function refreshIndexesUnlocked(
     changedOrAddedKeys,
     deletedKeys,
   );
-  const freshPatternIndex = await runPatternExtractionStage(reposRoot, mergedSymbolIndex);
+  const extractedPatternIndex = await runPatternExtractionStage(reposRoot, mergedSymbolIndex);
+  const freshPatternIndex =
+    (await options.testHooks?.mutatePatternIndex?.({
+      reposRoot: path.resolve(reposRoot),
+      patternIndex: extractedPatternIndex,
+    })) ?? extractedPatternIndex;
+  const previousPatternLoadResult = previousGeneration ? await loadPatternIndexResult() : null;
   const previousPatternIndex = previousGeneration
-    ? await loadPatternIndex()
+    ? previousPatternLoadResult?.value ?? {
+        schemaVersion: freshPatternIndex.schemaVersion,
+        sourceSymbolIndexSchemaVersion: 0,
+        generatedAt: '',
+        patterns: [],
+      }
     : {
         schemaVersion: freshPatternIndex.schemaVersion,
         sourceSymbolIndexSchemaVersion: 0,
@@ -433,27 +422,28 @@ async function refreshIndexesUnlocked(
         generatedAt: '',
         propUsages: [],
       };
-  const changedOrAddedFileIds = new Set(
-    manifest
-      .filter((entry) => changedOrAddedKeys.has(entry.key))
-      .map((entry) => createFileId(entry.repoId, entry.filePath)),
-  );
   const deletedFileIds = new Set(
     previousManifest
       .filter((entry) => deletedKeys.has(entry.key))
       .map((entry) => createFileId(entry.repoId, entry.filePath)),
   );
-  const mergedPatternResult = mergePatternIndexes(
-    previousPatternIndex,
-    freshPatternIndex,
-    changedOrAddedFileIds,
-    deletedFileIds,
-  );
+  const mergedPatternResult = {
+    index: freshPatternIndex,
+    deletedPatternEntriesRemoved: previousPatternIndex.patterns.filter((pattern) =>
+      deletedFileIds.has(pattern.fileId),
+    ).length,
+  };
   cleanup.deletedPatternEntriesRemoved = mergedPatternResult.deletedPatternEntriesRemoved;
 
   warnings.push(
     'code graph and UI artifacts rebuild globally on changed generations to keep cross-file resolution deterministic',
   );
+
+  if (previousPatternLoadResult && previousPatternLoadResult.status !== 'ok') {
+    warnings.push(
+      `previous pattern artifact was ${previousPatternLoadResult.status}: ${previousPatternLoadResult.reason}; refresh rebuilt patterns from the current symbol index instead of trusting persisted pattern state`,
+    );
+  }
 
   const repoConfigById = await loadRepoResolutionConfigs(
     Object.fromEntries(repositories.map((repository) => [repository.repoId, repository.repoRoot])),
@@ -477,6 +467,28 @@ async function refreshIndexesUnlocked(
     currentUiProps: uiProps,
     generatedAt: createdAt,
   });
+  const patternIntegrity = evaluatePatternIntegrity({
+    checkedAt: createdAt,
+    symbolIndex: mergedSymbolIndex,
+    patternIndex: mergedPatternResult.index,
+    previousGeneration,
+    previousPatternLoadResult,
+    changeSummary,
+  });
+
+  for (const issue of patternIntegrity.issues) {
+    warnings.push(`${issue.summary}: ${issue.details}`);
+  }
+
+  if (patternIntegrity.status === 'failed') {
+    const failureSummary = patternIntegrity.issues
+      .filter((issue) => issue.severity === 'error')
+      .map((issue) => `${issue.summary} (${issue.recommendedAction})`)
+      .join('; ');
+    logger.error(`[index-refresh] pattern-integrity failure: ${failureSummary}`);
+    throw new Error(`Pattern integrity validation failed: ${failureSummary}`);
+  }
+
   const counts = createCounts(
     mergedSymbolIndex,
     graph,
@@ -486,7 +498,7 @@ async function refreshIndexesUnlocked(
   );
   const rebuild: IndexGenerationRebuildSummary = {
     symbolFilesRebuilt: changedOrAddedKeys.size,
-    patternFilesRebuilt: changedOrAddedFileIds.size,
+    patternFilesRebuilt: Object.keys(mergedSymbolIndex.byFile).length,
     graphMode: 'full',
     uiCompositionMode: 'full',
     uiPropsMode: 'full',
@@ -535,6 +547,7 @@ async function refreshIndexesUnlocked(
     cleanup,
     changeSummary: changeSummary.overview,
     search,
+    patternIntegrity,
     warnings,
     errors: [],
   };

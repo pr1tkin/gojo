@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { loadPatternIndexResult } from '../patterns/store.js';
 import {
   getCoordinationDirectory,
   getCurrentHealthSnapshotFilePath,
@@ -169,6 +170,7 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
   );
   const requestResult = await loadSearchRefreshRequestResult();
   const snapshotResult = await loadSearchRefreshSnapshotResult();
+  const patternIndexResult = await loadPatternIndexResult();
   const search = deriveSearchFreshness(state, requestResult.value, snapshotResult.value, {
     requestResult,
     snapshotResult,
@@ -179,6 +181,18 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
 
   if (search.status !== 'ready') {
     reasons.push(search.details ?? `search freshness is ${search.status}`);
+  }
+
+  for (const issue of state.patternIntegrity?.issues ?? []) {
+    const message = `${issue.summary}: ${issue.details}`;
+
+    if (issue.severity === 'error') {
+      errors.push(message);
+    } else {
+      warnings.push(message);
+    }
+
+    reasons.push(`${issue.summary}; remediation: ${issue.recommendedAction}`);
   }
 
   if (!changeSummaryStatus.exists) {
@@ -220,6 +234,16 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
 
   if (snapshotMarkerIssue) {
     warnings.push(snapshotMarkerIssue);
+  }
+
+  if (patternIndexResult.status !== 'ok') {
+    const patternMessage = `pattern artifact is ${patternIndexResult.status}: ${patternIndexResult.reason}`;
+
+    if (patternIndexResult.status === 'missing') {
+      warnings.push(patternMessage);
+    } else {
+      errors.push(patternMessage);
+    }
   }
 
   const changeSummary = changeSummaryStatus.value;

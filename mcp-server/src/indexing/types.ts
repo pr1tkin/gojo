@@ -7,6 +7,7 @@ export type CoordinationMarkerParseStatus =
   | 'incompatible-version'
   | 'unreadable'
   | 'unknown';
+export type PatternIntegrityStatus = 'trusted' | 'degraded' | 'failed';
 export type ConsistencyCheckSeverity = 'info' | 'warning' | 'error';
 export type ConsistencyCheckStatus = 'passed' | 'warning' | 'failed' | 'repaired';
 export type ConsistencyScope = 'generation' | 'artifact' | 'coordination' | 'maintenance';
@@ -180,6 +181,25 @@ export interface SearchFreshnessState {
   snapshotId?: string;
 }
 
+export interface PatternIntegrityIssue {
+  code: string;
+  severity: 'warning' | 'error';
+  summary: string;
+  details: string;
+  recommendedAction: string;
+}
+
+export interface PatternIntegrityAssessment {
+  status: PatternIntegrityStatus;
+  checkedAt: string;
+  totalPatterns: number;
+  eligibleSourceFiles: number;
+  patternBearingFiles: number;
+  previousPatternCount?: number;
+  previousEligibleSourceFiles?: number;
+  issues: PatternIntegrityIssue[];
+}
+
 export interface IndexGenerationState {
   schemaVersion: number;
   generationId: string;
@@ -199,6 +219,7 @@ export interface IndexGenerationState {
   changeSummary: GenerationChangeSummaryOverview;
   consistency?: ConsistencyRunOverview;
   search: SearchFreshnessState;
+  patternIntegrity?: PatternIntegrityAssessment;
   warnings: string[];
   errors: string[];
 }
