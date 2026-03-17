@@ -17,6 +17,35 @@ log_error() {
   echo "[zoekt-coordination] $*" >&2
 }
 
+SEARCH_IGNORED_DIRECTORIES=(
+  ".git"
+  "node_modules"
+  "dist"
+  "build"
+  "coverage"
+  ".next"
+  ".turbo"
+  ".cache"
+  "out"
+  "storybook-static"
+  "generated"
+)
+
+SEARCH_IGNORED_FILE_NAMES=(
+  ".ds_store"
+)
+
+SEARCH_IGNORED_FILE_SUFFIXES=(
+  ".d.ts"
+  ".generated.ts"
+  ".generated.tsx"
+  ".tmp"
+  ".temp"
+  ".swp"
+  ".swo"
+  "~"
+)
+
 json_escape() {
   local value="$1"
   value="${value//\\/\\\\}"
@@ -101,6 +130,42 @@ resolve_interval_seconds() {
   echo "${DEFAULT_INTERVAL_SECONDS}"
 }
 
+should_ignore_relative_path() {
+  local relative_path="$1"
+  local normalized_path="${relative_path#./}"
+  local lower_path
+  local file_name
+  local segment
+  lower_path="$(printf '%s' "${normalized_path}" | tr '[:upper:]' '[:lower:]')"
+  file_name="${lower_path##*/}"
+  IFS='/' read -r -a path_segments <<< "${normalized_path}"
+
+  for segment in "${path_segments[@]}"; do
+    local ignored_directory
+    for ignored_directory in "${SEARCH_IGNORED_DIRECTORIES[@]}"; do
+      if [[ "${segment}" == "${ignored_directory}" ]]; then
+        return 0
+      fi
+    done
+  done
+
+  local ignored_name
+  for ignored_name in "${SEARCH_IGNORED_FILE_NAMES[@]}"; do
+    if [[ "${file_name}" == "${ignored_name}" ]]; then
+      return 0
+    fi
+  done
+
+  local ignored_suffix
+  for ignored_suffix in "${SEARCH_IGNORED_FILE_SUFFIXES[@]}"; do
+    if [[ "${file_name}" == *"${ignored_suffix}" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 run_index_pass() {
   local indexed_any=false
   local refresh_started_at
@@ -155,10 +220,21 @@ run_index_pass() {
 
 count_repo_files() {
   local repo_path="$1"
+  local file_count=0
+  local file_path
+  local relative_path
 
-  find "${repo_path}" \
-    \( -path "*/.git" -o -path "*/node_modules" -o -path "*/dist" -o -path "*/build" -o -path "*/coverage" \) -prune -o \
-    -type f -print0 | tr -cd '\0' | wc -c | tr -d '[:space:]'
+  while IFS= read -r -d '' file_path; do
+    relative_path="${file_path#${repo_path}/}"
+
+    if should_ignore_relative_path "${relative_path}"; then
+      continue
+    fi
+
+    file_count=$((file_count + 1))
+  done < <(find "${repo_path}" -type f -print0)
+
+  printf '%s' "${file_count}"
 }
 
 compute_repo_fingerprint() {
@@ -166,15 +242,16 @@ compute_repo_fingerprint() {
   local tmp_file
   tmp_file="$(mktemp)"
 
-  find "${repo_path}" \
-    \( -path "*/.git" -o -path "*/node_modules" -o -path "*/dist" -o -path "*/build" -o -path "*/coverage" \) -prune -o \
-    -type f -print0 |
-    sort -z |
-    while IFS= read -r -d '' file_path; do
-      local relative_path
-      relative_path="${file_path#${repo_path}/}"
-      printf '%s\t%s\n' "${relative_path}" "$(sha256sum "${file_path}" | awk '{print $1}')" >> "${tmp_file}"
-    done
+  while IFS= read -r -d '' file_path; do
+    local relative_path
+    relative_path="${file_path#${repo_path}/}"
+
+    if should_ignore_relative_path "${relative_path}"; then
+      continue
+    fi
+
+    printf '%s\t%s\n' "${relative_path}" "$(sha256sum "${file_path}" | awk '{print $1}')" >> "${tmp_file}"
+  done < <(find "${repo_path}" -type f -print0 | sort -z)
 
   if [[ ! -s "${tmp_file}" ]]; then
     rm -f "${tmp_file}"
@@ -190,14 +267,19 @@ compute_repo_fingerprint() {
 
 compute_aggregate_fingerprint() {
   local repo_fingerprint_file="$1"
+  local normalized_file
 
   if [[ ! -s "${repo_fingerprint_file}" ]]; then
     printf '%s' "empty"
     return
   fi
 
+  normalized_file="$(mktemp)"
+  sort "${repo_fingerprint_file}" > "${normalized_file}"
+
   local aggregate_fingerprint
-  aggregate_fingerprint="$(sha256sum "${repo_fingerprint_file}" | awk '{print $1}')"
+  aggregate_fingerprint="$(sha256sum "${normalized_file}" | awk '{print $1}')"
+  rm -f "${normalized_file}"
   printf '%s' "${aggregate_fingerprint}"
 }
 
@@ -208,10 +290,13 @@ build_search_state_ready_payload() {
   local aggregate_fingerprint
   local payload_file
   local payload
+  local sorted_repo_fingerprint_file
   local is_first=true
 
   aggregate_fingerprint="$(compute_aggregate_fingerprint "${repo_fingerprint_file}")"
   payload_file="$(create_temp_file_in_directory "${COORDINATION_ROOT}" "zoekt-refresh-payload")"
+  sorted_repo_fingerprint_file="$(create_temp_file_in_directory "${COORDINATION_ROOT}" "zoekt-repo-fingerprints.sorted")"
+  sort "${repo_fingerprint_file}" > "${sorted_repo_fingerprint_file}"
 
   {
     printf '{\n'
@@ -221,7 +306,7 @@ build_search_state_ready_payload() {
     printf '  "refreshedAt": "%s",\n' "$(json_escape "${refreshed_at}")"
     printf '  "aggregateFingerprint": "%s",\n' "$(json_escape "${aggregate_fingerprint}")"
     printf '  "repoFingerprints": [\n'
-    if [[ -s "${repo_fingerprint_file}" ]]; then
+    if [[ -s "${sorted_repo_fingerprint_file}" ]]; then
       while IFS=$'\t' read -r repo_id fingerprint file_count; do
         if [[ -z "${repo_id}" ]]; then
           continue
@@ -234,7 +319,7 @@ build_search_state_ready_payload() {
           "$(json_escape "${fingerprint}")" \
           "${file_count}"
         is_first=false
-      done < "${repo_fingerprint_file}"
+      done < "${sorted_repo_fingerprint_file}"
       printf '\n'
     fi
     printf '  ],\n'
@@ -243,6 +328,7 @@ build_search_state_ready_payload() {
   } > "${payload_file}"
 
   payload="$(cat "${payload_file}")"
+  rm -f "${sorted_repo_fingerprint_file}"
   rm -f "${payload_file}"
   printf '%s' "${payload}"
 }

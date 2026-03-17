@@ -383,6 +383,24 @@ zoekt-indexer -> coordination marker -> MCP search freshness reconciliation
    or stale until a shared Zoekt snapshot marker matches the current generation
    fingerprint.
 
+Canonical repository fingerprint contract for search freshness:
+
+- include first-level Git repositories directly under `./repos`
+- include repository files after normalizing relative paths to `/`
+- exclude ignored noise paths such as `.git`, `node_modules`, `dist`, `build`,
+  `coverage`, `.next`, `.turbo`, `.cache`, `out`, `storybook-static`,
+  `generated`, `.d.ts`, `*.generated.ts[x]`, and common temp/editor files
+- hash each included file as `SHA256(raw file bytes)`
+- sort file records lexicographically by normalized relative path
+- compute the repo fingerprint as `SHA256` over LF-terminated
+  `path<TAB>contentHash` lines
+- sort repo fingerprints lexicographically by `repoId`
+- compute the aggregate fingerprint as `SHA256` over LF-terminated
+  `repoId<TAB>repoFingerprint<TAB>fileCount` lines
+
+This fingerprint is deterministic, content-based, process-stable, and does not
+depend on filesystem iteration order or timestamps.
+
 ### Retrieval And Analysis
 
 ```text

@@ -1,8 +1,7 @@
-import { createHash } from 'node:crypto';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-
-import { listRepositories } from '../repositories.js';
+import {
+  buildSearchRepoFingerprints,
+  compareSearchFingerprintSets,
+} from './search-fingerprint.js';
 import {
   loadCurrentGenerationState,
   loadSearchRefreshRequestResult,
@@ -15,86 +14,9 @@ import type {
   SearchFreshnessState,
   SearchRefreshRequest,
   SearchRefreshSnapshot,
-  SearchRepoFingerprint,
 } from './types.js';
 
 const SEARCH_COORDINATION_SCHEMA_VERSION = 1;
-const SEARCH_IGNORED_DIRECTORIES = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage']);
-
-function normalizeRelativePath(filePath: string): string {
-  return filePath.split(path.sep).join('/');
-}
-
-async function hashFileContent(absolutePath: string): Promise<string> {
-  const buffer = await fs.readFile(absolutePath);
-  return createHash('sha256').update(buffer).digest('hex');
-}
-
-async function collectSearchFingerprintEntries(
-  repositoryRoot: string,
-  currentDirectory: string = repositoryRoot,
-): Promise<Array<{ filePath: string; contentHash: string }>> {
-  const entries = await fs.readdir(currentDirectory, { withFileTypes: true });
-  const files: Array<{ filePath: string; contentHash: string }> = [];
-
-  for (const entry of entries) {
-    const entryPath = path.join(currentDirectory, entry.name);
-
-    if (entry.isDirectory()) {
-      if (SEARCH_IGNORED_DIRECTORIES.has(entry.name)) {
-        continue;
-      }
-
-      files.push(...(await collectSearchFingerprintEntries(repositoryRoot, entryPath)));
-      continue;
-    }
-
-    if (!entry.isFile()) {
-      continue;
-    }
-
-    files.push({
-      filePath: normalizeRelativePath(path.relative(repositoryRoot, entryPath)),
-      contentHash: await hashFileContent(entryPath),
-    });
-  }
-
-  return files;
-}
-
-function createFingerprint(value: string[]): string {
-  return createHash('sha256').update(value.join('\n')).digest('hex');
-}
-
-export async function buildSearchRepoFingerprints(reposRoot: string): Promise<{
-  aggregateFingerprint: string;
-  repoFingerprints: SearchRepoFingerprint[];
-}> {
-  const repositories = await listRepositories(reposRoot);
-  const repoFingerprints: SearchRepoFingerprint[] = [];
-
-  for (const repository of repositories) {
-    const fileEntries = await collectSearchFingerprintEntries(repository.rootPath);
-    fileEntries.sort((left, right) => left.filePath.localeCompare(right.filePath));
-    const fingerprint = createFingerprint(
-      fileEntries.map((entry) => `${entry.filePath}\t${entry.contentHash}`),
-    );
-    repoFingerprints.push({
-      repoId: repository.id,
-      fingerprint,
-      fileCount: fileEntries.length,
-    });
-  }
-
-  repoFingerprints.sort((left, right) => left.repoId.localeCompare(right.repoId));
-
-  return {
-    aggregateFingerprint: createFingerprint(
-      repoFingerprints.map((entry) => `${entry.repoId}\t${entry.fingerprint}\t${entry.fileCount}`),
-    ),
-    repoFingerprints,
-  };
-}
 
 export function createSearchRefreshRequest(
   generationState: Pick<IndexGenerationState, 'generationId' | 'createdAt' | 'search'>,
@@ -212,15 +134,6 @@ export function deriveSearchFreshness(
     };
   }
 
-  if (snapshot?.status === 'ready' && snapshot.aggregateFingerprint === base.aggregateFingerprint) {
-    return {
-      ...base,
-      status: 'ready',
-      details: 'Zoekt snapshot fingerprint matches the current MCP generation',
-      error: undefined,
-    };
-  }
-
   if (
     snapshot?.status === 'failed' &&
     relevantRequest?.requestedAt &&
@@ -234,12 +147,33 @@ export function deriveSearchFreshness(
     };
   }
 
-  if (snapshot?.status === 'ready' && snapshot.aggregateFingerprint && relevantRequest?.requestedAt) {
+  if (snapshot?.status === 'ready') {
+    const comparison = compareSearchFingerprintSets(
+      base.repoFingerprints,
+      snapshot.repoFingerprints,
+      base.aggregateFingerprint,
+      snapshot.aggregateFingerprint,
+    );
+
+    if (comparison.equivalent) {
+      return {
+        ...base,
+        status: 'ready',
+        details:
+          comparison.issues.length === 0
+            ? 'Zoekt snapshot fingerprint matches the current MCP generation'
+            : `Zoekt snapshot fingerprint matches the current MCP generation after normalization. ${comparison.summary}`,
+        error: undefined,
+        comparison,
+      };
+    }
+
     return {
       ...base,
       status: 'stale',
-      details: 'Zoekt has a known snapshot, but it does not match the current MCP generation fingerprint',
+      details: `Zoekt has a known snapshot, but it does not match the current MCP generation fingerprint. ${comparison.summary}`,
       error: undefined,
+      comparison,
     };
   }
 
@@ -281,6 +215,12 @@ export async function reconcileCurrentGenerationSearchFreshness(
         `[search-freshness] coordination-marker status=${result.status} path=${result.path} reason=${result.reason} consequence=${freshness.status}`,
       );
     }
+  }
+
+  if (freshness.comparison && !freshness.comparison.equivalent) {
+    logger?.warn(
+      `[search-freshness] fingerprint-mismatch generation=${generationState.generationId} summary=${freshness.comparison.summary}`,
+    );
   }
 
   if (previousSerialized !== nextSerialized) {

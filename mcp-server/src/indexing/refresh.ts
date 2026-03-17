@@ -42,11 +42,11 @@ import {
   saveSearchRefreshRequest,
 } from './generation-store.js';
 import {
-  buildSearchRepoFingerprints,
   createSearchRefreshRequest,
   deriveSearchFreshness,
   getCurrentSearchFreshness,
 } from './search-freshness.js';
+import { buildSearchRepoFingerprints } from './search-fingerprint.js';
 import { runSingleFlightRefresh, type RefreshCoordinatorTestHooks } from './refresh-coordinator.js';
 import type {
   FileFingerprintManifestEntry,

@@ -173,6 +173,27 @@ export interface SearchRepoFingerprint {
   fileCount: number;
 }
 
+export interface SearchFingerprintComparisonIssue {
+  severity: 'warning' | 'error';
+  code:
+    | 'missing-repo'
+    | 'unexpected-repo'
+    | 'file-count-mismatch'
+    | 'repo-fingerprint-mismatch'
+    | 'aggregate-mismatch';
+  message: string;
+}
+
+export interface SearchFingerprintComparison {
+  equivalent: boolean;
+  expectedAggregateFingerprint?: string;
+  actualAggregateFingerprint?: string;
+  expectedRepoFingerprints: SearchRepoFingerprint[];
+  actualRepoFingerprints: SearchRepoFingerprint[];
+  issues: SearchFingerprintComparisonIssue[];
+  summary: string;
+}
+
 export interface SearchFreshnessState {
   status: SearchFreshnessStatus;
   requestedAt?: string;
@@ -183,6 +204,7 @@ export interface SearchFreshnessState {
   details?: string;
   error?: string;
   snapshotId?: string;
+  comparison?: SearchFingerprintComparison;
 }
 
 export interface PatternIntegrityIssue {

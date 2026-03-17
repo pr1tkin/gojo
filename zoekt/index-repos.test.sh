@@ -58,6 +58,11 @@ repo-b	bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb	7
 EOF
 }
 
+create_test_repo() {
+  local repo_path="$1"
+  mkdir -p "${repo_path}/.git"
+}
+
 test_valid_write() {
   local repo_fingerprints_file
   create_test_environment "valid-write"
@@ -167,10 +172,44 @@ for (const entry of data.repoFingerprints) {
 EOF
 }
 
+test_repo_fingerprint_is_order_independent_and_ignores_noise() {
+  local repo_root_a
+  local repo_root_b
+  local fingerprint_a
+  local fingerprint_b
+  local file_count
+
+  create_test_environment "fingerprint-contract"
+  repo_root_a="${TEST_ROOT}/fingerprint-a"
+  repo_root_b="${TEST_ROOT}/fingerprint-b"
+  create_test_repo "${repo_root_a}"
+  create_test_repo "${repo_root_b}"
+
+  mkdir -p "${repo_root_a}/src" "${repo_root_b}/src"
+  printf 'export const b = 2;\n' > "${repo_root_a}/src/b.ts"
+  printf 'export const a = 1;\n' > "${repo_root_a}/src/a.ts"
+  printf 'export const a = 1;\n' > "${repo_root_b}/src/a.ts"
+  printf 'export const b = 2;\n' > "${repo_root_b}/src/b.ts"
+
+  mkdir -p "${repo_root_a}/dist" "${repo_root_a}/generated" "${repo_root_a}/types"
+  printf 'compiled' > "${repo_root_a}/dist/bundle.js"
+  printf 'generated' > "${repo_root_a}/generated/api.generated.ts"
+  printf 'declare const x: string;\n' > "${repo_root_a}/types/index.d.ts"
+  printf 'scratch' > "${repo_root_a}/src/a.ts.tmp"
+
+  fingerprint_a="$(compute_repo_fingerprint "${repo_root_a}")"
+  fingerprint_b="$(compute_repo_fingerprint "${repo_root_b}")"
+  file_count="$(count_repo_files "${repo_root_a}")"
+
+  assert_eq "${fingerprint_b}" "${fingerprint_a}" "repo fingerprint should ignore file ordering and excluded noise"
+  assert_eq "2" "${file_count}" "ignored files must not affect repo file count"
+}
+
 test_valid_write
 test_atomicity_preserves_previous_marker_on_failure
 test_concurrent_writes_remain_valid
 test_serialization_failure_does_not_overwrite_marker
 test_schema_integrity
+test_repo_fingerprint_is_order_independent_and_ignores_noise
 
 echo "zoekt/index-repos.test.sh: PASS"
