@@ -394,7 +394,7 @@ describe.sequential('refreshIndexes', () => {
       expect.arrayContaining([
         expect.objectContaining({
           key: 'app-repo/src/Parent.tsx',
-          signals: expect.arrayContaining(['contentChanged', 'uiPropsChanged']),
+          signals: expect.arrayContaining(['contentChanged', 'uiPropsChanged', 'uiStructureChanged']),
           impactHints: expect.arrayContaining(['requiresUiRefresh']),
         }),
       ]),
@@ -407,6 +407,139 @@ describe.sequential('refreshIndexes', () => {
           usage.propName === 'tone',
       ),
     ).toBe(true);
+  });
+
+  it('classifies wrapper and layout changes as uiStructureChanged', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Child.tsx',
+      'export function Child() { return <span>child</span>; }',
+    );
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Parent.tsx',
+      [
+        "import { Child } from './Child';",
+        '',
+        'export function Parent() {',
+        '  return <section><Child /></section>;',
+        '}',
+      ].join('\n'),
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Parent.tsx',
+      [
+        "import { Child } from './Child';",
+        '',
+        'export function Parent() {',
+        '  return <main><Child /></main>;',
+        '}',
+      ].join('\n'),
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+
+    expect(result.diagnostics.changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/Parent.tsx',
+        signals: expect.arrayContaining(['contentChanged', 'uiStructureChanged']),
+        impactHints: expect.arrayContaining(['requiresUiRefresh']),
+      }),
+    ]);
+  });
+
+  it('classifies conditional rendering changes as uiRenderingChanged', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Panel.tsx',
+      [
+        'export function Panel(props: { ready: boolean }) {',
+        '  return <section>ready</section>;',
+        '}',
+      ].join('\n'),
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Panel.tsx',
+      [
+        'export function Panel(props: { ready: boolean }) {',
+        '  return <section>{props.ready ? <strong>ready</strong> : null}</section>;',
+        '}',
+      ].join('\n'),
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+
+    expect(result.diagnostics.changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/Panel.tsx',
+        signals: expect.arrayContaining(['contentChanged', 'uiRenderingChanged', 'patternRelevantChanged']),
+        impactHints: expect.arrayContaining(['requiresUiRefresh', 'requiresPatternRefresh']),
+      }),
+    ]);
+  });
+
+  it('classifies simple JSX styling changes as uiStylingChanged', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Card.tsx',
+      [
+        'export function Card() {',
+        '  return <section className="before">card</section>;',
+        '}',
+      ].join('\n'),
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/Card.tsx',
+      [
+        'export function Card() {',
+        '  return <section style={{ color: "red" }}>card</section>;',
+        '}',
+      ].join('\n'),
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+
+    expect(result.diagnostics.changeSummary.files).toEqual([
+      expect.objectContaining({
+        key: 'app-repo/src/Card.tsx',
+        signals: expect.arrayContaining(['contentChanged', 'uiStylingChanged']),
+        impactHints: expect.arrayContaining(['requiresUiRefresh']),
+      }),
+    ]);
   });
 
   it('detects pattern-relevant structural changes for derived pattern candidates', async () => {
@@ -490,6 +623,35 @@ describe.sequential('refreshIndexes', () => {
       }),
     ]);
     expect(changeSummary.overview.highRiskFiles).toBe(1);
+  });
+
+  it('does not attach UI-specific signals to non-UI file changes', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/math.ts',
+      'export function sum(a: number, b: number): number { return a + b; }',
+    );
+
+    await refreshIndexes(reposRoot, { logger: silentLogger });
+    await writeRepositoryFile(
+      reposRoot,
+      'app-repo',
+      'src/math.ts',
+      'export function subtract(a: number, b: number): number { return a - b; }',
+    );
+
+    const result = await refreshIndexes(reposRoot, { logger: silentLogger });
+    const file = result.diagnostics.changeSummary.files[0];
+
+    expect(file.key).toBe('app-repo/src/math.ts');
+    expect(file.signals).not.toEqual(expect.arrayContaining(['uiStructureChanged', 'uiPropsChanged', 'uiRenderingChanged', 'uiStylingChanged']));
   });
 
   it('persists change summaries into the published generation state and artifact set', async () => {

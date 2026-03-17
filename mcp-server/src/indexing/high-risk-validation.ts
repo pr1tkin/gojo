@@ -66,6 +66,12 @@ function findHighRiskTriggers(
     );
   }
 
+  if ((changeSummary.overview.signalCounts.uiRenderingChanged ?? 0) > 0) {
+    triggers.push(
+      `${changeSummary.overview.signalCounts.uiRenderingChanged ?? 0} file change(s) changed UI rendering semantics`,
+    );
+  }
+
   if (filesChanged >= largeScaleThreshold) {
     triggers.push(
       `${filesChanged} file(s) changed in a repository with ${current.counts.files} indexed files, which exceeds the large-scale validation threshold`,

@@ -54,6 +54,8 @@ export type RepositoryFileChangeSignal =
   | 'graphRelevantChanged'
   | 'uiStructureChanged'
   | 'uiPropsChanged'
+  | 'uiRenderingChanged'
+  | 'uiStylingChanged'
   | 'patternRelevantChanged'
   | 'likelyApiBoundaryChanged'
   | 'unknownStructuralChange';

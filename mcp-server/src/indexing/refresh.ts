@@ -26,6 +26,12 @@ import { getCurrentIndexHealth } from './health.js';
 import { evaluateHighRiskRefreshValidation } from './high-risk-validation.js';
 import { evaluatePatternIntegrity } from './pattern-integrity.js';
 import {
+  buildUiSemanticsIndex,
+  createEmptyUiSemanticsIndex,
+  getUiSemanticsArtifactFileName,
+  loadUiSemanticsIndexForGeneration,
+} from './ui-semantics.js';
+import {
   loadCurrentGenerationState,
   publishGeneration,
   saveGenerationArtifacts,
@@ -446,6 +452,9 @@ async function refreshIndexesUnlocked(
         generatedAt: '',
         propUsages: [],
       };
+  const previousUiSemantics = previousGeneration
+    ? (await loadUiSemanticsIndexForGeneration(previousGeneration.generationId)) ?? createEmptyUiSemanticsIndex()
+    : createEmptyUiSemanticsIndex();
   const deletedFileIds = new Set(
     previousManifest
       .filter((entry) => deletedKeys.has(entry.key))
@@ -477,6 +486,7 @@ async function refreshIndexesUnlocked(
   });
   const uiComposition = await buildUiCompositionIndex(reposRoot, mergedSymbolIndex);
   const uiProps = await buildUiPropSurfaceIndex(reposRoot, mergedSymbolIndex);
+  const uiSemantics = await buildUiSemanticsIndex(reposRoot);
   const mutatedArtifacts =
     (await options.testHooks?.mutateDerivedArtifacts?.({
       reposRoot: path.resolve(reposRoot),
@@ -503,6 +513,8 @@ async function refreshIndexesUnlocked(
     currentUiComposition: finalUiComposition,
     previousUiProps,
     currentUiProps: finalUiProps,
+    previousUiSemantics,
+    currentUiSemantics: uiSemantics,
     generatedAt: createdAt,
   });
   const patternIntegrity = evaluatePatternIntegrity({
@@ -632,6 +644,7 @@ async function refreshIndexesUnlocked(
       'code-graph.json': finalGraph,
       'ui-composition.json': finalUiComposition,
       'ui-props.json': finalUiProps,
+      [getUiSemanticsArtifactFileName()]: uiSemantics,
       'pattern-candidates.json': finalPatternIndex,
       'change-summary.json': changeSummary,
     },

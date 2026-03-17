@@ -4,6 +4,7 @@ import type { PatternCandidate, PatternIndex } from '../patterns/types.js';
 import type { FileRelation, SymbolIndex } from '../symbol-index/types.js';
 import type { UiCompositionEdge, UiCompositionIndex } from '../ui-composition/types.js';
 import type { UiPropSurfaceIndex, UiPropUsage } from '../ui-props/types.js';
+import type { UiSemanticsIndex } from './ui-semantics.js';
 import type {
   FileFingerprintManifestEntry,
   GenerationChangeSummary,
@@ -28,6 +29,8 @@ interface ClassifyRepositoryChangesOptions {
   currentUiComposition: UiCompositionIndex;
   previousUiProps: UiPropSurfaceIndex;
   currentUiProps: UiPropSurfaceIndex;
+  previousUiSemantics: UiSemanticsIndex;
+  currentUiSemantics: UiSemanticsIndex;
   generatedAt: string;
 }
 
@@ -136,6 +139,48 @@ function normalizeUiProps(propUsages: UiPropUsage[], filePath: string): string[]
   );
 }
 
+function normalizeUiSemantics(index: UiSemanticsIndex, repoId: string, filePath: string): {
+  wrapperElements: string[];
+  stylingSignals: string[];
+} {
+  const summary = index.files[`${repoId}/${filePath}`];
+
+  return {
+    wrapperElements: summary?.wrapperElements ?? [],
+    stylingSignals: summary?.stylingSignals ?? [],
+  };
+}
+
+function normalizeUiRenderingSignals(patterns: PatternCandidate[], fileId: string | undefined): string[] {
+  if (!fileId) {
+    return [];
+  }
+
+  return toSortedUnique(
+    patterns
+      .filter((pattern) => pattern.fileId === fileId)
+      .flatMap((pattern) => {
+        const matches: string[] = [];
+
+        if (pattern.kind === 'conditional-rendering') {
+          matches.push('conditional-render');
+        }
+
+        if (pattern.kind === 'list-rendering') {
+          matches.push('list-rendering');
+        }
+
+        for (const signal of pattern.fingerprint.uiSignals ?? []) {
+          if (signal === 'conditional-render' || signal === 'map-rendering') {
+            matches.push(signal);
+          }
+        }
+
+        return matches;
+      }),
+  );
+}
+
 function normalizePatterns(patterns: PatternCandidate[], fileId: string | undefined): string[] {
   if (!fileId) {
     return [];
@@ -208,6 +253,7 @@ function classifyAddedOrDeletedFile(options: {
   patternIndex: PatternIndex;
   uiComposition: UiCompositionIndex;
   uiProps: UiPropSurfaceIndex;
+  uiSemantics: UiSemanticsIndex;
 }): RepositoryFileChangeRecord {
   const record = createBaseRecord(
     options.key,
@@ -222,6 +268,7 @@ function classifyAddedOrDeletedFile(options: {
   const patternSurface = normalizePatterns(options.patternIndex.patterns, fileId);
   const uiEdges = normalizeUiEdges(options.uiComposition.edges, options.filePath);
   const uiProps = normalizeUiProps(options.uiProps.propUsages, options.filePath);
+  const uiSemantics = normalizeUiSemantics(options.uiSemantics, options.repoId, options.filePath);
 
   if (options.changeKind === 'added') {
     addSignal(signals, 'contentChanged');
@@ -250,6 +297,14 @@ function classifyAddedOrDeletedFile(options: {
     addSignal(signals, 'uiPropsChanged');
   }
 
+  if (uiSemantics.wrapperElements.length > 0) {
+    addSignal(signals, 'uiStructureChanged');
+  }
+
+  if (uiSemantics.stylingSignals.length > 0) {
+    addSignal(signals, 'uiStylingChanged');
+  }
+
   if (patternSurface.length > 0) {
     addSignal(signals, 'patternRelevantChanged');
   }
@@ -265,7 +320,12 @@ function classifyAddedOrDeletedFile(options: {
   addImpactHint(hints, 'requiresPatternRefresh');
   addImpactHint(hints, 'mayAffectSearchFreshness');
 
-  if (record.language === 'tsx' || signals.has('uiStructureChanged') || signals.has('uiPropsChanged')) {
+  if (
+    record.language === 'tsx' ||
+    signals.has('uiStructureChanged') ||
+    signals.has('uiPropsChanged') ||
+    signals.has('uiStylingChanged')
+  ) {
     addImpactHint(hints, 'requiresUiRefresh');
   }
 
@@ -294,6 +354,8 @@ function classifyModifiedFile(options: {
   currentUiComposition: UiCompositionIndex;
   previousUiProps: UiPropSurfaceIndex;
   currentUiProps: UiPropSurfaceIndex;
+  previousUiSemantics: UiSemanticsIndex;
+  currentUiSemantics: UiSemanticsIndex;
 }): RepositoryFileChangeRecord {
   const previousRelation = getFileRelation(options.previousSymbolIndex, options.repoId, options.filePath);
   const currentRelation = getFileRelation(options.currentSymbolIndex, options.repoId, options.filePath);
@@ -321,6 +383,24 @@ function classifyModifiedFile(options: {
   const currentUiProps = normalizeUiProps(options.currentUiProps.propUsages, options.filePath);
   const previousPatterns = normalizePatterns(options.previousPatternIndex.patterns, previousRelation?.fileId);
   const currentPatterns = normalizePatterns(options.currentPatternIndex.patterns, currentRelation?.fileId);
+  const previousUiSemantics = normalizeUiSemantics(
+    options.previousUiSemantics,
+    options.repoId,
+    options.filePath,
+  );
+  const currentUiSemantics = normalizeUiSemantics(
+    options.currentUiSemantics,
+    options.repoId,
+    options.filePath,
+  );
+  const previousUiRendering = normalizeUiRenderingSignals(
+    options.previousPatternIndex.patterns,
+    previousRelation?.fileId,
+  );
+  const currentUiRendering = normalizeUiRenderingSignals(
+    options.currentPatternIndex.patterns,
+    currentRelation?.fileId,
+  );
 
   if (!areStringArraysEqual(previousSymbols, currentSymbols)) {
     addSignal(signals, 'symbolSurfaceChanged');
@@ -343,6 +423,18 @@ function classifyModifiedFile(options: {
 
   if (!areStringArraysEqual(previousUiProps, currentUiProps)) {
     addSignal(signals, 'uiPropsChanged');
+  }
+
+  if (!areStringArraysEqual(previousUiSemantics.wrapperElements, currentUiSemantics.wrapperElements)) {
+    addSignal(signals, 'uiStructureChanged');
+  }
+
+  if (!areStringArraysEqual(previousUiRendering, currentUiRendering)) {
+    addSignal(signals, 'uiRenderingChanged');
+  }
+
+  if (!areStringArraysEqual(previousUiSemantics.stylingSignals, currentUiSemantics.stylingSignals)) {
+    addSignal(signals, 'uiStylingChanged');
   }
 
   if (!areStringArraysEqual(previousPatterns, currentPatterns)) {
@@ -381,6 +473,8 @@ function classifyModifiedFile(options: {
   if (
     signals.has('uiStructureChanged') ||
     signals.has('uiPropsChanged') ||
+    signals.has('uiRenderingChanged') ||
+    signals.has('uiStylingChanged') ||
     (signals.has('unknownStructuralChange') && record.language === 'tsx')
   ) {
     addImpactHint(hints, 'requiresUiRefresh');
@@ -459,6 +553,7 @@ export function classifyRepositoryChanges(
         patternIndex: options.currentPatternIndex,
         uiComposition: options.currentUiComposition,
         uiProps: options.currentUiProps,
+        uiSemantics: options.currentUiSemantics,
       }),
     );
   }
@@ -486,6 +581,8 @@ export function classifyRepositoryChanges(
         currentUiComposition: options.currentUiComposition,
         previousUiProps: options.previousUiProps,
         currentUiProps: options.currentUiProps,
+        previousUiSemantics: options.previousUiSemantics,
+        currentUiSemantics: options.currentUiSemantics,
       }),
     );
   }
@@ -507,6 +604,7 @@ export function classifyRepositoryChanges(
         patternIndex: options.previousPatternIndex,
         uiComposition: options.previousUiComposition,
         uiProps: options.previousUiProps,
+        uiSemantics: options.previousUiSemantics,
       }),
     );
   }
