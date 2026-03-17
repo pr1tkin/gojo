@@ -1,4 +1,5 @@
 export type IndexGenerationStatus = 'ready';
+export type SearchFreshnessStatus = 'pending' | 'ready' | 'stale' | 'failed' | 'unknown';
 
 export interface IndexedRepositoryDescriptor {
   repoId: string;
@@ -48,6 +49,24 @@ export interface IndexGenerationCleanupSummary {
   deletedPatternEntriesRemoved: number;
 }
 
+export interface SearchRepoFingerprint {
+  repoId: string;
+  fingerprint: string;
+  fileCount: number;
+}
+
+export interface SearchFreshnessState {
+  status: SearchFreshnessStatus;
+  requestedAt?: string;
+  refreshedAt?: string;
+  aggregateFingerprint: string;
+  repoFingerprints: SearchRepoFingerprint[];
+  coordinationMode: 'shared-marker';
+  details?: string;
+  error?: string;
+  snapshotId?: string;
+}
+
 export interface IndexGenerationState {
   schemaVersion: number;
   generationId: string;
@@ -64,6 +83,7 @@ export interface IndexGenerationState {
   counts: IndexGenerationCounts;
   rebuild: IndexGenerationRebuildSummary;
   cleanup: IndexGenerationCleanupSummary;
+  search: SearchFreshnessState;
   warnings: string[];
   errors: string[];
 }
@@ -81,7 +101,26 @@ export interface IndexRefreshDiagnostics {
   counts: IndexGenerationCounts;
   rebuild: IndexGenerationRebuildSummary;
   cleanup: IndexGenerationCleanupSummary;
+  search: SearchFreshnessState;
   warnings: string[];
   status: 'no-op' | 'committed';
 }
 
+export interface SearchRefreshRequest {
+  schemaVersion: number;
+  generationId: string;
+  requestedAt: string;
+  aggregateFingerprint: string;
+  repoFingerprints: SearchRepoFingerprint[];
+}
+
+export interface SearchRefreshSnapshot {
+  schemaVersion: number;
+  snapshotId: string;
+  status: 'ready' | 'failed';
+  refreshedAt: string;
+  aggregateFingerprint?: string;
+  repoFingerprints: SearchRepoFingerprint[];
+  details?: string;
+  error?: string;
+}

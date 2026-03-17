@@ -21,7 +21,14 @@ import {
   loadCurrentGenerationState,
   publishGeneration,
   saveGenerationArtifacts,
+  saveSearchRefreshRequest,
 } from './generation-store.js';
+import {
+  buildSearchRepoFingerprints,
+  createSearchRefreshRequest,
+  deriveSearchFreshness,
+  getCurrentSearchFreshness,
+} from './search-freshness.js';
 import type {
   FileFingerprintManifestEntry,
   IndexGenerationCleanupSummary,
@@ -340,10 +347,12 @@ export async function refreshIndexes(
   const previousGeneration = await loadCurrentGenerationState();
   const previousManifest = previousGeneration?.manifest ?? [];
   const { repositories, manifest } = await scanRepositoryManifest(reposRoot);
+  const searchFingerprints = await buildSearchRepoFingerprints(reposRoot);
   const delta = diffManifest(previousManifest, manifest);
 
   if (!hasManifestChanges(delta) && previousGeneration) {
     const currentSymbolIndex = await loadSymbolIndex();
+    const search = (await getCurrentSearchFreshness(logger)) ?? previousGeneration.search;
     const diagnostics: IndexRefreshDiagnostics = {
       generationId: previousGeneration.generationId,
       createdAt: previousGeneration.createdAt,
@@ -351,6 +360,7 @@ export async function refreshIndexes(
       counts: previousGeneration.counts,
       rebuild: previousGeneration.rebuild,
       cleanup: previousGeneration.cleanup,
+      search,
       warnings: previousGeneration.warnings,
       status: 'no-op',
     };
@@ -426,6 +436,32 @@ export async function refreshIndexes(
     uiCompositionMode: 'full',
     uiPropsMode: 'full',
   };
+  const searchRequest = createSearchRefreshRequest({
+    generationId,
+    createdAt,
+    search: {
+      status: 'pending',
+      requestedAt: createdAt,
+      aggregateFingerprint: searchFingerprints.aggregateFingerprint,
+      repoFingerprints: searchFingerprints.repoFingerprints,
+      coordinationMode: 'shared-marker',
+    },
+  });
+  const search = deriveSearchFreshness(
+    {
+      generationId,
+      createdAt,
+      search: {
+        status: 'pending',
+        requestedAt: createdAt,
+        aggregateFingerprint: searchFingerprints.aggregateFingerprint,
+        repoFingerprints: searchFingerprints.repoFingerprints,
+        coordinationMode: 'shared-marker',
+      },
+    },
+    searchRequest,
+    null,
+  );
   const generationState: IndexGenerationState = {
     schemaVersion: INDEX_GENERATION_STATE_SCHEMA_VERSION,
     generationId,
@@ -442,6 +478,7 @@ export async function refreshIndexes(
     counts,
     rebuild,
     cleanup,
+    search,
     warnings,
     errors: [],
   };
@@ -462,6 +499,10 @@ export async function refreshIndexes(
     throw new Error('Simulated refresh failure before publish.');
   }
 
+  await saveSearchRefreshRequest(searchRequest);
+  logger.info(
+    `[search-freshness] request generation=${generationId} status=${generationState.search.status} fingerprint=${generationState.search.aggregateFingerprint}`,
+  );
   await publishGeneration(generationId, createdAt);
 
   const diagnostics: IndexRefreshDiagnostics = {
@@ -471,6 +512,7 @@ export async function refreshIndexes(
     counts,
     rebuild,
     cleanup,
+    search: generationState.search,
     warnings,
     status: 'committed',
   };

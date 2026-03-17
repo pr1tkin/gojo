@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
-const { searchZoektMock, formatSearchResultsMock } = vi.hoisted(() => ({
+const { searchZoektMock, formatSearchResultsMock, getCurrentSearchFreshnessMock } = vi.hoisted(() => ({
   searchZoektMock: vi.fn(),
   formatSearchResultsMock: vi.fn(),
+  getCurrentSearchFreshnessMock: vi.fn(),
 }));
 
 vi.mock('../../src/zoekt-client.js', () => ({
@@ -14,11 +15,24 @@ vi.mock('../../src/formatters.js', () => ({
   formatSearchResults: formatSearchResultsMock,
 }));
 
+vi.mock('../../src/indexing/search-freshness.js', () => ({
+  getCurrentSearchFreshness: getCurrentSearchFreshnessMock,
+}));
+
 import { runSearchCodeTool, searchCodeToolDefinition } from '../../src/tools/search-code.js';
 
 describe('search_code tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getCurrentSearchFreshnessMock.mockResolvedValue({
+      status: 'ready',
+      requestedAt: '2026-03-17T00:00:00.000Z',
+      refreshedAt: '2026-03-17T00:01:00.000Z',
+      aggregateFingerprint: 'fingerprint',
+      repoFingerprints: [],
+      coordinationMode: 'shared-marker',
+      details: 'up to date',
+    });
   });
 
   it('requires a non-empty query through the public schema', () => {
@@ -95,6 +109,14 @@ describe('search_code tool', () => {
                   snippet: 'hello',
                 },
               ],
+              searchFreshness: {
+                status: 'ready',
+                requestedAt: '2026-03-17T00:00:00.000Z',
+                refreshedAt: '2026-03-17T00:01:00.000Z',
+                details: 'up to date',
+                error: undefined,
+              },
+              warnings: [],
             },
             null,
             2,
@@ -148,6 +170,36 @@ describe('search_code tool', () => {
 
     expect(result.content[0].text).toContain('"matchCount": 0');
     expect(result.content[0].text).toContain('"matches": []');
+  });
+
+  it('adds a freshness warning when Zoekt is not known to be current', async () => {
+    getCurrentSearchFreshnessMock.mockResolvedValue({
+      status: 'stale',
+      requestedAt: '2026-03-17T00:00:00.000Z',
+      refreshedAt: '2026-03-17T00:01:00.000Z',
+      aggregateFingerprint: 'fingerprint',
+      repoFingerprints: [],
+      coordinationMode: 'shared-marker',
+      details: 'snapshot does not match current generation',
+    });
+    searchZoektMock.mockResolvedValue({
+      appliedQuery: 'missing',
+      response: {},
+    });
+    formatSearchResultsMock.mockReturnValue({
+      query: 'missing',
+      appliedQuery: 'missing',
+      matchCount: 0,
+      truncated: false,
+      matches: [],
+    });
+
+    const result = await runSearchCodeTool('http://zoekt:6070', {
+      query: 'missing',
+    });
+
+    expect(result.content[0].text).toContain('"status": "stale"');
+    expect(result.content[0].text).toContain('may not match the current MCP generation');
   });
 
   it('propagates lower-level Zoekt failures predictably', async () => {

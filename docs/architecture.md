@@ -83,6 +83,8 @@ It is used for:
 - low-level search-oriented MCP tools
 
 Zoekt does not parse syntax and does not own symbol or graph relationships.
+Its freshness relative to the published MCP generation is tracked explicitly
+rather than assumed.
 
 ### Structure Layer
 
@@ -112,6 +114,7 @@ Persisted files:
 - `ui-props.json`
 - `pattern-candidates.json`
 - `index-generation.json`
+- coordination files under `mcp-server/.data/coordination/` for Zoekt freshness
 
 ### Graph Layer
 
@@ -365,6 +368,8 @@ repos/ -> mcp-server indexing -> repository scan + manifest
                               -> delta detection
                               -> staged generation artifacts
                               -> current generation publish
+                              -> explicit search refresh request
+zoekt-indexer -> coordination marker -> MCP search freshness reconciliation
 ```
 
 1. Repositories are placed under `./repos`.
@@ -374,6 +379,9 @@ repos/ -> mcp-server indexing -> repository scan + manifest
    indexed repository set.
 5. A refresh only publishes a new current generation after all staged artifacts
    and generation metadata are written successfully.
+6. Search freshness remains separately coordinated: MCP marks Zoekt as pending
+   or stale until a shared Zoekt snapshot marker matches the current generation
+   fingerprint.
 
 ### Retrieval And Analysis
 
@@ -408,6 +416,9 @@ target resolution
   - first-level symlinks are supported if they resolve correctly
 - `zoekt-index`
   - Docker named volume shared by `zoekt` and `zoekt-indexer`
+- `refresh-coordination`
+  - Docker named volume shared by `zoekt-indexer` and `mcp-server`
+  - carries Zoekt refresh requests and the latest Zoekt freshness snapshot
 - `mcp-server/.data/`
   - persisted MCP-side artifacts including:
   - `current-generation.json`
@@ -417,6 +428,8 @@ target resolution
   - `generations/<generationId>/ui-composition.json`
   - `generations/<generationId>/ui-props.json`
   - `generations/<generationId>/pattern-candidates.json`
+  - `coordination/search-refresh-request.json`
+  - `coordination/zoekt-refresh-state.json`
 
 ## Compose Layout
 
@@ -426,9 +439,11 @@ The current `docker-compose.yml` defines:
   - serves Zoekt search over `6070`
 - `zoekt-indexer`
   - performs periodic indexing of `/repos`
+  - writes explicit Zoekt freshness markers for MCP-side coordination
 - `mcp-server`
   - runs the MCP server over stdio
   - mounts `/repos`
+  - reads the shared refresh coordination marker volume
   - depends on `zoekt`
 
 ## Boundaries

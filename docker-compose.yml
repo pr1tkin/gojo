@@ -18,6 +18,7 @@ services:
     volumes:
       - ./repos:/repos:ro
       - zoekt-index:/data/index
+      - refresh-coordination:/data/coordination
 
   mcp-server:
     build:
@@ -26,6 +27,8 @@ services:
       - zoekt
     volumes:
       - ./repos:/repos:ro
+      - refresh-coordination:/app/.data/coordination
 
 volumes:
   zoekt-index:
+  refresh-coordination:

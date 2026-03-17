@@ -85,6 +85,7 @@ Behavior:
 - refreshes periodically
 - uses `INDEX_INTERVAL_SECONDS`
 - default interval is `300`
+- writes the latest Zoekt freshness marker into the shared coordination volume
 
 Run a one-shot reindex:
 
@@ -98,11 +99,24 @@ The MCP server persists analysis artifacts under `mcp-server/.data/`.
 
 Key files:
 
-- `mcp-server/.data/symbol-index.json`
-- `mcp-server/.data/code-graph.json`
-- `mcp-server/.data/ui-composition.json`
-- `mcp-server/.data/ui-props.json`
-- `mcp-server/.data/pattern-candidates.json`
+- `mcp-server/.data/current-generation.json`
+- `mcp-server/.data/generations/<generationId>/index-generation.json`
+- `mcp-server/.data/generations/<generationId>/symbol-index.json`
+- `mcp-server/.data/generations/<generationId>/code-graph.json`
+- `mcp-server/.data/generations/<generationId>/ui-composition.json`
+- `mcp-server/.data/generations/<generationId>/ui-props.json`
+- `mcp-server/.data/generations/<generationId>/pattern-candidates.json`
+- `mcp-server/.data/coordination/search-refresh-request.json`
+- `mcp-server/.data/coordination/zoekt-refresh-state.json`
+
+Cross-index freshness note:
+
+- MCP artifact publication and Zoekt indexing are coordinated, not atomically
+  transacted
+- a newly published MCP generation can report Zoekt as `pending`, `stale`,
+  `failed`, or `unknown`
+- do not assume `search_code` reflects the same repository state as MCP-side
+  graph or symbol data unless search freshness is reported as ready
 
 Manual build sequence:
 
@@ -155,13 +169,15 @@ Typical sequence:
 1. Open `http://localhost:6070` and confirm Zoekt responds.
 2. Check `docker compose logs zoekt-indexer` for an indexing pass.
 3. Verify the MCP-side artifacts exist:
-   - `mcp-server/.data/symbol-index.json`
-   - `mcp-server/.data/code-graph.json`
+   - `mcp-server/.data/current-generation.json`
+   - `mcp-server/.data/generations/<generationId>/index-generation.json`
+   - `mcp-server/.data/coordination/zoekt-refresh-state.json`
 4. Verify `search_code` returns results from an indexed repository.
-5. Verify `explore_component` returns a structured result for a known symbol.
-6. Verify `analyze_symbol` returns a symbol role summary.
-7. Verify `collect_refactor_context` returns importer and imported-file context.
-8. Verify `plan_change` returns scope, risk, and ordered edit/review steps.
+5. Verify search freshness is reported honestly when Zoekt is still catching up.
+6. Verify `explore_component` returns a structured result for a known symbol.
+7. Verify `analyze_symbol` returns a symbol role summary.
+8. Verify `collect_refactor_context` returns importer and imported-file context.
+9. Verify `plan_change` returns scope, risk, and ordered edit/review steps.
 
 ## MCP Runtime Notes
 

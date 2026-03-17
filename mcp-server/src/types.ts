@@ -83,6 +83,14 @@ export interface SearchCodeResult {
   matchCount: number;
   truncated: boolean;
   matches: SearchMatch[];
+  searchFreshness?: {
+    status: 'pending' | 'ready' | 'stale' | 'failed' | 'unknown';
+    requestedAt?: string;
+    refreshedAt?: string;
+    details?: string;
+    error?: string;
+  };
+  warnings?: string[];
 }
 
 export type SymbolKind =
