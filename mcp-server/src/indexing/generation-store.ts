@@ -3,6 +3,7 @@ import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 
 import type {
+  CoordinationMarkerParseResult,
   CurrentGenerationPointer,
   IndexGenerationState,
   SearchFreshnessState,
@@ -244,6 +245,7 @@ export function resolveArtifactFilePathSync(fileName: string): string {
 function normalizeSearchRefreshRequest(value: unknown): SearchRefreshRequest | null {
   if (
     !isObject(value) ||
+    typeof value.schemaVersion !== 'number' ||
     typeof value.generationId !== 'string' ||
     typeof value.requestedAt !== 'string' ||
     typeof value.aggregateFingerprint !== 'string' ||
@@ -258,6 +260,7 @@ function normalizeSearchRefreshRequest(value: unknown): SearchRefreshRequest | n
 function normalizeSearchRefreshSnapshot(value: unknown): SearchRefreshSnapshot | null {
   if (
     !isObject(value) ||
+    typeof value.schemaVersion !== 'number' ||
     typeof value.snapshotId !== 'string' ||
     (value.status !== 'ready' && value.status !== 'failed') ||
     typeof value.refreshedAt !== 'string' ||
@@ -276,10 +279,74 @@ export async function saveSearchRefreshRequest(request: SearchRefreshRequest): P
   return filePath;
 }
 
-export async function loadSearchRefreshRequest(): Promise<SearchRefreshRequest | null> {
+function describeUnknownError(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message.trim();
+  }
+
+  return 'unknown coordination marker read failure';
+}
+
+function summarizeRawMarkerValue(value: unknown): string | undefined {
+  if (Array.isArray(value)) {
+    return `json-array(length=${value.length})`;
+  }
+
+  if (isObject(value)) {
+    const keys = Object.keys(value).sort((left, right) => left.localeCompare(right));
+    return `json-object(keys=${keys.slice(0, 8).join(',')}${keys.length > 8 ? ',…' : ''})`;
+  }
+
+  if (value === null) {
+    return 'json-null';
+  }
+
+  return `json-${typeof value}`;
+}
+
+async function loadCoordinationMarker<T>(
+  filePath: string,
+  normalizer: (value: unknown) => T | null,
+  expectedSchemaVersion: number,
+): Promise<CoordinationMarkerParseResult<T>> {
   try {
-    const content = await fsPromises.readFile(getSearchRefreshRequestFilePath(), 'utf8');
-    return normalizeSearchRefreshRequest(JSON.parse(content) as unknown);
+    const content = await fsPromises.readFile(filePath, 'utf8');
+    const parsed = JSON.parse(content) as unknown;
+    const normalized = normalizer(parsed);
+    const rawSummary = summarizeRawMarkerValue(parsed);
+
+    if (!normalized) {
+      return {
+        status: 'malformed',
+        path: filePath,
+        value: null,
+        reason: 'marker JSON does not match the required structure',
+        rawSummary,
+        trustDegraded: true,
+      };
+    }
+
+    const normalizedWithVersion = normalized as T & { schemaVersion: number };
+
+    if (normalizedWithVersion.schemaVersion !== expectedSchemaVersion) {
+      return {
+        status: 'incompatible-version',
+        path: filePath,
+        value: null,
+        reason: `unsupported schemaVersion ${normalizedWithVersion.schemaVersion}; expected ${expectedSchemaVersion}`,
+        rawSummary,
+        trustDegraded: true,
+      };
+    }
+
+    return {
+      status: 'ok',
+      path: filePath,
+      value: normalized,
+      reason: 'marker loaded successfully',
+      rawSummary,
+      trustDegraded: false,
+    };
   } catch (error) {
     const code =
       typeof error === 'object' && error !== null && 'code' in error
@@ -287,27 +354,67 @@ export async function loadSearchRefreshRequest(): Promise<SearchRefreshRequest |
         : '';
 
     if (code === 'ENOENT') {
-      return null;
+      return {
+        status: 'missing',
+        path: filePath,
+        value: null,
+        reason: 'marker file does not exist',
+        trustDegraded: true,
+      };
     }
 
-    throw error;
+    if (error instanceof SyntaxError) {
+      return {
+        status: 'malformed',
+        path: filePath,
+        value: null,
+        reason: error.message,
+        trustDegraded: true,
+      };
+    }
+
+    if (code === 'EACCES' || code === 'EPERM' || code === 'EBUSY' || code === 'EISDIR') {
+      return {
+        status: 'unreadable',
+        path: filePath,
+        value: null,
+        reason: code || describeUnknownError(error),
+        trustDegraded: true,
+      };
+    }
+
+    return {
+      status: 'unknown',
+      path: filePath,
+      value: null,
+      reason: code || describeUnknownError(error),
+      trustDegraded: true,
+    };
   }
 }
 
+export async function loadSearchRefreshRequestResult(): Promise<CoordinationMarkerParseResult<SearchRefreshRequest>> {
+  return loadCoordinationMarker(
+    getSearchRefreshRequestFilePath(),
+    normalizeSearchRefreshRequest,
+    1,
+  );
+}
+
+export async function loadSearchRefreshRequest(): Promise<SearchRefreshRequest | null> {
+  const result = await loadSearchRefreshRequestResult();
+  return result.status === 'ok' ? result.value : null;
+}
+
+export async function loadSearchRefreshSnapshotResult(): Promise<CoordinationMarkerParseResult<SearchRefreshSnapshot>> {
+  return loadCoordinationMarker(
+    getSearchRefreshSnapshotFilePath(),
+    normalizeSearchRefreshSnapshot,
+    1,
+  );
+}
+
 export async function loadSearchRefreshSnapshot(): Promise<SearchRefreshSnapshot | null> {
-  try {
-    const content = await fsPromises.readFile(getSearchRefreshSnapshotFilePath(), 'utf8');
-    return normalizeSearchRefreshSnapshot(JSON.parse(content) as unknown);
-  } catch (error) {
-    const code =
-      typeof error === 'object' && error !== null && 'code' in error
-        ? String((error as { code?: string }).code)
-        : '';
-
-    if (code === 'ENOENT') {
-      return null;
-    }
-
-    throw error;
-  }
+  const result = await loadSearchRefreshSnapshotResult();
+  return result.status === 'ok' ? result.value : null;
 }

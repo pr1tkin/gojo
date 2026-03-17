@@ -20,13 +20,14 @@ import {
   getGenerationStateFilePath,
   loadCurrentGenerationPointer,
   loadCurrentGenerationState,
-  loadSearchRefreshRequest,
-  loadSearchRefreshSnapshot,
+  loadSearchRefreshRequestResult,
+  loadSearchRefreshSnapshotResult,
   updateGenerationState,
 } from './generation-store.js';
 import { getCurrentIndexHealth } from './health.js';
 import { deriveSearchFreshness } from './search-freshness.js';
 import type {
+  CoordinationMarkerParseResult,
   ConsistencyCheckResult,
   ConsistencyCheckSeverity,
   ConsistencyRepairRecord,
@@ -175,12 +176,15 @@ async function readJsonFileStatus<T>(filePath: string): Promise<JsonFileStatus<T
   }
 }
 
-async function safelyLoad<T>(loader: () => Promise<T | null>): Promise<T | null> {
-  try {
-    return await loader();
-  } catch {
+function describeCoordinationMarkerIssue(
+  label: string,
+  result: CoordinationMarkerParseResult<unknown>,
+): string | null {
+  if (result.status === 'ok') {
     return null;
   }
+
+  return `${label} marker ${result.status} at ${result.path}: ${result.reason}`;
 }
 
 function createRepairRecord(
@@ -638,22 +642,23 @@ export async function runCurrentGenerationConsistencyMaintenance(
   const snapshotStatus = await readJsonFileStatus<Record<string, unknown>>(
     path.join(getCoordinationDirectory(), 'zoekt-refresh-state.json'),
   );
-  const request = await safelyLoad(() => loadSearchRefreshRequest());
-  const snapshot = await safelyLoad(() => loadSearchRefreshSnapshot());
-  let nextSearch = deriveSearchFreshness(generationState, request, snapshot);
-
-  if (requestStatus.malformed || snapshotStatus.malformed) {
-    nextSearch = {
-      ...nextSearch,
-      status: request ? 'pending' : 'unknown',
-      details: 'consistency maintenance downgraded search freshness because coordination state is malformed',
-      error: undefined,
-    };
-  }
+  const requestResult = await loadSearchRefreshRequestResult();
+  const snapshotResult = await loadSearchRefreshSnapshotResult();
+  let nextSearch = deriveSearchFreshness(generationState, requestResult.value, snapshotResult.value, {
+    requestResult,
+    snapshotResult,
+  });
+  const requestIssue = describeCoordinationMarkerIssue('search refresh request', requestResult);
+  const snapshotIssue = describeCoordinationMarkerIssue('Zoekt refresh snapshot', snapshotResult);
 
   const coordinationIssues = [
-    ...(requestStatus.malformed ? ['search refresh request marker is malformed'] : []),
-    ...(snapshotStatus.malformed ? ['Zoekt refresh snapshot marker is malformed'] : []),
+    ...(requestIssue ? [requestIssue] : []),
+    ...(snapshotIssue ? [snapshotIssue] : []),
+    ...(requestStatus.malformed && !requestIssue ? ['search refresh request marker is malformed'] : []),
+    ...(snapshotStatus.malformed && !snapshotIssue ? ['Zoekt refresh snapshot marker is malformed'] : []),
+    ...(requestIssue || snapshotIssue
+      ? [`search freshness consequence: downgraded to ${nextSearch.status}`]
+      : []),
     ...(generationState.search.status === 'ready' && nextSearch.status !== 'ready'
       ? [`published search freshness was downgraded from ready to ${nextSearch.status}`]
       : []),

@@ -1,5 +1,12 @@
 export type IndexGenerationStatus = 'ready';
 export type SearchFreshnessStatus = 'pending' | 'ready' | 'stale' | 'failed' | 'unknown';
+export type CoordinationMarkerParseStatus =
+  | 'ok'
+  | 'missing'
+  | 'malformed'
+  | 'incompatible-version'
+  | 'unreadable'
+  | 'unknown';
 export type ConsistencyCheckSeverity = 'info' | 'warning' | 'error';
 export type ConsistencyCheckStatus = 'passed' | 'warning' | 'failed' | 'repaired';
 export type ConsistencyScope = 'generation' | 'artifact' | 'coordination' | 'maintenance';
@@ -233,6 +240,15 @@ export interface SearchRefreshSnapshot {
   repoFingerprints: SearchRepoFingerprint[];
   details?: string;
   error?: string;
+}
+
+export interface CoordinationMarkerParseResult<T> {
+  status: CoordinationMarkerParseStatus;
+  path: string;
+  value: T | null;
+  reason: string;
+  rawSummary?: string;
+  trustDegraded: boolean;
 }
 
 export interface IndexHealthRecentActivity {

@@ -7,11 +7,12 @@ import {
   getGenerationArtifactFilePath,
   loadCurrentGenerationPointer,
   loadCurrentGenerationState,
-  loadSearchRefreshRequest,
-  loadSearchRefreshSnapshot,
+  loadSearchRefreshRequestResult,
+  loadSearchRefreshSnapshotResult,
 } from './generation-store.js';
 import { deriveSearchFreshness } from './search-freshness.js';
 import type {
+  CoordinationMarkerParseResult,
   ConsistencyRunReport,
   GenerationChangeSummary,
   IndexHealthSummary,
@@ -49,12 +50,15 @@ async function readJsonFileStatus<T>(filePath: string): Promise<JsonFileStatus<T
   }
 }
 
-async function safelyLoad<T>(loader: () => Promise<T | null>): Promise<T | null> {
-  try {
-    return await loader();
-  } catch {
+function describeCoordinationMarkerIssue(
+  label: string,
+  result: CoordinationMarkerParseResult<unknown>,
+): string | null {
+  if (result.status === 'ok') {
     return null;
   }
+
+  return `${label} coordination marker is ${result.status}: ${result.reason}`;
 }
 
 function sortStrings(values: Iterable<string>): string[] {
@@ -163,9 +167,12 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
   const snapshotStatus = await readJsonFileStatus<Record<string, unknown>>(
     `${getCoordinationDirectory()}/zoekt-refresh-state.json`,
   );
-  const request = await safelyLoad(() => loadSearchRefreshRequest());
-  const snapshot = await safelyLoad(() => loadSearchRefreshSnapshot());
-  const search = deriveSearchFreshness(state, request, snapshot);
+  const requestResult = await loadSearchRefreshRequestResult();
+  const snapshotResult = await loadSearchRefreshSnapshotResult();
+  const search = deriveSearchFreshness(state, requestResult.value, snapshotResult.value, {
+    requestResult,
+    snapshotResult,
+  });
   const reasons: string[] = [];
   const warnings: string[] = [...state.warnings];
   const errors: string[] = [...state.errors];
@@ -190,12 +197,29 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     errors.push('consistency report is malformed');
   }
 
-  if (requestStatus.malformed) {
+  const requestMarkerIssue = describeCoordinationMarkerIssue(
+    'search refresh request',
+    requestResult,
+  );
+  const snapshotMarkerIssue = describeCoordinationMarkerIssue(
+    'Zoekt refresh snapshot',
+    snapshotResult,
+  );
+
+  if (requestStatus.malformed && requestMarkerIssue === null) {
     warnings.push('search refresh request coordination marker is malformed');
   }
 
-  if (snapshotStatus.malformed) {
+  if (snapshotStatus.malformed && snapshotMarkerIssue === null) {
     warnings.push('Zoekt refresh snapshot coordination marker is malformed');
+  }
+
+  if (requestMarkerIssue) {
+    warnings.push(requestMarkerIssue);
+  }
+
+  if (snapshotMarkerIssue) {
+    warnings.push(snapshotMarkerIssue);
   }
 
   const changeSummary = changeSummaryStatus.value;

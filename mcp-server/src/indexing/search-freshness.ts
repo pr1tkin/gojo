@@ -5,11 +5,12 @@ import path from 'node:path';
 import { listRepositories } from '../repositories.js';
 import {
   loadCurrentGenerationState,
-  loadSearchRefreshRequest,
-  loadSearchRefreshSnapshot,
+  loadSearchRefreshRequestResult,
+  loadSearchRefreshSnapshotResult,
   updateGenerationState,
 } from './generation-store.js';
 import type {
+  CoordinationMarkerParseResult,
   IndexGenerationState,
   SearchFreshnessState,
   SearchRefreshRequest,
@@ -107,10 +108,65 @@ export function createSearchRefreshRequest(
   };
 }
 
+function summarizeCoordinationMarkerResult(
+  label: string,
+  result: CoordinationMarkerParseResult<unknown>,
+): string | null {
+  if (result.status === 'ok') {
+    return null;
+  }
+
+  return `${label} marker ${result.status} at ${result.path}: ${result.reason}`;
+}
+
+function getConservativeFreshnessForMarkerState(
+  generationState: Pick<IndexGenerationState, 'generationId' | 'createdAt' | 'search'>,
+  base: SearchFreshnessState,
+  requestResult: CoordinationMarkerParseResult<SearchRefreshRequest>,
+  snapshotResult: CoordinationMarkerParseResult<SearchRefreshSnapshot>,
+): SearchFreshnessState | null {
+  if (requestResult.status === 'ok' && snapshotResult.status === 'ok') {
+    return null;
+  }
+
+  const issues = [
+    summarizeCoordinationMarkerResult('search refresh request', requestResult),
+    summarizeCoordinationMarkerResult('Zoekt refresh snapshot', snapshotResult),
+  ].filter((value): value is string => value !== null);
+  const hasUsableRequest = requestResult.status === 'ok';
+  const hasUsableSnapshot = snapshotResult.status === 'ok';
+  const hasHistoricalRequest = Boolean(
+    requestResult.value?.requestedAt ?? generationState.search.requestedAt,
+  );
+  let status: SearchFreshnessState['status'] = 'unknown';
+
+  if (hasUsableSnapshot && snapshotResult.value?.status === 'failed') {
+    status = 'failed';
+  } else if (hasUsableRequest || hasHistoricalRequest) {
+    status = 'pending';
+  } else if (hasUsableSnapshot) {
+    status = 'stale';
+  }
+
+  return {
+    ...base,
+    status,
+    details: `search freshness downgraded because coordination markers are not trustworthy: ${issues.join('; ')}`,
+    error:
+      status === 'failed'
+        ? snapshotResult.value?.error ?? generationState.search.error
+        : undefined,
+  };
+}
+
 export function deriveSearchFreshness(
   generationState: Pick<IndexGenerationState, 'generationId' | 'createdAt' | 'search'>,
   request: SearchRefreshRequest | null,
   snapshot: SearchRefreshSnapshot | null,
+  markerState: {
+    requestResult?: CoordinationMarkerParseResult<SearchRefreshRequest>;
+    snapshotResult?: CoordinationMarkerParseResult<SearchRefreshSnapshot>;
+  } = {},
 ): SearchFreshnessState {
   const relevantRequest =
     request && request.generationId === generationState.generationId ? request : null;
@@ -125,6 +181,28 @@ export function deriveSearchFreshness(
     error: generationState.search.error,
     snapshotId: snapshot?.snapshotId,
   };
+  const conservativeMarkerState = getConservativeFreshnessForMarkerState(
+    generationState,
+    base,
+    markerState.requestResult ?? {
+      status: request ? 'ok' : 'missing',
+      path: 'coordination/search-refresh-request.json',
+      value: request,
+      reason: request ? 'marker loaded successfully' : 'marker file does not exist',
+      trustDegraded: !request,
+    },
+    markerState.snapshotResult ?? {
+      status: snapshot ? 'ok' : 'missing',
+      path: 'coordination/zoekt-refresh-state.json',
+      value: snapshot,
+      reason: snapshot ? 'marker loaded successfully' : 'marker file does not exist',
+      trustDegraded: !snapshot,
+    },
+  );
+
+  if (conservativeMarkerState) {
+    return conservativeMarkerState;
+  }
 
   if (!relevantRequest && !snapshot) {
     return {
@@ -186,11 +264,24 @@ export async function reconcileCurrentGenerationSearchFreshness(
     return null;
   }
 
-  const request = await loadSearchRefreshRequest();
-  const snapshot = await loadSearchRefreshSnapshot();
-  const freshness = deriveSearchFreshness(generationState, request, snapshot);
+  const requestResult = await loadSearchRefreshRequestResult();
+  const snapshotResult = await loadSearchRefreshSnapshotResult();
+  const request = requestResult.status === 'ok' ? requestResult.value : null;
+  const snapshot = snapshotResult.status === 'ok' ? snapshotResult.value : null;
+  const freshness = deriveSearchFreshness(generationState, request, snapshot, {
+    requestResult,
+    snapshotResult,
+  });
   const previousSerialized = JSON.stringify(generationState.search);
   const nextSerialized = JSON.stringify(freshness);
+
+  for (const result of [requestResult, snapshotResult]) {
+    if (result.status !== 'ok') {
+      logger?.warn(
+        `[search-freshness] coordination-marker status=${result.status} path=${result.path} reason=${result.reason} consequence=${freshness.status}`,
+      );
+    }
+  }
 
   if (previousSerialized !== nextSerialized) {
     const updatedState: IndexGenerationState = {

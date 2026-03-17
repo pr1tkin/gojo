@@ -84,7 +84,6 @@ describe.sequential('index health', () => {
     await ensureRepository(reposRoot, 'app-repo');
     await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export function alpha() { return "a"; }');
     await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
-    await runCurrentGenerationConsistencyMaintenance({ logger: silentLogger, applyRepairs: true });
     const state = await loadCurrentGenerationState();
 
     await writeSearchSnapshot(tempRoot, {
@@ -96,6 +95,7 @@ describe.sequential('index health', () => {
       repoFingerprints: state?.search.repoFingerprints,
       details: 'Zoekt indexing pass completed successfully.',
     });
+    await runCurrentGenerationConsistencyMaintenance({ logger: silentLogger, applyRepairs: true });
 
     const health = await getCurrentIndexHealth();
     const snapshot = await loadCurrentIndexHealthSnapshot();
@@ -120,7 +120,7 @@ describe.sequential('index health', () => {
 
     expect(health.trustState).toBe('stale-search');
     expect(health.search?.status).toBe('pending');
-    expect(health.reasons.join(' ')).toContain('newer than the last known Zoekt snapshot');
+    expect(health.reasons.join(' ')).toContain('coordination markers are not trustworthy');
   });
 
   it('reports inconsistent with explicit evidence when consistency checks fail', async () => {
