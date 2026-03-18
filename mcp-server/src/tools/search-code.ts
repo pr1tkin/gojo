@@ -1,5 +1,6 @@
 import { formatSearchResults } from '../formatters.js';
 import { getCurrentSearchFreshness } from '../indexing/search-freshness.js';
+import { stderrLogger } from '../logging.js';
 import { searchCodeInputSchema } from '../schemas.js';
 import type { SearchCodeInput } from '../types.js';
 import { searchZoekt } from '../zoekt-client.js';
@@ -17,7 +18,7 @@ export async function runSearchCodeTool(
   zoektBaseUrl: string,
   input: SearchCodeInput,
 ): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
-  const searchFreshness = await getCurrentSearchFreshness(console);
+  const searchFreshness = await getCurrentSearchFreshness(stderrLogger);
   const cappedLimit = input.limit ?? DEFAULT_SEARCH_LIMIT;
   const zoektResult = await searchZoekt(zoektBaseUrl, {
     query: input.query,
