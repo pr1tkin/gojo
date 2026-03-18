@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document explains how to run, inspect, and recover the current RepoRadar
+This document explains how to run, inspect, and recover the current gojo
 stack.
 
 It focuses on:
@@ -77,7 +77,7 @@ docker compose logs mcp-server
 
 ## Indexing Modes
 
-RepoRadar has two indexing systems that move at different speeds:
+gojo has two indexing systems that move at different speeds:
 
 - `mcp-server` publishes generation-scoped structure, graph, UI, pattern, and health state
 - `zoekt-indexer` builds and refreshes Zoekt search shards
@@ -233,18 +233,18 @@ unrelated host path.
 
 With the default Compose project name, those usually look like:
 
-- `repo-radar_mcp-server-data`
-- `repo-radar_refresh-coordination`
+- `gojo_mcp-server-data`
+- `gojo_refresh-coordination`
 
 Example:
 
 ```bash
 docker run --rm -i \
-  --network repo-radar_default \
+  --network gojo_default \
   -v /absolute/path/to/repos:/repos:ro \
-  -v repo-radar_mcp-server-data:/app/.data \
-  -v repo-radar_refresh-coordination:/app/.data/coordination \
-  repo-radar-mcp-server
+  -v gojo_mcp-server-data:/app/.data \
+  -v gojo_refresh-coordination:/app/.data/coordination \
+  gojo-mcp-server
 ```
 
 Use `docker volume ls` if your Compose project name differs.
@@ -260,7 +260,7 @@ Example debug-only workflow:
 docker run --rm -i \
   -v /absolute/path/to/repos:/repos:ro \
   -v /absolute/path/to/debug-mcp-data:/app/.data \
-  repo-radar-mcp-server
+  gojo-mcp-server
 ```
 
 This is a different mode from the Compose runtime. Do not casually mix it with

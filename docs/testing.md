@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document describes the current validation workflow for RepoRadar.
+This document describes the current validation workflow for gojo.
 
 It focuses on:
 
@@ -16,7 +16,7 @@ For runtime setup, see [Operations](./operations.md). For system design, see
 
 ## Current Testing Model
 
-RepoRadar uses a mix of:
+gojo uses a mix of:
 
 - unit tests for deterministic logic and tool contracts
 - focused real-system checks against the running stack when behavior depends on runtime coordination
@@ -179,7 +179,7 @@ It intentionally avoids over-documenting:
 
 ## Scope Limits
 
-RepoRadar validation does not claim:
+gojo validation does not claim:
 
 - Docker-perfect end-to-end coverage for every environment
 - compiler-complete semantic correctness

@@ -2,7 +2,7 @@
 
 ## Overview
 
-RepoRadar is a local code-intelligence stack for coding agents and developers.
+gojo is a local code-intelligence stack for coding agents and developers.
 
 It combines:
 
@@ -15,13 +15,13 @@ It combines:
 - internal pattern intelligence for similarity, clustering, and precedent discovery
 - MCP tools exposed over stdio for agent-facing workflows
 
-RepoRadar does not attempt full semantic program understanding. It provides
+gojo does not attempt full semantic program understanding. It provides
 practical, graph-aware retrieval and conservative planning support for real
 repository work.
 
 ## Runtime Services
 
-RepoRadar runs as three services plus a shared repository mount:
+gojo runs as three services plus a shared repository mount:
 
 - `zoekt`
   - serves indexed full-text search over HTTP on port `6070`
@@ -87,7 +87,7 @@ Agent / MCP Client
       extraction -> fingerprints -> similarity -> clustering -> precedents
 ```
 
-RepoRadar is easiest to think about as a progressive stack:
+gojo is easiest to think about as a progressive stack:
 
 `Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
 
@@ -192,7 +192,7 @@ Key concepts:
     repair conservative state degradations
   - reports are written per generation as `consistency-report.json`
 - trust
-  - RepoRadar distinguishes between healthy, degraded, inconsistent, and
+  - gojo distinguishes between healthy, degraded, inconsistent, and
     unknown states instead of silently assuming artifacts are reliable
   - malformed or missing coordination markers, suspicious artifact regressions,
     and refresh failures degrade trust rather than being hidden
@@ -202,7 +202,7 @@ about what is and is not trustworthy.
 
 ### Pattern Intelligence
 
-RepoRadar also includes an internal pattern-intelligence capability that builds
+gojo also includes an internal pattern-intelligence capability that builds
 on the published structure artifacts.
 
 It currently provides:

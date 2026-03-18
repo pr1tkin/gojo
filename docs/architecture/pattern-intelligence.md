@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Pattern intelligence is RepoRadar's internal capability for recognizing,
+Pattern intelligence is gojo's internal capability for recognizing,
 comparing, and reusing recurring implementation shapes across a repository set.
 
 It supports three related jobs:
@@ -147,7 +147,7 @@ The stage stays conservative. Files without strong evidence emit no patterns.
 
 ### Current Detectors
 
-RepoRadar currently extracts patterns for detectors such as:
+gojo currently extracts patterns for detectors such as:
 
 - React components
 - custom hooks
@@ -209,7 +209,7 @@ artifacts while following the same persistence conventions.
 
 ## Similarity And Clustering
 
-RepoRadar computes deterministic similarity between patterns of the same
+gojo computes deterministic similarity between patterns of the same
 `PatternKind`.
 
 Similarity operates on normalized fingerprint fields such as:

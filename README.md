@@ -1,146 +1,168 @@
-# RepoRadar
+# 👁️ Gojo
 
-RepoRadar is a local code-intelligence stack for coding agents and developers.
+> Throughout heaven and earth, I alone see everything.
 
-It combines:
+Gojo is a local-first code intelligence engine that gives agents and developers  
+**complete visibility into complex codebases**.
 
-- Zoekt for repository-scale full-text search
-- Tree-sitter for syntax-aware symbol extraction
-- generation-based persisted MCP artifacts under `/app/.data`
-- deterministic file-level graph construction from imports and exports
-- conservative impact, ownership, and planning workflows
-- MCP tools exposed over stdio for agent-facing repository work
+It combines search, symbol analysis, graph reasoning, and pattern intelligence  
+into a single system — designed for **understanding, not just lookup**.
 
-RepoRadar is practical rather than compiler-complete. It aims to provide fast,
-explainable repository context for real codebases without claiming semantic
-refactor guarantees.
+---
 
-## Runtime Model
+## ✨ What makes Gojo different?
 
-RepoRadar runs as three services against the same `repos/` mount:
+Most tools show you files.
 
-- `zoekt`
-  - serves indexed search over HTTP on port `6070`
-  - reads Zoekt shards from `/data/index`
-- `zoekt-indexer`
-  - scans `/repos`
-  - writes Zoekt shards to `/data/index`
-  - writes search freshness snapshots to `/data/coordination/zoekt-refresh-state.json`
-- `mcp-server`
-  - runs over stdio
-  - scans `/repos`
-  - publishes generation-scoped MCP artifacts under `/app/.data/generations/<generationId>/`
-  - writes search refresh requests to `/app/.data/coordination/search-refresh-request.json`
+Gojo shows you:
 
-The MCP server owns the structured repository model. Zoekt owns search shards.
-They are coordinated through shared fingerprints and marker files rather than a
-single shared transaction.
+- what matters
+- how things connect
+- what will break if you change something
 
-## Quick Start
+> You’re not debugging anymore — you’re seeing.
 
-### 1. Add repositories
+---
 
-RepoRadar indexes first-level Git repositories under `./repos`.
+## ⚡ Core Capabilities
 
-```bash
-mkdir -p repos
-ln -s /path/to/repo-alpha repos/repo-alpha
-ln -s /path/to/repo-beta repos/repo-beta
+- 🔍 High-performance repository search (Zoekt)
+- 🧠 Syntax-aware symbol extraction (Tree-sitter)
+- 🕸️ Deterministic code graph from imports & exports
+- 📊 Pattern intelligence & precedent discovery
+- 🤖 Agent-oriented workflows and context assembly
+- ⚙️ Local-first, Docker-based architecture
+
+---
+
+## 🧠 One Query → Full Context
+
+Instead of asking:
+
+- where is this defined?
+- who uses it?
+- what depends on it?
+
+Gojo answers all of them in one coherent view.
+
+---
+
+## 🔌 Example Workflow
+
+```ts
+const component = await explore_component({
+  symbol: "WorkspaceCasesExportActions"
+})
+
+const symbol = await analyze_symbol({
+  symbolId: component.symbolId
+})
+
+const patterns = await search_patterns({
+  query: "export modal pattern"
+})
 ```
 
-### 2. Start the stack
+---
 
-```powershell
+## 🧩 Recommended Agent Flow
+
+Before changing code:
+
+1. explore_component
+2. analyze_symbol
+3. search_patterns
+4. collect_refactor_context
+5. plan_change
+
+> Prefer understanding over guessing.
+
+---
+
+## 🏗️ Runtime Model
+
+Gojo runs as three coordinated services against the same `repos/` mount:
+
+### 🔍 zoekt
+- serves indexed search over HTTP (`:6070`)
+- reads shards from `/data/index`
+
+### 🛠️ zoekt-indexer
+- scans `/repos`
+- writes search shards to `/data/index`
+- maintains freshness state
+
+### 🧠 mcp-server
+- runs over stdio
+- builds structured repository model
+- publishes artifacts under `/app/.data/generations/<generationId>/`
+- coordinates search refresh via marker files
+
+Gojo separates:
+- search (Zoekt)
+- structure (MCP server)
+
+and synchronizes them through fingerprints and coordination files.
+
+---
+
+## 🚀 Quick Start
+
+```bash
 docker compose up -d --build
 ```
 
-This uses the current Compose runtime layout:
+Mount your repositories → start exploring immediately.
 
-- `mcp-server-data:/app/.data`
-- `refresh-coordination:/app/.data/coordination`
-- `zoekt-index:/data/index`
+---
 
-### 3. Check the services
+## 🧠 Architecture Philosophy
 
-```powershell
-docker compose logs zoekt
-docker compose logs zoekt-indexer
-docker compose logs mcp-server
-```
+> Code understanding should be structured, not guessed.
 
-Open `http://localhost:6070` to confirm Zoekt is serving search.
+Gojo combines:
 
-### 4. Build and run the MCP server locally
+- Search (Zoekt)
+- Syntax (Tree-sitter)
+- Graph (dependencies & relationships)
+- Patterns (real-world precedents)
+- Orchestration (agent workflows)
 
-From `mcp-server/`:
+---
 
-```powershell
-npm install
-npm run build
-npm run test
-npm run start
-```
+## 🧲 Positioning
 
-This is useful for local MCP development. For containerized runtime behavior,
-prefer the Compose-managed service and its named volumes.
+Gojo is a lightweight, modular alternative to systems like Sourcegraph Cody —  
+focused on clarity, composability, and agent-first workflows.
 
-## MCP Tool Surface
+---
 
-High-level workflows:
+## ⚠️ Status
 
-- `explore_component`
-- `search_patterns`
-- `analyze_symbol`
-- `collect_refactor_context`
-- `plan_change`
+Actively evolving toward:
 
-Lower-level tools:
+- better coverage
+- smarter ranking
+- deeper agent workflows
 
-- `search_code`
-- `open_file`
-- `list_symbols`
-- `find_symbol`
-- `find_references`
-- `find_related_files`
+---
 
-Example workflow:
+## 💡 Vision
 
-```text
-explore_component("LandingHero")
-analyze_symbol({ "name": "LandingHero" })
-collect_refactor_context({ "name": "LandingHero", "mode": "component" })
-plan_change({ "symbol": "LandingHero", "filePath": "src/components/LandingHero.tsx" })
-```
+> No blind spots. No guesswork. Just understanding.
+
+Gojo aims to become the foundation layer for intelligent coding agents.
+
+---
 
 ## Documentation
 
 - [Architecture](./docs/architecture.md)
-- [Operations](./docs/operations.md)
-- [Tools](./docs/tools.md)
-- [Testing](./docs/testing.md)
 - [Pattern Intelligence](./docs/architecture/pattern-intelligence.md)
-
-## Repository Layout
-
-- `mcp-server/`
-  - MCP server, refresh pipeline, indexing, orchestration, and tools
-- `zoekt/`
-  - Zoekt image and indexing entrypoint
-- `repos/`
-  - local repositories mounted into the stack
-- `docs/`
-  - architecture, operations, testing, and tool reference docs
-
-## Boundaries
-
-RepoRadar does not claim:
-
-- compiler-complete semantic understanding
-- guaranteed safe refactors
-- automatic patch generation
-- runtime-complete UI dependency analysis
-- cross-repo semantic inference beyond the mounted repositories
+- [Operations](./docs/operations.md)
+- [Testing](./docs/testing.md)
+- [Tools](./docs/tools.md)
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](./LICENSE).
+- [LICENSE.md](./LICENSE.md)

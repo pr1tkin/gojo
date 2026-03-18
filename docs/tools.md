@@ -2,7 +2,7 @@
 
 ## Overview
 
-RepoRadar exposes a focused MCP toolset on top of the current runtime model:
+gojo exposes a focused MCP toolset on top of the current runtime model:
 
 `Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
 
@@ -227,7 +227,7 @@ A practical workflow is:
 
 ## Practical Limits
 
-RepoRadar tools are intentionally conservative.
+gojo tools are intentionally conservative.
 
 They do not claim:
 
