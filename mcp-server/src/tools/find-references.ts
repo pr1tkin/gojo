@@ -1,5 +1,6 @@
 import { formatSearchResults } from '../formatters.js';
 import { getCurrentSearchFreshness } from '../indexing/search-freshness.js';
+import { stderrLogger } from '../logging.js';
 import { listFileRelations } from '../symbol-index/query.js';
 import { rankFindReferenceResults } from '../ranking.js';
 import { findReferencesInputSchema } from '../schemas.js';
@@ -76,10 +77,10 @@ async function findHeuristicReferences(
   zoektBaseUrl: string,
   input: FindReferencesInput,
 ): Promise<FindReferenceMatch[]> {
-  const searchFreshness = await getCurrentSearchFreshness(console);
+  const searchFreshness = await getCurrentSearchFreshness(stderrLogger);
 
   if (searchFreshness && searchFreshness.status !== 'ready') {
-    console.warn(
+    stderrLogger.warn(
       `[search-freshness] heuristic references using Zoekt while status=${searchFreshness.status}`,
     );
   }

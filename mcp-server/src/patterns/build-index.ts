@@ -1086,13 +1086,6 @@ function collectPatternsForFile(
   pushCandidate(detectStorybookStory(relation, tree, source));
   candidates.sort(comparePatterns);
 
-  if (candidates.length > 0) {
-    console.log(`[PatternExtraction] ${candidates.length} patterns detected in ${relation.filePath}`);
-    for (const candidate of candidates) {
-      console.log(`  - ${candidate.kind}`);
-    }
-  }
-
   return candidates;
 }
 

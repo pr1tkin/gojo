@@ -10,6 +10,7 @@ import { exploreComponentToolDefinition, runExploreComponentTool } from './tools
 import { planChangeToolDefinition, runPlanChangeTool } from './tools/plan-change.js';
 import { loadConfig } from './config.js';
 import { cleanupGenerationDebris } from './indexing/generation-debris.js';
+import { stderrLogger } from './logging.js';
 import { buildSymbolIndex } from './symbol-index/indexer.js';
 import { runSearchPatternsTool, searchPatternsToolDefinition } from './tools/search-patterns.js';
 import { findRelatedFilesToolDefinition, runFindRelatedFilesTool } from './tools/find-related-files.js';
@@ -22,7 +23,7 @@ import { runSearchCodeTool, searchCodeToolDefinition } from './tools/search-code
 async function main(): Promise<void> {
   const config = loadConfig();
   const shouldBuildSymbolIndex = process.env.BUILD_SYMBOL_INDEX_ON_STARTUP === 'true';
-  await cleanupGenerationDebris({ logger: console, applyDeletes: true });
+  await cleanupGenerationDebris({ logger: stderrLogger, applyDeletes: true });
 
   if (shouldBuildSymbolIndex) {
     await buildSymbolIndex(config.reposRoot);
@@ -148,6 +149,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  console.error('Failed to start MCP server.', error);
+  stderrLogger.error('Failed to start MCP server.', error);
   process.exit(1);
 });
