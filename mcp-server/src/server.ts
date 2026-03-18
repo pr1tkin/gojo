@@ -25,10 +25,6 @@ async function main(): Promise<void> {
   const shouldBuildSymbolIndex = process.env.BUILD_SYMBOL_INDEX_ON_STARTUP === 'true';
   await cleanupGenerationDebris({ logger: stderrLogger, applyDeletes: true });
 
-  if (shouldBuildSymbolIndex) {
-    await buildSymbolIndex(config.reposRoot);
-  }
-
   const server = new McpServer({
     name: 'local-code-search',
     version: '0.1.0',
@@ -146,6 +142,13 @@ async function main(): Promise<void> {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+
+  if (shouldBuildSymbolIndex) {
+    stderrLogger.info('Startup index refresh scheduled in background.');
+    void buildSymbolIndex(config.reposRoot).catch((error: unknown) => {
+      stderrLogger.error('Background startup index refresh failed.', error);
+    });
+  }
 }
 
 main().catch((error: unknown) => {
