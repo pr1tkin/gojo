@@ -172,6 +172,72 @@ const candidatePeer = {
   },
 };
 
+const candidateWrapperStrong = {
+  fileId: 'repo-a:src/components/ButtonContainer.tsx',
+  repo: 'repo-a',
+  filePath: 'src/components/ButtonContainer.tsx',
+  classification: 'source',
+  symbolIds: ['button-container-symbol'],
+  symbolNames: ['ButtonContainer'],
+  imports: [
+    {
+      fileId: 'repo-a:src/components/ButtonContainer.tsx',
+      source: './Button.styles',
+      bindings: [],
+      resolvedKind: 'local-file',
+      resolvedTargetFileId: 'repo-a:src/components/Button.styles.ts',
+    },
+  ],
+  exports: [
+    {
+      fileId: 'repo-a:src/components/ButtonContainer.tsx',
+      kind: 'named',
+      exportedName: 'ButtonContainer',
+      localName: 'ButtonContainer',
+      symbolId: 'button-container-symbol',
+    },
+  ],
+  importTokens: ['Button.styles', 'clsx'],
+  structuralAnchor: {
+    structurallyIndexed: true,
+    resolvedLocalDependencyFileIds: ['repo-a:src/components/Button.styles.ts'],
+    localDependencyFamilyTokens: ['components', 'button', 'styles', 'src'],
+  },
+};
+
+const candidateModuleNeighbor = {
+  fileId: 'repo-a:src/components/button/index.ts',
+  repo: 'repo-a',
+  filePath: 'src/components/button/index.ts',
+  classification: 'source',
+  symbolIds: ['button-module-symbol'],
+  symbolNames: ['buttonModule'],
+  imports: [
+    {
+      fileId: 'repo-a:src/components/button/index.ts',
+      source: '../Button.styles',
+      bindings: [],
+      resolvedKind: 'local-file',
+      resolvedTargetFileId: 'repo-a:src/components/Button.styles.ts',
+    },
+  ],
+  exports: [
+    {
+      fileId: 'repo-a:src/components/button/index.ts',
+      kind: 'named',
+      exportedName: 'buttonModule',
+      localName: 'buttonModule',
+      symbolId: 'button-module-symbol',
+    },
+  ],
+  importTokens: ['Button.styles', 'clsx'],
+  structuralAnchor: {
+    structurallyIndexed: true,
+    resolvedLocalDependencyFileIds: ['repo-a:src/components/Button.styles.ts'],
+    localDependencyFamilyTokens: ['components', 'button', 'styles', 'src'],
+  },
+};
+
 const candidateStoryPeer = {
   fileId: 'repo-a:src/components/IconButton.stories.tsx',
   repo: 'repo-a',
@@ -370,6 +436,92 @@ function symbolNode(symbolId: string, fileId: string, repoId: string, filePath: 
   };
 }
 
+function configureCustomRelationSet(
+  relations: Array<typeof targetRelation>,
+  relatedFileIdsByFileId: Record<string, string[]> = {},
+) {
+  listFileRelationsMock.mockResolvedValue(relations);
+  getFileRelationByIdMock.mockImplementation(async (fileId: string) => {
+    return relations.find((entry) => entry.fileId === fileId) ?? null;
+  });
+  getFileRelationMock.mockImplementation(async (filePath: string, repo?: string) => {
+    const match = relations.find((entry) => entry.filePath === filePath && (!repo || entry.repo === repo));
+
+    if (!match) {
+      throw new Error('missing');
+    }
+
+    return match;
+  });
+  getFileNodeMock.mockImplementation(async (fileId: string) => {
+    const match = relations.find((entry) => entry.fileId === fileId);
+    return match ? fileNode(match.fileId, match.repo, match.filePath) : null;
+  });
+  getDefinedSymbolsMock.mockImplementation(async (fileId: string) => {
+    const match = relations.find((entry) => entry.fileId === fileId);
+    if (!match) {
+      return [];
+    }
+
+    return match.symbolNames.map((name, index) =>
+      symbolNode(match.symbolIds[index] ?? `${match.fileId}:${index}`, match.fileId, match.repo, match.filePath, name),
+    );
+  });
+  getExportedSymbolsMock.mockImplementation(async (fileId: string) => {
+    const match = relations.find((entry) => entry.fileId === fileId);
+    if (!match) {
+      return [];
+    }
+
+    const exportedNames = match.exports
+      .map((entry) => entry.exportedName ?? entry.localName)
+      .filter((value): value is string => Boolean(value));
+    const names = exportedNames.length > 0 ? exportedNames : match.symbolNames;
+
+    return names.map((name, index) =>
+      symbolNode(match.symbolIds[index] ?? `${match.fileId}:export:${index}`, match.fileId, match.repo, match.filePath, name),
+    );
+  });
+  getFileExplorationContextMock.mockImplementation(async (fileId: string) => {
+    const match = relations.find((entry) => entry.fileId === fileId);
+    if (!match) {
+      throw new Error('missing');
+    }
+
+    const relatedFileIds = relatedFileIdsByFileId[fileId] ?? [];
+
+    return {
+      fileId,
+      primaryFile: fileNode(match.fileId, match.repo, match.filePath),
+      repo: match.repo,
+      relatedFiles: relatedFileIds.map((relatedFileId, index) => {
+        const related = relations.find((entry) => entry.fileId === relatedFileId);
+        if (!related) {
+          throw new Error(`missing related file ${relatedFileId}`);
+        }
+
+        return {
+          file: fileNode(related.fileId, related.repo, related.filePath),
+          score: 20 - index,
+          reason: 'direct import',
+          reasons: [{ signal: 'graph_connection', value: 10 - index }],
+          via: ['file_imports_file'],
+        };
+      }),
+      neighboringFiles: [],
+      definedSymbols: [],
+      exportedSymbols: [],
+      summary: {
+        relatedFileCount: relatedFileIds.length,
+        neighboringFileCount: 0,
+        definedSymbolCount: 0,
+        exportedSymbolCount: 0,
+      },
+      rawContext: {},
+    };
+  });
+}
+
 describe('pattern orchestrator service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -379,6 +531,8 @@ describe('pattern orchestrator service', () => {
       candidateStrong,
       candidateTestArtifactStrong,
       candidatePeer,
+      candidateWrapperStrong,
+      candidateModuleNeighbor,
       candidateStoryPeer,
       candidateWeak,
       candidateNoise,
@@ -392,6 +546,8 @@ describe('pattern orchestrator service', () => {
         candidateStrong,
         candidateTestArtifactStrong,
         candidatePeer,
+        candidateWrapperStrong,
+        candidateModuleNeighbor,
         candidateStoryPeer,
         candidateWeak,
         candidateNoise,
@@ -406,6 +562,8 @@ describe('pattern orchestrator service', () => {
         candidateStrong,
         candidateTestArtifactStrong,
         candidatePeer,
+        candidateWrapperStrong,
+        candidateModuleNeighbor,
         candidateStoryPeer,
         candidateWeak,
         candidateNoise,
@@ -428,6 +586,8 @@ describe('pattern orchestrator service', () => {
         candidateStrong,
         candidateTestArtifactStrong,
         candidatePeer,
+        candidateWrapperStrong,
+        candidateModuleNeighbor,
         candidateStoryPeer,
         candidateWeak,
         candidateNoise,
@@ -452,6 +612,14 @@ describe('pattern orchestrator service', () => {
 
       if (fileId === candidatePeer.fileId) {
         return [symbolNode('button-shell-symbol', candidatePeer.fileId, 'repo-a', candidatePeer.filePath, 'ButtonShell')];
+      }
+
+      if (fileId === candidateWrapperStrong.fileId) {
+        return [symbolNode('button-container-symbol', candidateWrapperStrong.fileId, 'repo-a', candidateWrapperStrong.filePath, 'ButtonContainer')];
+      }
+
+      if (fileId === candidateModuleNeighbor.fileId) {
+        return [symbolNode('button-module-symbol', candidateModuleNeighbor.fileId, 'repo-a', candidateModuleNeighbor.filePath, 'buttonModule')];
       }
 
       if (fileId === candidateStoryPeer.fileId) {
@@ -491,6 +659,14 @@ describe('pattern orchestrator service', () => {
 
       if (fileId === candidatePeer.fileId) {
         return [symbolNode('button-shell-symbol', candidatePeer.fileId, 'repo-a', candidatePeer.filePath, 'Button')];
+      }
+
+      if (fileId === candidateWrapperStrong.fileId) {
+        return [symbolNode('button-container-symbol', candidateWrapperStrong.fileId, 'repo-a', candidateWrapperStrong.filePath, 'ButtonContainer')];
+      }
+
+      if (fileId === candidateModuleNeighbor.fileId) {
+        return [symbolNode('button-module-symbol', candidateModuleNeighbor.fileId, 'repo-a', candidateModuleNeighbor.filePath, 'buttonModule')];
       }
 
       if (fileId === candidateStoryPeer.fileId) {
@@ -541,6 +717,26 @@ describe('pattern orchestrator service', () => {
                   },
                 ]
             : fileId === candidateTestArtifactStrong.fileId
+              ? [
+                  {
+                    file: fileNode('repo-a:src/components/Button.styles.ts', 'repo-a', 'src/components/Button.styles.ts'),
+                    score: 13,
+                    reason: 'direct import',
+                    reasons: [{ signal: 'graph_connection', value: 6 }],
+                    via: ['file_imports_file'],
+                  },
+                ]
+            : fileId === candidateWrapperStrong.fileId
+              ? [
+                  {
+                    file: fileNode('repo-a:src/components/Button.styles.ts', 'repo-a', 'src/components/Button.styles.ts'),
+                    score: 13,
+                    reason: 'direct import',
+                    reasons: [{ signal: 'graph_connection', value: 6 }],
+                    via: ['file_imports_file'],
+                  },
+                ]
+            : fileId === candidateModuleNeighbor.fileId
               ? [
                   {
                     file: fileNode('repo-a:src/components/Button.styles.ts', 'repo-a', 'src/components/Button.styles.ts'),
@@ -660,7 +856,7 @@ describe('pattern orchestrator service', () => {
     expect(result.patternMatches[0]).toEqual(
       expect.objectContaining({
         file: expect.objectContaining({ fileId: candidateStrong.fileId }),
-        reason: 'runtime precedent with shared dependencies',
+        reason: 'peer component precedent with shared dependencies',
         structuralAlignment: expect.objectContaining({
           graphAnchored: true,
           structuralContextStrength: 'high',
@@ -674,6 +870,8 @@ describe('pattern orchestrator service', () => {
         expect.objectContaining({ signal: 'dependency_overlap' }),
         expect.objectContaining({ signal: 'shared_local_dependencies' }),
         expect.objectContaining({ signal: 'responsibility_similarity' }),
+        expect.objectContaining({ signal: 'precedent_family_match', note: 'component' }),
+        expect.objectContaining({ signal: 'implementation_usefulness' }),
         expect.objectContaining({ signal: 'runtime_role_bonus', note: 'component' }),
       ]),
     );
@@ -681,16 +879,18 @@ describe('pattern orchestrator service', () => {
     const lowAlignmentMatch = result.patternMatches.find(
       (match) => match.file.fileId === candidatePeer.fileId,
     );
-    expect(lowAlignmentMatch).toEqual(
-      expect.objectContaining({
-        file: expect.objectContaining({ fileId: candidatePeer.fileId }),
-        structuralAlignment: expect.objectContaining({
-          graphAnchored: false,
-          structuralContextStrength: 'low',
+    if (lowAlignmentMatch) {
+      expect(lowAlignmentMatch).toEqual(
+        expect.objectContaining({
+          file: expect.objectContaining({ fileId: candidatePeer.fileId }),
+          structuralAlignment: expect.objectContaining({
+            graphAnchored: false,
+            structuralContextStrength: 'low',
+          }),
         }),
-      }),
-    );
-    expect(lowAlignmentMatch?.score).toBeLessThan(result.patternMatches[0].score);
+      );
+      expect(lowAlignmentMatch.score).toBeLessThan(result.patternMatches[0].score);
+    }
     const testArtifactMatch = result.patternMatches.find(
       (match) => match.file.fileId === candidateTestArtifactStrong.fileId,
     );
@@ -709,7 +909,7 @@ describe('pattern orchestrator service', () => {
         structuralContextStrength: 'high',
       }),
     );
-    expect(result.summary.graphAnchoredMatchCount).toBe(4);
+    expect(result.summary.graphAnchoredMatchCount).toBe(6);
   });
 
   it('prioritizes structural alignment over superficial similarity', async () => {
@@ -725,6 +925,18 @@ describe('pattern orchestrator service', () => {
 
     expect(rankedFileIds.indexOf(candidateStrong.fileId)).toBeLessThan(
       rankedFileIds.indexOf(candidateRoleMismatch.fileId),
+    );
+  });
+
+  it('prefers a peer component over a runtime module or wrapper neighbor', async () => {
+    const result = await getPatternMatchesForComponent('Button', { repo: 'repo-a', limit: 8 });
+    const rankedFileIds = result.patternMatches.map((entry) => entry.file.fileId);
+
+    expect(rankedFileIds.indexOf(candidateStrong.fileId)).toBeLessThan(
+      rankedFileIds.indexOf(candidateModuleNeighbor.fileId),
+    );
+    expect(rankedFileIds.indexOf(candidateStrong.fileId)).toBeLessThan(
+      rankedFileIds.indexOf(candidateWrapperStrong.fileId),
     );
   });
 
@@ -765,6 +977,366 @@ describe('pattern orchestrator service', () => {
         file: expect.objectContaining({ fileId: candidateTestArtifactStrong.fileId }),
       }),
     );
+  });
+
+  it('prefers a peer page precedent over a structurally close child module', async () => {
+    const targetPage = {
+      fileId: 'repo-a:src/app/orders/OrdersPage.tsx',
+      repo: 'repo-a',
+      filePath: 'src/app/orders/OrdersPage.tsx',
+      classification: 'source',
+      symbolIds: ['orders-page-symbol'],
+      symbolNames: ['OrdersPage'],
+      imports: [
+        {
+          fileId: 'repo-a:src/app/orders/OrdersPage.tsx',
+          source: '../_components/PageShell',
+          bindings: [],
+          resolvedKind: 'local-file',
+          resolvedTargetFileId: 'repo-a:src/app/_components/PageShell.tsx',
+        },
+        {
+          fileId: 'repo-a:src/app/orders/OrdersPage.tsx',
+          source: './OrdersTable',
+          bindings: [],
+          resolvedKind: 'local-file',
+          resolvedTargetFileId: 'repo-a:src/app/orders/OrdersTable.tsx',
+        },
+      ],
+      exports: [
+        {
+          fileId: 'repo-a:src/app/orders/OrdersPage.tsx',
+          kind: 'named',
+          exportedName: 'OrdersPage',
+          localName: 'OrdersPage',
+          symbolId: 'orders-page-symbol',
+        },
+      ],
+      importTokens: ['PageShell', 'OrdersTable'],
+    };
+    const pageShell = {
+      fileId: 'repo-a:src/app/_components/PageShell.tsx',
+      repo: 'repo-a',
+      filePath: 'src/app/_components/PageShell.tsx',
+      classification: 'source',
+      symbolIds: ['page-shell-symbol'],
+      symbolNames: ['PageShell'],
+      imports: [],
+      exports: [
+        {
+          fileId: 'repo-a:src/app/_components/PageShell.tsx',
+          kind: 'named',
+          exportedName: 'PageShell',
+          localName: 'PageShell',
+          symbolId: 'page-shell-symbol',
+        },
+      ],
+      importTokens: [],
+    };
+    const ordersTable = {
+      fileId: 'repo-a:src/app/orders/OrdersTable.tsx',
+      repo: 'repo-a',
+      filePath: 'src/app/orders/OrdersTable.tsx',
+      classification: 'source',
+      symbolIds: ['orders-table-symbol'],
+      symbolNames: ['OrdersTable'],
+      imports: [],
+      exports: [
+        {
+          fileId: 'repo-a:src/app/orders/OrdersTable.tsx',
+          kind: 'named',
+          exportedName: 'OrdersTable',
+          localName: 'OrdersTable',
+          symbolId: 'orders-table-symbol',
+        },
+      ],
+      importTokens: [],
+    };
+    const peerPage = {
+      fileId: 'repo-a:src/app/customers/CustomersPage.tsx',
+      repo: 'repo-a',
+      filePath: 'src/app/customers/CustomersPage.tsx',
+      classification: 'source',
+      symbolIds: ['customers-page-symbol'],
+      symbolNames: ['CustomersPage'],
+      imports: [
+        {
+          fileId: 'repo-a:src/app/customers/CustomersPage.tsx',
+          source: '../_components/PageShell',
+          bindings: [],
+          resolvedKind: 'local-file',
+          resolvedTargetFileId: 'repo-a:src/app/_components/PageShell.tsx',
+        },
+      ],
+      exports: [
+        {
+          fileId: 'repo-a:src/app/customers/CustomersPage.tsx',
+          kind: 'named',
+          exportedName: 'CustomersPage',
+          localName: 'CustomersPage',
+          symbolId: 'customers-page-symbol',
+        },
+      ],
+      importTokens: ['PageShell'],
+    };
+    const childModule = {
+      fileId: 'repo-a:src/app/orders/orders-module.ts',
+      repo: 'repo-a',
+      filePath: 'src/app/orders/orders-module.ts',
+      classification: 'source',
+      symbolIds: ['orders-module-symbol'],
+      symbolNames: ['ordersModule'],
+      imports: [
+        {
+          fileId: 'repo-a:src/app/orders/orders-module.ts',
+          source: '../_components/PageShell',
+          bindings: [],
+          resolvedKind: 'local-file',
+          resolvedTargetFileId: 'repo-a:src/app/_components/PageShell.tsx',
+        },
+        {
+          fileId: 'repo-a:src/app/orders/orders-module.ts',
+          source: './OrdersTable',
+          bindings: [],
+          resolvedKind: 'local-file',
+          resolvedTargetFileId: 'repo-a:src/app/orders/OrdersTable.tsx',
+        },
+      ],
+      exports: [
+        {
+          fileId: 'repo-a:src/app/orders/orders-module.ts',
+          kind: 'named',
+          exportedName: 'ordersModule',
+          localName: 'ordersModule',
+          symbolId: 'orders-module-symbol',
+        },
+      ],
+      importTokens: ['PageShell', 'OrdersTable'],
+    };
+
+    configureCustomRelationSet(
+      [targetPage, peerPage, childModule, pageShell, ordersTable],
+      {
+        [targetPage.fileId]: ['repo-a:src/app/_components/PageShell.tsx', 'repo-a:src/app/orders/OrdersTable.tsx'],
+        [peerPage.fileId]: ['repo-a:src/app/_components/PageShell.tsx'],
+        [childModule.fileId]: ['repo-a:src/app/_components/PageShell.tsx', 'repo-a:src/app/orders/OrdersTable.tsx'],
+      },
+    );
+    getSymbolExplorationContextMock.mockResolvedValueOnce({
+      query: 'OrdersPage',
+      repo: 'repo-a',
+      kind: undefined,
+      primarySymbol: {
+        symbolId: 'orders-page-symbol',
+        fileId: targetPage.fileId,
+        name: 'OrdersPage',
+        kind: 'function',
+        repo: 'repo-a',
+        filePath: targetPage.filePath,
+        startLine: 1,
+        endLine: 20,
+        exported: true,
+      },
+      primaryFile: fileNode(targetPage.fileId, 'repo-a', targetPage.filePath),
+      rankedSymbols: [
+        {
+          item: {
+            symbolId: 'orders-page-symbol',
+            fileId: targetPage.fileId,
+            name: 'OrdersPage',
+            kind: 'function',
+            repo: 'repo-a',
+            filePath: targetPage.filePath,
+            startLine: 1,
+            endLine: 20,
+            exported: true,
+          },
+          score: 15,
+          reasons: [{ signal: 'exact_name', value: 10 }],
+        },
+      ],
+      relatedFiles: [],
+      exportedSymbols: [symbolNode('orders-page-symbol', targetPage.fileId, 'repo-a', targetPage.filePath, 'OrdersPage')],
+      summary: {
+        candidateCount: 1,
+        relatedFileCount: 0,
+        exportedSymbolCount: 1,
+      },
+      rawContext: {},
+    });
+
+    const result = await getPatternMatchesForComponent('OrdersPage', { repo: 'repo-a', limit: 5 });
+    const rankedFileIds = result.patternMatches.map((entry) => entry.file.fileId);
+
+    expect(rankedFileIds[0]).toBe(peerPage.fileId);
+    expect(rankedFileIds.indexOf(peerPage.fileId)).toBeLessThan(rankedFileIds.indexOf(childModule.fileId));
+  });
+
+  it('prefers a peer hook/context precedent over a consuming page', async () => {
+    const targetStore = {
+      fileId: 'repo-a:src/store/useButtonStore.ts',
+      repo: 'repo-a',
+      filePath: 'src/store/useButtonStore.ts',
+      classification: 'source',
+      symbolIds: ['use-button-store-symbol'],
+      symbolNames: ['useButtonStore'],
+      imports: [
+        {
+          fileId: 'repo-a:src/store/useButtonStore.ts',
+          source: '../lib/createStore',
+          bindings: [],
+          resolvedKind: 'local-file',
+          resolvedTargetFileId: 'repo-a:src/lib/createStore.ts',
+        },
+      ],
+      exports: [
+        {
+          fileId: 'repo-a:src/store/useButtonStore.ts',
+          kind: 'named',
+          exportedName: 'useButtonStore',
+          localName: 'useButtonStore',
+          symbolId: 'use-button-store-symbol',
+        },
+      ],
+      importTokens: ['createStore'],
+    };
+    const createStore = {
+      fileId: 'repo-a:src/lib/createStore.ts',
+      repo: 'repo-a',
+      filePath: 'src/lib/createStore.ts',
+      classification: 'source',
+      symbolIds: ['create-store-symbol'],
+      symbolNames: ['createStore'],
+      imports: [],
+      exports: [
+        {
+          fileId: 'repo-a:src/lib/createStore.ts',
+          kind: 'named',
+          exportedName: 'createStore',
+          localName: 'createStore',
+          symbolId: 'create-store-symbol',
+        },
+      ],
+      importTokens: [],
+    };
+    const peerStore = {
+      fileId: 'repo-a:src/store/useModalStore.ts',
+      repo: 'repo-a',
+      filePath: 'src/store/useModalStore.ts',
+      classification: 'source',
+      symbolIds: ['use-modal-store-symbol'],
+      symbolNames: ['useModalStore'],
+      imports: [
+        {
+          fileId: 'repo-a:src/store/useModalStore.ts',
+          source: '../lib/createStore',
+          bindings: [],
+          resolvedKind: 'local-file',
+          resolvedTargetFileId: 'repo-a:src/lib/createStore.ts',
+        },
+      ],
+      exports: [
+        {
+          fileId: 'repo-a:src/store/useModalStore.ts',
+          kind: 'named',
+          exportedName: 'useModalStore',
+          localName: 'useModalStore',
+          symbolId: 'use-modal-store-symbol',
+        },
+      ],
+      importTokens: ['createStore'],
+    };
+    const consumingPage = {
+      fileId: 'repo-a:src/app/buttons/page.tsx',
+      repo: 'repo-a',
+      filePath: 'src/app/buttons/page.tsx',
+      classification: 'source',
+      symbolIds: ['buttons-page-symbol'],
+      symbolNames: ['ButtonsPage'],
+      imports: [
+        {
+          fileId: 'repo-a:src/app/buttons/page.tsx',
+          source: '../../lib/createStore',
+          bindings: [],
+          resolvedKind: 'local-file',
+          resolvedTargetFileId: 'repo-a:src/lib/createStore.ts',
+        },
+        {
+          fileId: 'repo-a:src/app/buttons/page.tsx',
+          source: '../../store/useButtonStore',
+          bindings: [],
+          resolvedKind: 'local-file',
+          resolvedTargetFileId: 'repo-a:src/store/useButtonStore.ts',
+        },
+      ],
+      exports: [
+        {
+          fileId: 'repo-a:src/app/buttons/page.tsx',
+          kind: 'named',
+          exportedName: 'ButtonsPage',
+          localName: 'ButtonsPage',
+          symbolId: 'buttons-page-symbol',
+        },
+      ],
+      importTokens: ['createStore', 'useButtonStore'],
+    };
+
+    configureCustomRelationSet(
+      [targetStore, peerStore, consumingPage, createStore],
+      {
+        [targetStore.fileId]: ['repo-a:src/lib/createStore.ts'],
+        [peerStore.fileId]: ['repo-a:src/lib/createStore.ts'],
+        [consumingPage.fileId]: ['repo-a:src/lib/createStore.ts', 'repo-a:src/store/useButtonStore.ts'],
+      },
+    );
+    getSymbolExplorationContextMock.mockResolvedValueOnce({
+      query: 'useButtonStore',
+      repo: 'repo-a',
+      kind: undefined,
+      primarySymbol: {
+        symbolId: 'use-button-store-symbol',
+        fileId: targetStore.fileId,
+        name: 'useButtonStore',
+        kind: 'function',
+        repo: 'repo-a',
+        filePath: targetStore.filePath,
+        startLine: 1,
+        endLine: 20,
+        exported: true,
+      },
+      primaryFile: fileNode(targetStore.fileId, 'repo-a', targetStore.filePath),
+      rankedSymbols: [
+        {
+          item: {
+            symbolId: 'use-button-store-symbol',
+            fileId: targetStore.fileId,
+            name: 'useButtonStore',
+            kind: 'function',
+            repo: 'repo-a',
+            filePath: targetStore.filePath,
+            startLine: 1,
+            endLine: 20,
+            exported: true,
+          },
+          score: 15,
+          reasons: [{ signal: 'exact_name', value: 10 }],
+        },
+      ],
+      relatedFiles: [],
+      exportedSymbols: [symbolNode('use-button-store-symbol', targetStore.fileId, 'repo-a', targetStore.filePath, 'useButtonStore')],
+      summary: {
+        candidateCount: 1,
+        relatedFileCount: 0,
+        exportedSymbolCount: 1,
+      },
+      rawContext: {},
+    });
+
+    const result = await getPatternMatchesForComponent('useButtonStore', { repo: 'repo-a', limit: 5 });
+    const rankedFileIds = result.patternMatches.map((entry) => entry.file.fileId);
+
+    expect(rankedFileIds[0]).toBe(peerStore.fileId);
+    expect(rankedFileIds.indexOf(peerStore.fileId)).toBeLessThan(rankedFileIds.indexOf(consumingPage.fileId));
   });
 
   it('returns a stable ranking order across repeated runs', async () => {

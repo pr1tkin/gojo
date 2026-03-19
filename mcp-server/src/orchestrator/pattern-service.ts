@@ -25,6 +25,8 @@ const RESPONSIBILITY_SIMILARITY_WEIGHT = 0.2;
 const MATCH_STRENGTH_WEIGHT = 0.1;
 const SAME_ROLE_RUNTIME_BONUS = 0.12;
 const RELATED_RUNTIME_BONUS = 0.04;
+const PRECEDENT_FAMILY_WEIGHT = 0.08;
+const IMPLEMENTATION_USEFULNESS_WEIGHT = 0.08;
 
 type CandidateArtifactClass =
   | 'runtime_component'
@@ -40,6 +42,17 @@ type CandidateArtifactClass =
   | 'unknown';
 
 type ResponsibilityKind = 'page' | 'hook' | 'component' | 'utility' | 'handler' | 'test' | 'story' | 'module';
+type PrecedentFamily =
+  | 'page'
+  | 'routed_page_or_screen'
+  | 'ui_component'
+  | 'ui_wrapper_or_shell'
+  | 'hook_or_context'
+  | 'util_or_helper'
+  | 'api_or_handler'
+  | 'state_or_store'
+  | 'module_or_integration'
+  | 'support_runtime';
 
 interface PatternServiceOptions {
   repo?: string;
@@ -61,6 +74,7 @@ interface FilePatternProfile {
   structuralAlignment: PatternStructuralAlignment;
   responsibilityKind: ResponsibilityKind;
   artifactClass: CandidateArtifactClass;
+  precedentFamily: PrecedentFamily;
 }
 
 interface CandidateScore {
@@ -71,10 +85,13 @@ interface CandidateScore {
   reasons: RankingReason[];
   artifactClass: CandidateArtifactClass;
   responsibilityKind: ResponsibilityKind;
+  precedentFamily: PrecedentFamily;
   signalScores: {
     structuralAlignment: number;
     dependencyOverlap: number;
     responsibilitySimilarity: number;
+    precedentFamilyFit: number;
+    implementationUsefulness: number;
     matchStrength: number;
   };
 }
@@ -86,6 +103,14 @@ function compareScores(left: CandidateScore, right: CandidateScore): number {
 
   if (right.score !== left.score) {
     return right.score - left.score;
+  }
+
+  if (right.signalScores.precedentFamilyFit !== left.signalScores.precedentFamilyFit) {
+    return right.signalScores.precedentFamilyFit - left.signalScores.precedentFamilyFit;
+  }
+
+  if (right.signalScores.implementationUsefulness !== left.signalScores.implementationUsefulness) {
+    return right.signalScores.implementationUsefulness - left.signalScores.implementationUsefulness;
   }
 
   if (right.signalScores.dependencyOverlap !== left.signalScores.dependencyOverlap) {
@@ -288,6 +313,235 @@ function getResponsibilitySimilarityScore(target: ResponsibilityKind, candidate:
   }
 
   return 0;
+}
+
+function inferPrecedentFamily(
+  relation: FileRelation,
+  responsibilityKind: ResponsibilityKind,
+  artifactClass: CandidateArtifactClass,
+): PrecedentFamily {
+  const normalizedFilePath = relation.filePath.toLowerCase();
+  const baseName = path.posix.basename(normalizedFilePath);
+  const runtimeNameTokens = dedupe([
+    ...tokenizeName(baseName),
+    ...relation.symbolNames.flatMap((name) => tokenizeName(name)),
+  ]);
+  const hasStateTokens = runtimeNameTokens.some((token) =>
+    ['context', 'provider', 'store', 'state', 'reducer', 'slice'].includes(token),
+  );
+  const hasWrapperTokens = runtimeNameTokens.some((token) =>
+    ['wrapper', 'shell', 'layout', 'container', 'boundary', 'frame'].includes(token),
+  );
+  const isSupportArtifact = artifactClass === 'test_artifact' || artifactClass === 'story_artifact' || artifactClass === 'support_or_wrapper_artifact';
+  const isRoutedPage =
+    responsibilityKind === 'page' &&
+    (
+      normalizedFilePath.includes('/app/') ||
+      normalizedFilePath.includes('/pages/') ||
+      normalizedFilePath.includes('/screen') ||
+      baseName === 'page.tsx' ||
+      baseName === 'page.jsx' ||
+      baseName === 'screen.tsx' ||
+      baseName === 'screen.jsx'
+    );
+
+  if (isSupportArtifact) {
+    return 'support_runtime';
+  }
+
+  if (responsibilityKind === 'handler') {
+    return 'api_or_handler';
+  }
+
+  if (responsibilityKind === 'page') {
+    return isRoutedPage ? 'routed_page_or_screen' : 'page';
+  }
+
+  if (hasStateTokens) {
+    return responsibilityKind === 'hook' ? 'hook_or_context' : 'state_or_store';
+  }
+
+  if (responsibilityKind === 'hook') {
+    return 'hook_or_context';
+  }
+
+  if (responsibilityKind === 'component') {
+    return hasWrapperTokens ? 'ui_wrapper_or_shell' : 'ui_component';
+  }
+
+  if (responsibilityKind === 'utility') {
+    return 'util_or_helper';
+  }
+
+  if (
+    normalizedFilePath.includes('/api/') ||
+    normalizedFilePath.includes('/server/') ||
+    normalizedFilePath.includes('/actions/')
+  ) {
+    return 'api_or_handler';
+  }
+
+  if (hasWrapperTokens) {
+    return 'ui_wrapper_or_shell';
+  }
+
+  if (
+    normalizedFilePath.includes('/integration') ||
+    normalizedFilePath.includes('/adapters/') ||
+    normalizedFilePath.includes('/clients/') ||
+    normalizedFilePath.includes('/connectors/')
+  ) {
+    return 'module_or_integration';
+  }
+
+  return 'module_or_integration';
+}
+
+function getPrecedentFamilyFitScore(target: PrecedentFamily, candidate: PrecedentFamily): number {
+  if (target === candidate) {
+    return 1;
+  }
+
+  if (
+    (target === 'page' && candidate === 'routed_page_or_screen') ||
+    (target === 'routed_page_or_screen' && candidate === 'page')
+  ) {
+    return 0.9;
+  }
+
+  if (
+    (target === 'hook_or_context' && candidate === 'state_or_store') ||
+    (target === 'state_or_store' && candidate === 'hook_or_context')
+  ) {
+    return 0.85;
+  }
+
+  if (
+    (target === 'ui_component' && candidate === 'ui_wrapper_or_shell') ||
+    (target === 'ui_wrapper_or_shell' && candidate === 'ui_component')
+  ) {
+    return 0.55;
+  }
+
+  if (
+    (target === 'util_or_helper' && candidate === 'module_or_integration') ||
+    (target === 'module_or_integration' && candidate === 'util_or_helper')
+  ) {
+    return 0.35;
+  }
+
+  if (
+    (target === 'api_or_handler' && candidate === 'module_or_integration') ||
+    (target === 'module_or_integration' && candidate === 'api_or_handler')
+  ) {
+    return 0.45;
+  }
+
+  return 0;
+}
+
+function getPrecedentFamilyLabel(family: PrecedentFamily): string {
+  switch (family) {
+    case 'ui_component':
+      return 'component';
+    case 'ui_wrapper_or_shell':
+      return 'wrapper';
+    case 'page':
+    case 'routed_page_or_screen':
+      return 'page';
+    case 'hook_or_context':
+      return 'hook/context';
+    case 'state_or_store':
+      return 'store/context';
+    case 'util_or_helper':
+      return 'utility';
+    case 'api_or_handler':
+      return 'API/handler';
+    case 'module_or_integration':
+      return 'module';
+    case 'support_runtime':
+      return 'support';
+    default:
+      return 'runtime';
+  }
+}
+
+function hasExpectedRuntimeExport(
+  targetFamily: PrecedentFamily,
+  candidate: FileRelation,
+): boolean {
+  const exportNames = candidate.exports
+    .map((entry) => entry.exportedName ?? entry.localName)
+    .filter((value): value is string => Boolean(value));
+  const names = dedupe([...candidate.symbolNames, ...exportNames]);
+
+  if (targetFamily === 'ui_component' || targetFamily === 'ui_wrapper_or_shell' || targetFamily === 'page' || targetFamily === 'routed_page_or_screen') {
+    return names.some((name) => /^[A-Z]/.test(name));
+  }
+
+  if (targetFamily === 'hook_or_context') {
+    return names.some((name) => /^use[A-Z0-9_]/.test(name) || /(Context|Provider)$/.test(name));
+  }
+
+  if (targetFamily === 'state_or_store') {
+    return names.some((name) => /(Store|Context|Provider|State|Reducer|Slice)$/.test(name));
+  }
+
+  if (targetFamily === 'util_or_helper' || targetFamily === 'api_or_handler' || targetFamily === 'module_or_integration') {
+    return names.some((name) => /^[a-z]/.test(name));
+  }
+
+  return names.length > 0;
+}
+
+function getImplementationUsefulnessScore(
+  targetFamily: PrecedentFamily,
+  candidateFamily: PrecedentFamily,
+  candidateArtifactClass: CandidateArtifactClass,
+  familyFit: number,
+  dependencyOverlap: number,
+  candidate: FileRelation,
+): number {
+  let score = 0;
+
+  if (familyFit >= 1) {
+    score += 0.55;
+  } else if (familyFit >= 0.8) {
+    score += 0.4;
+  } else if (familyFit >= 0.5) {
+    score += 0.22;
+  } else if (familyFit > 0) {
+    score += 0.1;
+  }
+
+  if (hasExpectedRuntimeExport(targetFamily, candidate)) {
+    score += 0.2;
+  }
+
+  if (isRuntimeArtifactClass(candidateArtifactClass)) {
+    score += 0.1;
+  }
+
+  if (dependencyOverlap >= 0.35) {
+    score += 0.1;
+  }
+
+  if (candidateFamily === 'ui_wrapper_or_shell') {
+    score -= 0.25;
+  }
+
+  if (candidateFamily === 'support_runtime') {
+    score -= 0.2;
+  }
+
+  if (
+    (targetFamily === 'ui_component' || targetFamily === 'page' || targetFamily === 'routed_page_or_screen' || targetFamily === 'hook_or_context' || targetFamily === 'state_or_store') &&
+    candidateFamily === 'module_or_integration'
+  ) {
+    score -= 0.2;
+  }
+
+  return Math.max(0, Math.min(1, score));
 }
 
 function inferCandidateArtifactClass(relation: FileRelation): CandidateArtifactClass {
@@ -504,6 +758,7 @@ async function loadTargetProfile(fileId: string, allRelations: FileRelation[]): 
     structuralAlignment,
     responsibilityKind,
     artifactClass: inferCandidateArtifactClass(relation),
+    precedentFamily: inferPrecedentFamily(relation, responsibilityKind, inferCandidateArtifactClass(relation)),
   };
 }
 
@@ -517,7 +772,21 @@ function determineReason(reasons: RankingReason[]): string {
   const hasDependencyOverlap = reasons.some((reason) => reason.signal === 'dependency_overlap');
   const hasResponsibilitySimilarity = reasons.some((reason) => reason.signal === 'responsibility_similarity');
   const hasRuntimeRoleBonus = reasons.some((reason) => reason.signal === 'runtime_role_bonus');
+  const familyMatch = reasons.find((reason) => reason.signal === 'precedent_family_match');
+  const usefulnessBoost = reasons.find((reason) => reason.signal === 'implementation_usefulness');
   const hasArtifactPenalty = reasons.some((reason) => reason.signal === 'artifact_deprioritized');
+
+  if (familyMatch && (hasHighStructuralAlignment || hasMediumStructuralAlignment) && hasDependencyOverlap) {
+    return `peer ${familyMatch.note ?? 'runtime'} precedent with shared dependencies`;
+  }
+
+  if (familyMatch && usefulnessBoost) {
+    return `peer ${familyMatch.note ?? 'runtime'} precedent`;
+  }
+
+  if (usefulnessBoost && (hasHighStructuralAlignment || hasMediumStructuralAlignment)) {
+    return 'more directly reusable runtime implementation';
+  }
 
   if ((hasHighStructuralAlignment || hasMediumStructuralAlignment) && hasDependencyOverlap && hasRuntimeRoleBonus) {
     return 'runtime precedent with shared dependencies';
@@ -584,6 +853,7 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
   const relatedFileIdsByFileId = buildCandidateRelatedFileIdsByFileId(allRelations);
   const candidateResponsibilityKind = inferResponsibilityKind(candidate);
   const candidateArtifactClass = inferCandidateArtifactClass(candidate);
+  const candidatePrecedentFamily = inferPrecedentFamily(candidate, candidateResponsibilityKind, candidateArtifactClass);
   const candidateExportNames = dedupe(candidate.exports.map((entry) => entry.exportedName).filter((value): value is string => Boolean(value)));
   const targetExportNames = profile.exportedSymbols.map((symbol) => symbol.name);
   const exportNameOverlap = jaccard(targetExportNames, candidateExportNames);
@@ -632,6 +902,15 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
     profile.responsibilityKind,
     candidateResponsibilityKind,
   );
+  const precedentFamilyFit = getPrecedentFamilyFitScore(profile.precedentFamily, candidatePrecedentFamily);
+  const implementationUsefulness = getImplementationUsefulnessScore(
+    profile.precedentFamily,
+    candidatePrecedentFamily,
+    candidateArtifactClass,
+    precedentFamilyFit,
+    dependencyOverlap,
+    candidate,
+  );
   const sameBundleStem = getBundleStem(candidate.filePath) === profile.bundleStem ? 1 : 0;
   const heuristicMatchStrength = Math.max(
     0,
@@ -652,6 +931,14 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
         : responsibilitySimilarity >= 0.4
           ? RELATED_RUNTIME_BONUS
           : 0
+      : 0;
+  const precedentFamilyBonus =
+    isRuntimeTargetArtifact(profile.artifactClass) && isRuntimeArtifactClass(candidateArtifactClass)
+      ? roundScore(precedentFamilyFit * PRECEDENT_FAMILY_WEIGHT)
+      : 0;
+  const implementationUsefulnessBonus =
+    isRuntimeTargetArtifact(profile.artifactClass) && isRuntimeArtifactClass(candidateArtifactClass)
+      ? roundScore(implementationUsefulness * IMPLEMENTATION_USEFULNESS_WEIGHT)
       : 0;
   const artifactPenalty =
     isRuntimeTargetArtifact(profile.artifactClass) && !isRuntimeArtifactClass(candidateArtifactClass)
@@ -710,6 +997,14 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
     reasons.push(createReason('responsibility_similarity', roundScore(responsibilitySimilarity * RESPONSIBILITY_SIMILARITY_WEIGHT)));
   }
 
+  if (precedentFamilyBonus > 0) {
+    reasons.push(createReason('precedent_family_match', precedentFamilyBonus, getPrecedentFamilyLabel(candidatePrecedentFamily)));
+  }
+
+  if (implementationUsefulnessBonus > 0) {
+    reasons.push(createReason('implementation_usefulness', implementationUsefulnessBonus, 'more directly reusable runtime implementation'));
+  }
+
   if (runtimeRoleBonus > 0) {
     reasons.push(createReason('runtime_role_bonus', roundScore(runtimeRoleBonus), candidateResponsibilityKind));
   }
@@ -748,7 +1043,17 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
       responsibilitySimilarity * RESPONSIBILITY_SIMILARITY_WEIGHT +
       heuristicMatchStrength * MATCH_STRENGTH_WEIGHT,
   );
-  const score = roundScore(Math.max(0, baseScore + runtimeRoleBonus - artifactPenalty - weakSignalPenalty));
+  const score = roundScore(
+    Math.max(
+      0,
+      baseScore +
+        runtimeRoleBonus +
+        precedentFamilyBonus +
+        implementationUsefulnessBonus -
+        artifactPenalty -
+        weakSignalPenalty,
+    ),
+  );
 
   if (score === 0) {
     return null;
@@ -762,10 +1067,13 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
     reasons,
     artifactClass: candidateArtifactClass,
     responsibilityKind: candidateResponsibilityKind,
+    precedentFamily: candidatePrecedentFamily,
     signalScores: {
       structuralAlignment: roundScore(structuralAlignmentScore),
       dependencyOverlap: roundScore(dependencyOverlap),
       responsibilitySimilarity: roundScore(responsibilitySimilarity),
+      precedentFamilyFit: roundScore(precedentFamilyFit),
+      implementationUsefulness: roundScore(implementationUsefulness),
       matchStrength: roundScore(heuristicMatchStrength),
     },
   };
