@@ -1,5 +1,7 @@
 import { buildNormalizedDiagnostics, type BuildNormalizedDiagnosticsInput } from './diagnostics-builder.js';
+import { buildNormalizedEvidence } from './evidence-builder.js';
 import { buildNormalizedExpansions } from './expansion-builder.js';
+import { buildNormalizedNextActions } from './next-actions-builder.js';
 import { buildNormalizedSummary } from './summary-builder.js';
 import type {
   NormalizedExpansion,
@@ -48,8 +50,8 @@ export function createNormalizedResponse<T extends NormalizedResultBase>(
     query: input.query,
     summary: input.summary ?? buildNormalizedSummary({ results }),
     results,
-    evidence: input.evidence ?? [],
-    nextActions: input.nextActions ?? [],
+    evidence: buildNormalizedEvidence(input.evidence ?? [], { mode: input.mode }),
+    nextActions: buildNormalizedNextActions(input.nextActions ?? [], { mode: input.mode }),
     diagnostics: buildNormalizedDiagnostics(input.diagnostics),
     expansions: buildNormalizedExpansions(input.expansions),
   };
