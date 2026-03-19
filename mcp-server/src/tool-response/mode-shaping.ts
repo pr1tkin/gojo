@@ -1,4 +1,4 @@
-import type { NormalizedMode, NormalizedResultBase } from './normalized-types.js';
+import type { NormalizedDebugPayload, NormalizedMode, NormalizedResultBase } from './normalized-types.js';
 
 export interface NormalizedModeShape {
   mode: NormalizedMode;
@@ -47,4 +47,19 @@ export function shapeSignalsForMode(
   }
 
   return Object.fromEntries(entries);
+}
+
+export function buildNormalizedDebugPayload(
+  mode: NormalizedMode,
+  details?: Record<string, unknown> | null,
+): NormalizedDebugPayload | null {
+  if (mode !== 'debug') {
+    return null;
+  }
+
+  if (!details || Object.keys(details).length === 0) {
+    return {};
+  }
+
+  return { details };
 }

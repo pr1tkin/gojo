@@ -4,8 +4,9 @@ import {
   buildNormalizedTruncation,
   mergeNormalizedDiagnostics,
 } from './diagnostics-builder.js';
-import { buildNormalizedExpansion } from './expansion-builder.js';
+import { buildExpansionRefId, buildNormalizedExpansion } from './expansion-builder.js';
 import { buildNormalizedExplanation, normalizeExplanationSignals } from './explanation-builder.js';
+import { buildNormalizedDebugPayload } from './mode-shaping.js';
 import { buildNormalizedNextAction } from './next-actions-builder.js';
 import { createNormalizedResponse } from './normalized-response.js';
 import { buildNormalizedResultTiers, buildNormalizedSummary } from './summary-builder.js';
@@ -165,7 +166,6 @@ export interface NormalizedCollectRefactorContextResult extends NormalizedResult
   membership?: RefactorContextMembership;
   matchStrength: ConfidenceLevel;
   relationshipKinds: string[];
-  debug?: RawCollectRefactorRelatedResult['debug'];
 }
 
 export interface NormalizedCollectRefactorNearbyResult extends NormalizedResultBase {
@@ -176,7 +176,6 @@ export interface NormalizedCollectRefactorNearbyResult extends NormalizedResultB
   family?: string;
   clusterRef?: string;
   membership?: RefactorContextMembership;
-  debug?: RawCollectRefactorNearbyResult['debug'];
 }
 
 export interface NormalizedCollectRefactorCandidate extends NormalizedResultBase {
@@ -190,7 +189,6 @@ export interface NormalizedCollectRefactorCandidate extends NormalizedResultBase
   clusterRef?: string;
   membership?: RefactorContextMembership;
   matchStrength: ConfidenceLevel;
-  debug?: RawCollectRefactorCandidate['debug'];
 }
 
 export interface NormalizedCollectRefactorTarget {
@@ -244,7 +242,6 @@ export interface CollectRefactorContextNormalizedResponse
   contextSummary: NormalizedRefactorContextSummary;
   nearbyFiles?: NormalizedCollectRefactorNearbyResult[];
   symbolCandidates?: NormalizedCollectRefactorCandidate[];
-  debug?: RawCollectRefactorContextResponse['debug'];
 }
 
 export interface CollectRefactorContextNormalizationInput {
@@ -291,7 +288,7 @@ function buildSharedContextExpansions(raw: RawCollectRefactorContextResponse): R
   const expansions = new Map<string, NormalizedExpansion>();
 
   for (const [familyRef, family] of Object.entries(raw.sharedContext?.families ?? {})) {
-    const id = `family:${familyRef}`;
+    const id = buildExpansionRefId('family', familyRef);
     expansions.set(
       id,
       buildNormalizedExpansion({
@@ -308,7 +305,7 @@ function buildSharedContextExpansions(raw: RawCollectRefactorContextResponse): R
   }
 
   for (const [clusterRef, cluster] of Object.entries(raw.sharedContext?.clusters ?? {})) {
-    const id = `cluster:${clusterRef}`;
+    const id = buildExpansionRefId('cluster', clusterRef);
     expansions.set(
       id,
       buildNormalizedExpansion({
@@ -379,11 +376,11 @@ function buildSharedContextExpansions(raw: RawCollectRefactorContextResponse): R
 
 function buildResultExpansionId(input: { familyRef?: string; clusterRef?: string }): string | undefined {
   if (input.clusterRef) {
-    return `cluster:${input.clusterRef}`;
+    return buildExpansionRefId('cluster', input.clusterRef);
   }
 
   if (input.familyRef) {
-    return `family:${input.familyRef}`;
+    return buildExpansionRefId('family', input.familyRef);
   }
 
   return undefined;
@@ -419,7 +416,7 @@ function normalizeRelatedResult(
     ...(result.membership ? { membership: result.membership } : {}),
     matchStrength: result.matchStrength,
     relationshipKinds: result.via,
-    ...(mode === 'debug' && result.debug ? { debug: result.debug } : {}),
+    debug: buildNormalizedDebugPayload(mode, result.debug ?? null),
   };
 }
 
@@ -451,7 +448,7 @@ function normalizeNearbyResult(
     ...(result.familyRef ? { family: result.familyRef } : {}),
     ...(result.clusterRef ? { clusterRef: result.clusterRef } : {}),
     ...(result.membership ? { membership: result.membership } : {}),
-    ...(mode === 'debug' && result.debug ? { debug: result.debug } : {}),
+    debug: buildNormalizedDebugPayload(mode, result.debug ?? null),
   };
 }
 
@@ -486,7 +483,7 @@ function normalizeCandidate(
     ...(result.clusterRef ? { clusterRef: result.clusterRef } : {}),
     ...(result.membership ? { membership: result.membership } : {}),
     matchStrength: result.matchStrength,
-    ...(mode === 'debug' && result.debug ? { debug: result.debug } : {}),
+    debug: buildNormalizedDebugPayload(mode, result.debug ?? null),
   };
 }
 
@@ -494,8 +491,8 @@ function normalizeTarget(
   raw: RawCollectRefactorContextResponse,
   expansions: Record<string, NormalizedExpansion>,
 ): NormalizedCollectRefactorTarget {
-  const clusterExpansionId = raw.target.clusterRef ? `cluster:${raw.target.clusterRef}` : undefined;
-  const familyExpansionId = raw.target.familyRef ? `family:${raw.target.familyRef}` : undefined;
+  const clusterExpansionId = raw.target.clusterRef ? buildExpansionRefId('cluster', raw.target.clusterRef) : undefined;
+  const familyExpansionId = raw.target.familyRef ? buildExpansionRefId('family', raw.target.familyRef) : undefined;
   const expansionId =
     (clusterExpansionId && expansions[clusterExpansionId] ? clusterExpansionId : undefined) ??
     (familyExpansionId && expansions[familyExpansionId] ? familyExpansionId : undefined);
@@ -698,6 +695,7 @@ export function normalizeCollectRefactorContextResponse(
     nextActions: buildNextActions(raw),
     diagnostics,
     expansions: Object.values(expansions),
+    debug: raw.debug ?? null,
   });
 
   return {
@@ -736,6 +734,5 @@ export function normalizeCollectRefactorContextResponse(
           symbolCandidates: raw.results.candidates.map((entry) => normalizeCandidate(entry, input.mode)),
         }
       : {}),
-    ...(input.mode === 'debug' && raw.debug ? { debug: raw.debug } : {}),
   };
 }

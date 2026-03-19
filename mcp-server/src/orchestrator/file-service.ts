@@ -17,6 +17,7 @@ export async function getFileExplorationContext(
     exportedSymbols: context.exportedSymbols,
     summary: {
       relatedFileCount: context.relatedFiles.length,
+      totalRelatedFileCount: context.totalRelatedFiles,
       neighboringFileCount: context.neighboringFiles.length,
       definedSymbolCount: context.definedSymbols.length,
       exportedSymbolCount: context.exportedSymbols.length,

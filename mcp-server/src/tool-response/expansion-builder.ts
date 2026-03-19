@@ -13,6 +13,10 @@ function sanitizeExpansionPart(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
+export function buildExpansionRefId(namespace: string, value: string): string {
+  return value.startsWith(`${namespace}:`) ? value : `${namespace}:${value}`;
+}
+
 export function buildNormalizedExpansionId(input: {
   kind: string;
   stableKey: string;

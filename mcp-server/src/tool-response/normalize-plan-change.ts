@@ -2,6 +2,7 @@ import type { SymbolChangePlanResult } from '../orchestrator/index.js';
 import { buildNormalizedDiagnostics } from './diagnostics-builder.js';
 import { buildNormalizedExpansion } from './expansion-builder.js';
 import { buildNormalizedExplanation } from './explanation-builder.js';
+import { buildNormalizedDebugPayload } from './mode-shaping.js';
 import { buildNormalizedNextAction } from './next-actions-builder.js';
 import { createNormalizedResponse } from './normalized-response.js';
 import { buildNormalizedResultTiers, buildNormalizedSummary } from './summary-builder.js';
@@ -164,6 +165,7 @@ function normalizeStep(step: RawPlanChangeResponse['orderedPlan'][number], mode:
     references: {
       filePaths: [step.filePath],
     },
+    debug: buildNormalizedDebugPayload(mode, null),
     stepOrder: step.order,
     filePath: step.filePath,
     role: step.role,
@@ -275,6 +277,7 @@ export function normalizePlanChangeResponse(
       notes: raw.notes,
     }),
     expansions: Object.values(expansions),
+    debug: null,
   });
 
   return {

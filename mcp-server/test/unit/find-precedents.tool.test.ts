@@ -212,6 +212,7 @@ describe('find_precedents tool', () => {
         },
       ],
       summary: 'Found 1 precedents for ContractDetailPage.',
+      totalCandidateCount: 1,
     });
 
     const result = await runFindPrecedentsTool({
@@ -225,7 +226,7 @@ describe('find_precedents tool', () => {
       repo: 'ifdt-gui',
       limit: 3,
     });
-    expect(findPrecedentsForSymbolMock).toHaveBeenCalledWith('contract-detail-symbol', 3);
+    expect(findPrecedentsForSymbolMock).toHaveBeenCalledWith('contract-detail-symbol', 3, 'ifdt-gui');
     expect(parsed).toEqual(
       expect.objectContaining({
         tool: 'find_precedents',
@@ -263,7 +264,7 @@ describe('find_precedents tool', () => {
           grounding: 'strong',
           relationship: 'peer_family',
           family: 'routed_page_or_screen',
-          expansionId: 'cluster:cluster:page:edit:sub:contracts',
+          expansionId: 'cluster:page:edit:sub:contracts',
           explanation: expect.objectContaining({
             short: 'same family + strong dependency overlap',
           }),
@@ -326,7 +327,8 @@ describe('find_precedents tool', () => {
         }),
       }),
     );
-    expect(parsed.results.primary[0]).not.toHaveProperty('debug');
+    expect(parsed.results.primary[0].debug).toBeNull();
+    expect(parsed.debug).toBeNull();
     expect(parsed.expansions).toEqual({});
   });
 
@@ -468,6 +470,7 @@ describe('find_precedents tool', () => {
         },
       ],
       summary: 'Found 1 precedents for file target.',
+      totalCandidateCount: 1,
     });
 
     const result = await runFindPrecedentsTool({
@@ -483,7 +486,7 @@ describe('find_precedents tool', () => {
       repo: 'repo-a',
       limit: 3,
     });
-    expect(findPrecedentsForFileMock).toHaveBeenCalledWith('repo-a:src/hooks/useGetJobs.ts', 1);
+    expect(findPrecedentsForFileMock).toHaveBeenCalledWith('repo-a:src/hooks/useGetJobs.ts', 1, 'repo-a');
     expect(parsed).toEqual(
       expect.objectContaining({
         tool: 'find_precedents',
@@ -497,17 +500,21 @@ describe('find_precedents tool', () => {
     );
     expect(parsed.results.primary[0].debug).toEqual(
       expect.objectContaining({
-        precedentScore: 0.83,
-        similarityScore: 0.77,
-        reasonSignals: ['responsibility-match', 'graph-anchored'],
+        details: expect.objectContaining({
+          precedentScore: 0.83,
+          similarityScore: 0.77,
+          reasonSignals: ['responsibility-match', 'graph-anchored'],
+        }),
       }),
     );
     expect(parsed.debug).toEqual(
       expect.objectContaining({
-        serviceSummary: 'Found 1 precedents for file target.',
+        details: expect.objectContaining({
+          serviceSummary: 'Found 1 precedents for file target.',
+        }),
       }),
     );
-    expect(parsed.results.primary[0].score).toBe(0.83);
+    expect(parsed.results.primary[0].score).toBeNull();
   });
 
   it('scopes precedents to the resolved target repository by default', async () => {
@@ -562,21 +569,6 @@ describe('find_precedents tool', () => {
       },
       candidates: [
         {
-          patternId: 'pattern:toast-provider',
-          fileId: 'ifdt-gui:components/ui/ToastProvider.tsx',
-          filePath: 'components/ui/ToastProvider.tsx',
-          repoId: 'ifdt-gui',
-          symbolName: 'ToastProvider',
-          patternKind: 'component',
-          similarityScore: 0.77,
-          precedentScore: 0.81,
-          reasonSignals: ['graph-anchored'],
-          structuralAlignment: {
-            graphAnchored: true,
-            structuralContextStrength: 'medium',
-          },
-        },
-        {
           patternId: 'pattern:error-state',
           fileId: 'ibm-strings:components/common/error-state.tsx',
           filePath: 'components/common/error-state.tsx',
@@ -592,7 +584,8 @@ describe('find_precedents tool', () => {
           },
         },
       ],
-      summary: 'Found 2 structurally similar precedents.',
+      summary: 'Found 1 structurally similar precedents.',
+      totalCandidateCount: 1,
     });
 
     const result = await runFindPrecedentsTool({
@@ -735,6 +728,7 @@ describe('find_precedents tool', () => {
         },
       ],
       summary: 'Found 3 precedents for ContractDetailPage.',
+      totalCandidateCount: 3,
     });
 
     const result = await runFindPrecedentsTool({

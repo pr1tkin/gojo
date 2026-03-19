@@ -1,8 +1,9 @@
 import type { ToolTrustMetadata } from '../tools/trust-metadata.js';
 import type { ResultExplainabilitySignals } from '../orchestrator/types.js';
 import { buildNormalizedDiagnostics, buildNormalizedTruncation, mergeNormalizedDiagnostics } from './diagnostics-builder.js';
-import { buildNormalizedExpansion } from './expansion-builder.js';
+import { buildExpansionRefId, buildNormalizedExpansion } from './expansion-builder.js';
 import { buildNormalizedExplanation, normalizeExplanationSignals } from './explanation-builder.js';
+import { buildNormalizedDebugPayload } from './mode-shaping.js';
 import { buildNormalizedNextAction } from './next-actions-builder.js';
 import { createNormalizedResponse } from './normalized-response.js';
 import { buildNormalizedResultTiers, buildNormalizedSummary } from './summary-builder.js';
@@ -109,7 +110,6 @@ export interface NormalizedFindPrecedentResult extends NormalizedResultBase {
   matchStrength: ConfidenceLevel;
   grounding: FindPrecedentsGrounding;
   relationship: FindPrecedentsRelationship;
-  debug?: RawFindPrecedentResult['debug'];
 }
 
 export interface NormalizedFindPrecedentsTarget {
@@ -132,7 +132,6 @@ export interface NormalizedFindPrecedentsTarget {
 export interface FindPrecedentsNormalizedResponse
   extends NormalizedToolResponse<NormalizedFindPrecedentResult> {
   target: NormalizedFindPrecedentsTarget;
-  debug?: RawFindPrecedentsResponse['debug'];
 }
 
 export interface FindPrecedentsNormalizationInput {
@@ -157,7 +156,7 @@ function buildSharedContextExpansions(raw: RawFindPrecedentsResponse): Record<st
   const expansions = new Map<string, NormalizedExpansion>();
 
   if (raw.familyContext?.familyRef) {
-    const familyId = `family:${raw.familyContext.familyRef}`;
+    const familyId = buildExpansionRefId('family', raw.familyContext.familyRef);
     expansions.set(
       familyId,
       buildNormalizedExpansion({
@@ -175,7 +174,7 @@ function buildSharedContextExpansions(raw: RawFindPrecedentsResponse): Record<st
   }
 
   for (const [familyRef, family] of Object.entries(raw.sharedContext?.families ?? {})) {
-    const id = `family:${familyRef}`;
+    const id = buildExpansionRefId('family', familyRef);
     expansions.set(
       id,
       buildNormalizedExpansion({
@@ -192,7 +191,7 @@ function buildSharedContextExpansions(raw: RawFindPrecedentsResponse): Record<st
   }
 
   for (const [clusterRef, cluster] of Object.entries(raw.sharedContext?.clusters ?? {})) {
-    const id = `cluster:${clusterRef}`;
+    const id = buildExpansionRefId('cluster', clusterRef);
     expansions.set(
       id,
       buildNormalizedExpansion({
@@ -215,11 +214,11 @@ function buildSharedContextExpansions(raw: RawFindPrecedentsResponse): Record<st
 
 function buildResultExpansionId(result: RawFindPrecedentResult): string | undefined {
   if (result.clusterRef) {
-    return `cluster:${result.clusterRef}`;
+    return buildExpansionRefId('cluster', result.clusterRef);
   }
 
   if (result.familyRef) {
-    return `family:${result.familyRef}`;
+    return buildExpansionRefId('family', result.familyRef);
   }
 
   return undefined;
@@ -235,7 +234,7 @@ function normalizeResult(
       : `${result.repoId}:${result.filePath}`,
     kind: 'precedent',
     title: result.symbolName ?? result.filePath,
-    ...(mode === 'debug' && result.debug?.precedentScore !== undefined ? { score: result.debug.precedentScore } : {}),
+    score: null,
     confidence: result.confidence,
     explanation: buildNormalizedExplanation({
       mode,
@@ -256,7 +255,7 @@ function normalizeResult(
     matchStrength: result.matchStrength,
     grounding: result.grounding,
     relationship: result.relationship,
-    ...(mode === 'debug' && result.debug ? { debug: result.debug } : {}),
+    debug: buildNormalizedDebugPayload(mode, result.debug ?? null),
   };
 }
 
@@ -264,8 +263,8 @@ function normalizeTarget(
   raw: RawFindPrecedentsResponse,
   expansions: Record<string, NormalizedExpansion>,
 ): NormalizedFindPrecedentsTarget {
-  const familyExpansionId = raw.target.familyRef ? `family:${raw.target.familyRef}` : undefined;
-  const clusterExpansionId = raw.target.clusterRef ? `cluster:${raw.target.clusterRef}` : undefined;
+  const familyExpansionId = raw.target.familyRef ? buildExpansionRefId('family', raw.target.familyRef) : undefined;
+  const clusterExpansionId = raw.target.clusterRef ? buildExpansionRefId('cluster', raw.target.clusterRef) : undefined;
   const expansionId =
     (clusterExpansionId && expansions[clusterExpansionId] ? clusterExpansionId : undefined) ??
     (familyExpansionId && expansions[familyExpansionId] ? familyExpansionId : undefined);
@@ -406,11 +405,11 @@ export function normalizeFindPrecedentsResponse(
     nextActions: buildNextActions(raw),
     diagnostics,
     expansions: Object.values(expansions),
+    debug: raw.debug ?? null,
   });
 
   return {
     ...response,
     target: normalizeTarget(raw, response.expansions),
-    ...(input.mode === 'debug' && raw.debug ? { debug: raw.debug } : {}),
   };
 }

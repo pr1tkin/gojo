@@ -67,11 +67,14 @@ function mapRankedRelatedFiles(
 export async function assembleRelatedFileContext(
   fileId: string,
   options: AssembleFileContextOptions = {},
-): Promise<RankedFileContextItem[]> {
+): Promise<{ items: RankedFileContextItem[]; totalCount: number }> {
   const targetRelation = await getFileRelationById(fileId);
 
   if (!targetRelation) {
-    return [];
+    return {
+      items: [],
+      totalCount: 0,
+    };
   }
 
   const relatedFiles = await getRelatedFiles(fileId);
@@ -93,10 +96,15 @@ export async function assembleRelatedFileContext(
       relation,
       graphSignals: signalsByFileId.get(relation.fileId),
     })),
-    options.relatedLimit ?? DEFAULT_RELATED_LIMIT,
+    Number.MAX_SAFE_INTEGER,
   );
 
-  return mapRankedRelatedFiles(ranked, filesById, signalsByFileId);
+  const mapped = mapRankedRelatedFiles(ranked, filesById, signalsByFileId);
+
+  return {
+    items: mapped.slice(0, options.relatedLimit ?? DEFAULT_RELATED_LIMIT),
+    totalCount: mapped.length,
+  };
 }
 
 export async function assembleFileContext(
@@ -112,6 +120,7 @@ export async function assembleFileContext(
       repo: null,
       neighboringFiles: [],
       relatedFiles: [],
+      totalRelatedFiles: 0,
       definedSymbols: [],
       exportedSymbols: [],
     };
@@ -129,7 +138,8 @@ export async function assembleFileContext(
     file,
     repo: file.repoId,
     neighboringFiles,
-    relatedFiles,
+    relatedFiles: relatedFiles.items,
+    totalRelatedFiles: relatedFiles.totalCount,
     definedSymbols,
     exportedSymbols,
   };

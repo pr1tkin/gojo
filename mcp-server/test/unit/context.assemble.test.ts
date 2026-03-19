@@ -172,10 +172,14 @@ describe('context assembly', () => {
       repo: null,
       neighboringFiles: [],
       relatedFiles: [],
+      totalRelatedFiles: 0,
       definedSymbols: [],
       exportedSymbols: [],
     });
-    expect(missingRelatedContext).toEqual([]);
+    expect(missingRelatedContext).toEqual({
+      items: [],
+      totalCount: 0,
+    });
     expect(missingSymbolContext).toEqual({
       query: 'MissingSymbol',
       repo: undefined,
@@ -184,6 +188,8 @@ describe('context assembly', () => {
       primarySymbol: null,
       primaryFile: null,
       relatedFiles: [],
+      totalRankedSymbols: 0,
+      totalRelatedFiles: 0,
       exportedSymbols: [],
     });
   });

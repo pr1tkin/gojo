@@ -63,11 +63,18 @@ function buildSymbolCandidates(
   }));
 }
 
-async function collectNearbyFiles(fileId: string, repo: string, limit: number): Promise<RefactorNearbyFile[]> {
+async function collectNearbyFiles(
+  fileId: string,
+  repo: string,
+  limit: number,
+): Promise<{ items: RefactorNearbyFile[]; totalCount: number }> {
   const targetRelation = await getFileRelationById(fileId);
 
   if (!targetRelation) {
-    return [];
+    return {
+      items: [],
+      totalCount: 0,
+    };
   }
 
   const relations = await listFileRelations();
@@ -101,7 +108,7 @@ async function collectNearbyFiles(fileId: string, repo: string, limit: number): 
     });
   }
 
-  return Array.from(nearby.values())
+  const items = Array.from(nearby.values())
     .sort((left, right) => {
       if (left.category !== right.category) {
         return left.category === 'bundle_family' ? -1 : 1;
@@ -110,6 +117,11 @@ async function collectNearbyFiles(fileId: string, repo: string, limit: number): 
       return compareFiles(left.file, right.file);
     })
     .slice(0, limit);
+
+  return {
+    items,
+    totalCount: nearby.size,
+  };
 }
 
 function buildMissingContext(
@@ -117,10 +129,12 @@ function buildMissingContext(
   mode: RefactorContextMode,
   repo?: string,
   symbolCandidates: RefactorSymbolCandidate[] = [],
+  totalSymbolCandidateCount?: number,
 ): RefactorContext {
   const notes = ['target could not be resolved from the current symbol index and graph'];
+  const symbolCandidateCount = totalSymbolCandidateCount ?? symbolCandidates.length;
 
-  if (symbolCandidates.length > 1) {
+  if (symbolCandidateCount > 1) {
     notes.push('multiple symbol candidates were found, but no primary file could be resolved safely');
   }
 
@@ -151,9 +165,10 @@ function buildMissingContext(
       graphNeighborCount: 0,
       relatedFileCount: 0,
       nearbyFileCount: 0,
+      symbolCandidateCount,
       exportedSymbolCount: 0,
       definedSymbolCount: 0,
-      ambiguityDetected: symbolCandidates.length > 1,
+      ambiguityDetected: symbolCandidateCount > 1,
       notes,
     },
   };
@@ -166,6 +181,7 @@ async function buildResolvedContext(
   repo: string,
   symbol: RefactorContext['target']['symbol'],
   symbolCandidates: RefactorSymbolCandidate[],
+  totalSymbolCandidateCount: number,
   limit: number,
 ): Promise<RefactorContext> {
   const [
@@ -198,7 +214,7 @@ async function buildResolvedContext(
 
   const notes: string[] = [];
 
-  if (symbolCandidates.length > 1) {
+  if (totalSymbolCandidateCount > 1) {
     notes.push('multiple symbol candidates matched; the strongest ranked candidate was selected');
   }
 
@@ -206,7 +222,7 @@ async function buildResolvedContext(
     notes.push('direct importers are likely to be the highest-impact change surface');
   }
 
-  if (nearbyFiles.some((entry) => entry.category === 'bundle_family')) {
+  if (nearbyFiles.items.some((entry) => entry.category === 'bundle_family')) {
     notes.push('bundle-family files were included to capture tests, stories, or style companions');
   }
 
@@ -226,7 +242,7 @@ async function buildResolvedContext(
     reexportedFiles: reexportedFiles.sort(compareFiles),
     graphNeighbors: graphNeighbors.sort(compareFiles),
     relatedFiles: fileContext.relatedFiles.slice(0, limit),
-    nearbyFiles,
+    nearbyFiles: nearbyFiles.items,
     definedSymbols,
     symbolCandidates,
     summary: {
@@ -235,11 +251,12 @@ async function buildResolvedContext(
       reexportingFileCount: reexportingFiles.length,
       reexportedFileCount: reexportedFiles.length,
       graphNeighborCount: graphNeighbors.length,
-      relatedFileCount: fileContext.relatedFiles.length,
-      nearbyFileCount: nearbyFiles.length,
+      relatedFileCount: fileContext.summary.totalRelatedFileCount,
+      nearbyFileCount: nearbyFiles.totalCount,
+      symbolCandidateCount: totalSymbolCandidateCount,
       exportedSymbolCount: exportedSymbols.length,
       definedSymbolCount: definedSymbols.length,
-      ambiguityDetected: symbolCandidates.length > 1,
+      ambiguityDetected: totalSymbolCandidateCount > 1,
       notes,
     },
   };
@@ -258,6 +275,7 @@ export async function getRefactorContextForFile(
       relation.repo,
       null,
       [],
+      0,
       options.limit ?? DEFAULT_LIMIT,
     );
   } catch {
@@ -280,10 +298,19 @@ export async function getRefactorContextForSymbol(
   const repo = symbolContext.primarySymbol?.repo ?? symbolContext.primaryFile?.repoId ?? options.repo;
 
   if (!primaryFileId || !repo) {
-    return buildMissingContext(name, 'symbol', options.repo, symbolCandidates);
+    return buildMissingContext(name, 'symbol', options.repo, symbolCandidates, symbolContext.summary.totalCandidateCount);
   }
 
-  return buildResolvedContext(name, 'symbol', primaryFileId, repo, symbolContext.primarySymbol, symbolCandidates, limit);
+  return buildResolvedContext(
+    name,
+    'symbol',
+    primaryFileId,
+    repo,
+    symbolContext.primarySymbol,
+    symbolCandidates,
+    symbolContext.summary.totalCandidateCount,
+    limit,
+  );
 }
 
 export async function getRefactorContextForComponent(

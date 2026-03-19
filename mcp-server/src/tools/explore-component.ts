@@ -163,7 +163,7 @@ export async function runExploreComponentTool(
       };
     }),
   );
-  const ambiguityDetected = candidateSummaries.length > 1;
+  const ambiguityDetected = symbolContext.summary.totalCandidateCount > 1;
   const uiHierarchy =
     symbolContext.primarySymbol && (fileContext?.primaryFile ?? symbolContext.primaryFile)
       ? await getUiHierarchySummary({
@@ -213,7 +213,7 @@ export async function runExploreComponentTool(
     ...(resolvedPrimarySymbolExplanation?.clusterRef ? { clusterRef: resolvedPrimarySymbolExplanation.clusterRef } : {}),
     ...(resolvedPrimarySymbolExplanation?.membership ? { membership: resolvedPrimarySymbolExplanation.membership } : {}),
     resolution: {
-      candidateCount: candidateSummaries.length,
+      candidateCount: symbolContext.summary.totalCandidateCount,
       ambiguityDetected,
     },
     symbolSurface: {
@@ -273,10 +273,11 @@ export async function runExploreComponentTool(
       uiCompleteness: uiHierarchy?.renderTreeSummary.completeness ?? null,
     },
     internal: {
-      totalRelatedCount: fileContext?.summary.relatedFileCount ?? symbolContext.summary.relatedFileCount,
+      totalRelatedCount:
+        fileContext?.summary.totalRelatedFileCount ?? symbolContext.summary.totalRelatedFileCount,
       returnedRelatedCount: relatedFiles.length,
       appliedRelatedLimit: input.relatedLimit ?? DEFAULT_RELATED_LIMIT,
-      totalCandidateCount: symbolContext.summary.candidateCount,
+      totalCandidateCount: symbolContext.summary.totalCandidateCount,
       returnedCandidateCount: candidateSummaries.length,
       appliedCandidateLimit: input.limit ?? DEFAULT_CANDIDATE_LIMIT,
       navigationHintLimit: 3,

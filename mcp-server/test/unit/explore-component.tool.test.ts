@@ -173,7 +173,9 @@ describe('explore_component tool', () => {
       ],
       summary: {
         candidateCount: 1,
+        totalCandidateCount: 1,
         relatedFileCount: 0,
+        totalRelatedFileCount: 0,
         exportedSymbolCount: 1,
       },
       rawContext: {},
@@ -247,6 +249,7 @@ describe('explore_component tool', () => {
       ],
       summary: {
         relatedFileCount: 2,
+        totalRelatedFileCount: 2,
         neighboringFileCount: 0,
         definedSymbolCount: 1,
         exportedSymbolCount: 1,
@@ -433,7 +436,7 @@ describe('explore_component tool', () => {
     );
     expect(parsed.expansions).toEqual(
       expect.objectContaining({
-        'cluster:cluster:component:button': expect.objectContaining({
+        'cluster:component:button': expect.objectContaining({
           kind: 'cluster-context',
         }),
         'ui-renders:repo-gamma:components/ui/Button.tsx:function:Button:1': expect.objectContaining({
@@ -458,7 +461,9 @@ describe('explore_component tool', () => {
       exportedSymbols: [],
       summary: {
         candidateCount: 0,
+        totalCandidateCount: 0,
         relatedFileCount: 0,
+        totalRelatedFileCount: 0,
         exportedSymbolCount: 0,
       },
       rawContext: {},
@@ -501,7 +506,9 @@ describe('explore_component tool', () => {
       exportedSymbols: [],
       summary: {
         candidateCount: 0,
+        totalCandidateCount: 0,
         relatedFileCount: 0,
+        totalRelatedFileCount: 0,
         exportedSymbolCount: 0,
       },
       rawContext: {},
@@ -516,6 +523,7 @@ describe('explore_component tool', () => {
       exportedSymbols: [],
       summary: {
         relatedFileCount: 0,
+        totalRelatedFileCount: 0,
         neighboringFileCount: 0,
         definedSymbolCount: 0,
         exportedSymbolCount: 0,

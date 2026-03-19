@@ -191,7 +191,7 @@ export async function runCollectRefactorContextTool(
     ...(targetSymbol?.clusterRef ? { clusterRef: targetSymbol.clusterRef } : {}),
     ...(targetSymbol?.membership ? { membership: targetSymbol.membership } : {}),
     resolution: {
-      candidateCount: result.symbolCandidates.length,
+      candidateCount: result.summary.symbolCandidateCount,
       ambiguityDetected: result.summary.ambiguityDetected,
     },
     symbolSurface: {
@@ -265,10 +265,10 @@ export async function runCollectRefactorContextTool(
       totalRelatedCount: result.summary.relatedFileCount,
       appliedRelatedLimit: input.limit,
       returnedNearbyCount: Math.min(nearbyFiles.length, input.expandRelated ? 6 : 3),
-      totalNearbyCount: nearbyFiles.length,
+      totalNearbyCount: result.summary.nearbyFileCount,
       appliedNearbyLimit: input.expandRelated ? 6 : 3,
       returnedCandidateCount: Math.min(symbolCandidates.length, input.expandRelated ? 6 : 3),
-      totalCandidateCount: symbolCandidates.length,
+      totalCandidateCount: result.summary.symbolCandidateCount,
       appliedCandidateLimit: input.expandRelated ? 6 : 3,
       navigationHintLimit: 3,
     },

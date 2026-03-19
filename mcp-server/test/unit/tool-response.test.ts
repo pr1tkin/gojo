@@ -42,6 +42,7 @@ describe('tool response normalization foundations', () => {
         warnings: [],
       },
       expansions: {},
+      debug: null,
     });
   });
 
@@ -190,7 +191,6 @@ describe('tool response normalization foundations', () => {
       warnings: ['partial result', 'search freshness pending'],
       truncation,
       truncations: [
-        truncation,
         {
           type: 'candidates',
           truncated: true,

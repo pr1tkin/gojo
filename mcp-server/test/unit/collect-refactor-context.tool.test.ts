@@ -150,6 +150,7 @@ describe('collect_refactor_context tool', () => {
         graphNeighborCount: 0,
         relatedFileCount: 1,
         nearbyFileCount: 1,
+        symbolCandidateCount: 1,
         exportedSymbolCount: 1,
         definedSymbolCount: 1,
         ambiguityDetected: false,
@@ -284,7 +285,7 @@ describe('collect_refactor_context tool', () => {
     );
     expect(parsed.expansions).toEqual(
       expect.objectContaining({
-        'cluster:cluster:article-content': expect.objectContaining({
+        'cluster:article-content': expect.objectContaining({
           kind: 'cluster-context',
         }),
         'refactor:importing-files': expect.objectContaining({
@@ -325,6 +326,7 @@ describe('collect_refactor_context tool', () => {
         graphNeighborCount: 0,
         relatedFileCount: 0,
         nearbyFileCount: 0,
+        symbolCandidateCount: 0,
         exportedSymbolCount: 0,
         definedSymbolCount: 0,
         ambiguityDetected: false,
@@ -385,6 +387,7 @@ describe('collect_refactor_context tool', () => {
         graphNeighborCount: 0,
         relatedFileCount: 0,
         nearbyFileCount: 0,
+        symbolCandidateCount: 0,
         exportedSymbolCount: 0,
         definedSymbolCount: 0,
         ambiguityDetected: false,

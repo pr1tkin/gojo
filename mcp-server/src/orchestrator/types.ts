@@ -58,6 +58,7 @@ export interface FileExplorationContext {
   exportedSymbols: SymbolNode[];
   summary: {
     relatedFileCount: number;
+    totalRelatedFileCount: number;
     neighboringFileCount: number;
     definedSymbolCount: number;
     exportedSymbolCount: number;
@@ -87,7 +88,9 @@ export interface SymbolExplorationContext {
   exportedSymbols: SymbolNode[];
   summary: {
     candidateCount: number;
+    totalCandidateCount: number;
     relatedFileCount: number;
+    totalRelatedFileCount: number;
     exportedSymbolCount: number;
   };
   rawContext: SymbolContextBundle;
@@ -212,6 +215,7 @@ export interface RefactorContext {
     graphNeighborCount: number;
     relatedFileCount: number;
     nearbyFileCount: number;
+    symbolCandidateCount: number;
     exportedSymbolCount: number;
     definedSymbolCount: number;
     ambiguityDetected: boolean;

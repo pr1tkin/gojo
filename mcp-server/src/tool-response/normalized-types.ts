@@ -30,7 +30,9 @@ export interface NormalizedTruncation {
 
 export interface NormalizedDiagnostics {
   warnings: string[];
+  // Primary truncation entry for consumers that only need one limit signal.
   truncation?: NormalizedTruncation;
+  // Additional truncation entries beyond `truncation`, kept separate to avoid duplicate reporting.
   truncations?: NormalizedTruncation[];
   limits?: {
     resultLimit?: number;
@@ -51,11 +53,15 @@ export interface NormalizedExpansion {
 
 export type NormalizedExplanationSignalValue = ConfidenceLevel | string | number | boolean | null;
 
+export interface NormalizedDebugPayload {
+  details?: Record<string, unknown>;
+}
+
 export interface NormalizedResultBase {
   id: string;
   kind: string;
   title: string;
-  score?: number;
+  score?: number | null;
   confidence?: ConfidenceLevel;
   explanation: {
     short: string;
@@ -66,6 +72,8 @@ export interface NormalizedResultBase {
     symbolNames?: string[];
   };
   expansionId?: string;
+  // Present in both agent and debug modes so field presence stays stable across mode changes.
+  debug?: NormalizedDebugPayload | null;
 }
 
 export interface NormalizedEvidenceItem {
@@ -97,4 +105,6 @@ export interface NormalizedToolResponse<T extends NormalizedResultBase> {
   nextActions: NormalizedNextAction[];
   diagnostics: NormalizedDiagnostics;
   expansions: Record<string, NormalizedExpansion>;
+  // Present in both agent and debug modes so adapters enrich values instead of mutating shape.
+  debug?: NormalizedDebugPayload | null;
 }

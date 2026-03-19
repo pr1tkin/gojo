@@ -5,8 +5,9 @@ import {
   buildNormalizedTruncation,
   mergeNormalizedDiagnostics,
 } from './diagnostics-builder.js';
-import { buildNormalizedExpansion } from './expansion-builder.js';
+import { buildExpansionRefId, buildNormalizedExpansion } from './expansion-builder.js';
 import { buildNormalizedExplanation, normalizeExplanationSignals } from './explanation-builder.js';
+import { buildNormalizedDebugPayload } from './mode-shaping.js';
 import { buildNormalizedNextAction } from './next-actions-builder.js';
 import { createNormalizedResponse } from './normalized-response.js';
 import { buildNormalizedResultTiers, buildNormalizedSummary } from './summary-builder.js';
@@ -165,7 +166,6 @@ export interface NormalizedExploreComponentResult extends NormalizedResultBase {
   membership?: ExploreComponentMembership;
   matchStrength: ConfidenceLevel;
   relationshipKinds: string[];
-  debug?: RawExploreComponentRelatedResult['debug'];
 }
 
 export interface NormalizedExploreComponentAlternative extends NormalizedResultBase {
@@ -181,7 +181,6 @@ export interface NormalizedExploreComponentAlternative extends NormalizedResultB
   clusterRef?: string;
   membership?: ExploreComponentMembership;
   matchStrength: ConfidenceLevel;
-  debug?: RawExploreComponentCandidate['debug'];
 }
 
 export interface NormalizedExploreComponentTarget {
@@ -252,7 +251,7 @@ function buildSharedContextExpansions(raw: RawExploreComponentResponse): Record<
   const expansions = new Map<string, NormalizedExpansion>();
 
   for (const [familyRef, family] of Object.entries(raw.sharedContext?.families ?? {})) {
-    const id = `family:${familyRef}`;
+    const id = buildExpansionRefId('family', familyRef);
     expansions.set(
       id,
       buildNormalizedExpansion({
@@ -269,7 +268,7 @@ function buildSharedContextExpansions(raw: RawExploreComponentResponse): Record<
   }
 
   for (const [clusterRef, cluster] of Object.entries(raw.sharedContext?.clusters ?? {})) {
-    const id = `cluster:${clusterRef}`;
+    const id = buildExpansionRefId('cluster', clusterRef);
     expansions.set(
       id,
       buildNormalizedExpansion({
@@ -355,11 +354,11 @@ function buildSharedContextExpansions(raw: RawExploreComponentResponse): Record<
 
 function buildResultExpansionId(input: { familyRef?: string; clusterRef?: string }): string | undefined {
   if (input.clusterRef) {
-    return `cluster:${input.clusterRef}`;
+    return buildExpansionRefId('cluster', input.clusterRef);
   }
 
   if (input.familyRef) {
-    return `family:${input.familyRef}`;
+    return buildExpansionRefId('family', input.familyRef);
   }
 
   return undefined;
@@ -394,7 +393,7 @@ function normalizeResult(
     ...(result.membership ? { membership: result.membership } : {}),
     matchStrength: result.matchStrength,
     relationshipKinds: result.via,
-    ...(mode === 'debug' && result.debug ? { debug: result.debug } : {}),
+    debug: buildNormalizedDebugPayload(mode, result.debug ?? null),
   };
 }
 
@@ -431,7 +430,7 @@ function normalizeAlternative(
     ...(candidate.clusterRef ? { clusterRef: candidate.clusterRef } : {}),
     ...(candidate.membership ? { membership: candidate.membership } : {}),
     matchStrength: candidate.matchStrength,
-    ...(mode === 'debug' && candidate.debug ? { debug: candidate.debug } : {}),
+    debug: buildNormalizedDebugPayload(mode, candidate.debug ?? null),
   };
 }
 
@@ -443,8 +442,8 @@ function normalizeTarget(
   const renderedByExpansionId = raw.results.ui?.renderedBy?.length
     ? `ui-rendered-by:${raw.target.symbolId ?? raw.target.filePath ?? raw.requestedName}`
     : undefined;
-  const clusterExpansionId = raw.target.clusterRef ? `cluster:${raw.target.clusterRef}` : undefined;
-  const familyExpansionId = raw.target.familyRef ? `family:${raw.target.familyRef}` : undefined;
+  const clusterExpansionId = raw.target.clusterRef ? buildExpansionRefId('cluster', raw.target.clusterRef) : undefined;
+  const familyExpansionId = raw.target.familyRef ? buildExpansionRefId('family', raw.target.familyRef) : undefined;
   const expansionId =
     (rendersExpansionId && expansions[rendersExpansionId] ? rendersExpansionId : undefined) ??
     (clusterExpansionId && expansions[clusterExpansionId] ? clusterExpansionId : undefined) ??
@@ -683,6 +682,7 @@ export function normalizeExploreComponentResponse(
     nextActions: buildNextActions(raw),
     diagnostics,
     expansions: Object.values(expansions),
+    debug: null,
   });
 
   const normalizedAlternatives = raw.results.alternatives?.map((candidate) =>

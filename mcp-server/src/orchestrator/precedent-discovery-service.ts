@@ -423,58 +423,74 @@ export class PrecedentDiscoveryService {
     return candidates.sort((left, right) => comparePrecedents(left.candidate, right.candidate)).slice(0, limit);
   }
 
-  findPrecedentsForSymbol(symbolId: string, limit: number = DEFAULT_PRECEDENT_LIMIT): PrecedentDiscoveryResult {
+  findPrecedentsForSymbol(
+    symbolId: string,
+    limit: number = DEFAULT_PRECEDENT_LIMIT,
+    repoId?: string,
+  ): PrecedentDiscoveryResult {
     const patterns = this.getPatternsForSymbol(symbolId);
     const symbol = this.symbolById.get(symbolId) ?? null;
-    const target = createTarget(symbol, patterns, { symbolId, limit });
+    const target = createTarget(symbol, patterns, { symbolId, limit, repoId });
 
     if (patterns.length === 0) {
       return {
         target,
         candidates: [],
+        totalCandidateCount: 0,
         summary: summarizePrecedents(target, []),
       };
     }
 
-    return this.findPrecedentsFromPatterns(target, pickTargetPatterns(patterns), limit);
+    return this.findPrecedentsFromPatterns(target, pickTargetPatterns(patterns), limit, repoId);
   }
 
-  findPrecedentsForPattern(patternId: string, limit: number = DEFAULT_PRECEDENT_LIMIT): PrecedentDiscoveryResult {
+  findPrecedentsForPattern(
+    patternId: string,
+    limit: number = DEFAULT_PRECEDENT_LIMIT,
+    repoId?: string,
+  ): PrecedentDiscoveryResult {
     const pattern = this.patternById.get(patternId) ?? null;
     const symbol = pattern?.symbolId ? this.symbolById.get(pattern.symbolId) ?? null : null;
-    const target = createTarget(symbol, pattern ? [pattern] : [], { patternId, limit });
+    const target = createTarget(symbol, pattern ? [pattern] : [], { patternId, limit, repoId });
 
     if (!pattern) {
       return {
         target,
         candidates: [],
+        totalCandidateCount: 0,
         summary: summarizePrecedents(target, []),
       };
     }
 
-    return this.findPrecedentsFromPatterns(target, [pattern], limit);
+    return this.findPrecedentsFromPatterns(target, [pattern], limit, repoId);
   }
 
-  findPrecedentsForFile(fileId: string, limit: number = DEFAULT_PRECEDENT_LIMIT): PrecedentDiscoveryResult {
+  findPrecedentsForFile(
+    fileId: string,
+    limit: number = DEFAULT_PRECEDENT_LIMIT,
+    repoId?: string,
+  ): PrecedentDiscoveryResult {
     const patterns = this.getPatternsForFile(fileId);
     const symbol = this.symbolIndex.symbols.find((entry) => entry.fileId === fileId && Boolean(entry.exported)) ?? null;
-    const target = createTarget(symbol, patterns, { fileId, limit });
+    const target = createTarget(symbol, patterns, { fileId, limit, repoId });
 
     if (patterns.length === 0) {
       return {
         target,
         candidates: [],
+        totalCandidateCount: 0,
         summary: summarizePrecedents(target, []),
       };
     }
 
-    return this.findPrecedentsFromPatterns(target, pickTargetPatterns(patterns), limit);
+    return this.findPrecedentsFromPatterns(target, pickTargetPatterns(patterns), limit, repoId);
   }
 
   private findPrecedentsFromPatterns(
     target: PrecedentDiscoveryTarget,
     patterns: PatternCandidate[],
     limit: number,
+    repoId?: string,
   ): PrecedentDiscoveryResult {
     const aggregated = new Map<string, AggregateCandidate>();
 
@@ -497,14 +513,17 @@ export class PrecedentDiscoveryService {
       }
     }
 
-    const candidates = [...aggregated.values()]
+    const sortedCandidates = [...aggregated.values()]
       .map((entry) => entry.candidate)
+      .filter((candidate) => (repoId ? candidate.repoId === repoId : true))
       .sort(comparePrecedents)
-      .slice(0, limit);
+    ;
+    const candidates = sortedCandidates.slice(0, limit);
 
     return {
       target,
       candidates,
+      totalCandidateCount: sortedCandidates.length,
       summary: summarizePrecedents(target, candidates),
     };
   }
@@ -539,20 +558,23 @@ export async function createPrecedentDiscoveryService(): Promise<PrecedentDiscov
 export async function findPrecedentsForSymbol(
   symbolId: string,
   limit: number = DEFAULT_PRECEDENT_LIMIT,
+  repoId?: string,
 ): Promise<PrecedentDiscoveryResult> {
-  return (await createPrecedentDiscoveryService()).findPrecedentsForSymbol(symbolId, limit);
+  return (await createPrecedentDiscoveryService()).findPrecedentsForSymbol(symbolId, limit, repoId);
 }
 
 export async function findPrecedentsForPattern(
   patternId: string,
   limit: number = DEFAULT_PRECEDENT_LIMIT,
+  repoId?: string,
 ): Promise<PrecedentDiscoveryResult> {
-  return (await createPrecedentDiscoveryService()).findPrecedentsForPattern(patternId, limit);
+  return (await createPrecedentDiscoveryService()).findPrecedentsForPattern(patternId, limit, repoId);
 }
 
 export async function findPrecedentsForFile(
   fileId: string,
   limit: number = DEFAULT_PRECEDENT_LIMIT,
+  repoId?: string,
 ): Promise<PrecedentDiscoveryResult> {
-  return (await createPrecedentDiscoveryService()).findPrecedentsForFile(fileId, limit);
+  return (await createPrecedentDiscoveryService()).findPrecedentsForFile(fileId, limit, repoId);
 }

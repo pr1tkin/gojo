@@ -42,22 +42,25 @@ export async function assembleSymbolContext(query: SymbolContextQuery): Promise<
     {
       stats: index.stats,
     },
-  ).slice(0, query.limit);
-  const primarySymbol = rankedSymbols[0]?.item ?? null;
+  );
+  const limitedRankedSymbols = rankedSymbols.slice(0, query.limit);
+  const primarySymbol = limitedRankedSymbols[0]?.item ?? null;
   const primaryFile = primarySymbol ? await getFileNode(primarySymbol.fileId) : null;
   const relatedFiles = primarySymbol
     ? await assembleRelatedFileContext(primarySymbol.fileId, { relatedLimit: query.relatedLimit })
-    : [];
+    : { items: [], totalCount: 0 };
   const exportedSymbols = primarySymbol ? await getExportedSymbols(primarySymbol.fileId) : [];
 
   return {
     query: query.name,
     repo: query.repo,
     kind: query.kind,
-    rankedSymbols,
+    rankedSymbols: limitedRankedSymbols,
+    totalRankedSymbols: rankedSymbols.length,
     primarySymbol,
     primaryFile,
-    relatedFiles,
+    relatedFiles: relatedFiles.items,
+    totalRelatedFiles: relatedFiles.totalCount,
     exportedSymbols,
   };
 }

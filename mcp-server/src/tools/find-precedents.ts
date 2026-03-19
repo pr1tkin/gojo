@@ -201,22 +201,27 @@ export async function runFindPrecedentsTool(
   );
   const metadata = await buildPatternTrustMetadata(patternContext);
   const precedentService = await createPrecedentDiscoveryService();
-
-  let precedentResult = null;
-  if (patternContext.resolution.selectedCandidate?.symbolId) {
-    precedentResult = precedentService.findPrecedentsForSymbol(patternContext.resolution.selectedCandidate.symbolId, limit);
-  } else if (patternContext.primaryTarget.file?.fileId) {
-    precedentResult = precedentService.findPrecedentsForFile(patternContext.primaryTarget.file.fileId, limit);
-  }
-
   const targetRepoId =
     input.repo ??
     patternContext.primaryTarget.file?.repoId ??
-    precedentResult?.target.repoId ??
     null;
-  const scopedCandidates = precedentResult
-    ? precedentResult.candidates.filter((candidate) => (targetRepoId ? candidate.repoId === targetRepoId : true))
-    : [];
+
+  let precedentResult = null;
+  if (patternContext.resolution.selectedCandidate?.symbolId) {
+    precedentResult = precedentService.findPrecedentsForSymbol(
+      patternContext.resolution.selectedCandidate.symbolId,
+      limit,
+      targetRepoId ?? undefined,
+    );
+  } else if (patternContext.primaryTarget.file?.fileId) {
+    precedentResult = precedentService.findPrecedentsForFile(
+      patternContext.primaryTarget.file.fileId,
+      limit,
+      targetRepoId ?? undefined,
+    );
+  }
+
+  const scopedCandidates = precedentResult?.candidates ?? [];
   const compactPrecedents = precedentResult
     ? await Promise.all(
         scopedCandidates.slice(0, limit).map(async (candidate, index) => {
@@ -335,7 +340,7 @@ export async function runFindPrecedentsTool(
       metadata,
       [
         ...(compactPrecedents.length === 0 ? ['No reusable precedents were found for the resolved target'] : []),
-        ...(precedentResult && scopedCandidates.length === 0 && precedentResult.candidates.length > 0
+        ...(precedentResult && scopedCandidates.length === 0 && precedentResult.totalCandidateCount > 0
           ? ['No repo-local precedents remained after scoping results to the resolved target repository']
           : []),
       ],
@@ -359,7 +364,7 @@ export async function runFindPrecedentsTool(
       ? {
           debug: {
             serviceSummary:
-              scopedCandidates.length === precedentResult.candidates.length
+              scopedCandidates.length === precedentResult.totalCandidateCount
                 ? precedentResult.summary
                 : `Retained ${scopedCandidates.length} repo-local precedents after filtering cross-repository candidates.`,
             rawTarget: precedentResult.target,
@@ -368,7 +373,7 @@ export async function runFindPrecedentsTool(
       : {}),
     internal: {
       scopedCandidateCount: compactPrecedents.length,
-      totalCandidateCount: scopedCandidates.length,
+      totalCandidateCount: precedentResult?.totalCandidateCount ?? scopedCandidates.length,
       appliedLimit: limit,
       navigationHintLimit: microShaperEnabled && target.grounding === 'weak' ? 1 : 3,
     },

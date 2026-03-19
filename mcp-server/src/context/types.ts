@@ -19,6 +19,7 @@ export interface FileContextBundle {
   repo: string | null;
   neighboringFiles: FileNode[];
   relatedFiles: RankedFileContextItem[];
+  totalRelatedFiles: number;
   definedSymbols: SymbolNode[];
   exportedSymbols: SymbolNode[];
 }
@@ -40,8 +41,10 @@ export interface SymbolContextBundle {
   repo?: string;
   kind?: SymbolKind;
   rankedSymbols: RankedSymbolCandidate[];
+  totalRankedSymbols: number;
   primarySymbol: IndexedSymbol | null;
   primaryFile: FileNode | null;
   relatedFiles: RankedFileContextItem[];
+  totalRelatedFiles: number;
   exportedSymbols: SymbolNode[];
 }

@@ -176,6 +176,7 @@ describe('refactor context service', () => {
       exportedSymbols: [],
       summary: {
         relatedFileCount: 2,
+        totalRelatedFileCount: 2,
         neighboringFileCount: 0,
         definedSymbolCount: 0,
         exportedSymbolCount: 0,
@@ -234,7 +235,9 @@ describe('refactor context service', () => {
       exportedSymbols: [],
       summary: {
         candidateCount: 2,
+        totalCandidateCount: 2,
         relatedFileCount: 0,
+        totalRelatedFileCount: 0,
         exportedSymbolCount: 0,
       },
       rawContext: {},
@@ -270,6 +273,7 @@ describe('refactor context service', () => {
       reexportingFileCount: 1,
       relatedFileCount: 2,
       nearbyFileCount: 2,
+      symbolCandidateCount: 2,
       ambiguityDetected: true,
     }));
     expect(result.summary.notes).toEqual(expect.arrayContaining([
@@ -322,7 +326,9 @@ describe('refactor context service', () => {
       exportedSymbols: [],
       summary: {
         candidateCount: 1,
+        totalCandidateCount: 1,
         relatedFileCount: 0,
+        totalRelatedFileCount: 0,
         exportedSymbolCount: 0,
       },
       rawContext: {},

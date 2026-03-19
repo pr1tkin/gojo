@@ -1,10 +1,12 @@
 import { buildNormalizedDiagnostics, type BuildNormalizedDiagnosticsInput } from './diagnostics-builder.js';
 import { buildNormalizedEvidence } from './evidence-builder.js';
 import { buildNormalizedExpansions } from './expansion-builder.js';
+import { buildNormalizedDebugPayload } from './mode-shaping.js';
 import { buildNormalizedNextActions } from './next-actions-builder.js';
 import { buildNormalizedSummary } from './summary-builder.js';
 import type {
   NormalizedExpansion,
+  NormalizedDebugPayload,
   NormalizedEvidenceItem,
   NormalizedMode,
   NormalizedNextAction,
@@ -29,7 +31,22 @@ export interface CreateNormalizedResponseInput<T extends NormalizedResultBase> {
   nextActions?: NormalizedNextAction[];
   diagnostics?: BuildNormalizedDiagnosticsInput;
   expansions?: NormalizedExpansion[];
+  debug?: NormalizedDebugPayload | Record<string, unknown> | null;
   version?: string;
+}
+
+function toDebugDetails(
+  input: CreateNormalizedResponseInput<NormalizedResultBase>['debug'],
+): Record<string, unknown> | null | undefined {
+  if (input === null || input === undefined) {
+    return input;
+  }
+
+  if (typeof input === 'object' && !Array.isArray(input) && 'details' in input) {
+    return (input as NormalizedDebugPayload).details ?? {};
+  }
+
+  return input as Record<string, unknown>;
 }
 
 /**
@@ -54,5 +71,6 @@ export function createNormalizedResponse<T extends NormalizedResultBase>(
     nextActions: buildNormalizedNextActions(input.nextActions ?? [], { mode: input.mode }),
     diagnostics: buildNormalizedDiagnostics(input.diagnostics),
     expansions: buildNormalizedExpansions(input.expansions),
+    debug: buildNormalizedDebugPayload(input.mode, toDebugDetails(input.debug as CreateNormalizedResponseInput<NormalizedResultBase>['debug'])),
   };
 }

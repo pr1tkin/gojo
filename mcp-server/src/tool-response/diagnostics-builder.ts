@@ -61,6 +61,23 @@ function dedupeTruncations(
   return Array.from(new Map(values.map((truncation) => [buildTruncationKey(truncation), truncation])).values());
 }
 
+function splitPrimaryAndAdditionalTruncations(
+  truncations: NormalizedDiagnostics['truncations'] | undefined,
+): {
+  truncation?: NormalizedDiagnostics['truncation'];
+  truncations?: NormalizedDiagnostics['truncations'];
+} {
+  if (!truncations?.length) {
+    return {};
+  }
+
+  const [truncation, ...additional] = truncations;
+  return {
+    truncation,
+    ...(additional.length > 0 ? { truncations: additional } : {}),
+  };
+}
+
 export function mergeNormalizedDiagnostics(
   ...inputs: Array<BuildNormalizedDiagnosticsInput | undefined>
 ): NormalizedDiagnostics {
@@ -69,13 +86,13 @@ export function mergeNormalizedDiagnostics(
   const truncations = dedupeTruncations(
     inputs.flatMap((input) => [input?.truncation, ...(input?.truncations ?? [])]),
   );
-  const truncation = truncations?.[0];
+  const { truncation, truncations: additionalTruncations } = splitPrimaryAndAdditionalTruncations(truncations);
   const limits = Object.assign({}, ...inputs.map((input) => input?.limits ?? {}));
 
   return buildNormalizedDiagnostics({
     warnings,
     ...(truncation ? { truncation } : {}),
-    ...(truncations && truncations.length > 1 ? { truncations } : {}),
+    ...(additionalTruncations ? { truncations: additionalTruncations } : {}),
     ...(Object.keys(limits).length > 0 ? { limits } : {}),
     ...(notes ? { notes } : {}),
   });
@@ -86,13 +103,26 @@ export function buildNormalizedDiagnostics(
 ): NormalizedDiagnostics {
   const warnings = dedupe(input.warnings) ?? [];
   const notes = dedupe(input.notes);
-  const truncations = dedupeTruncations([input.truncation, ...(input.truncations ?? [])]);
-  const truncation = input.truncation ?? truncations?.[0];
+  const dedupedTruncations = dedupeTruncations([input.truncation, ...(input.truncations ?? [])]);
+  const {
+    truncation,
+    truncations,
+  } = input.truncation
+    ? {
+        truncation: input.truncation,
+        truncations: dedupeTruncations(
+          (input.truncations ?? []).filter(
+            (entry): entry is NonNullable<typeof entry> =>
+              Boolean(entry) && buildTruncationKey(entry) !== buildTruncationKey(input.truncation!),
+          ),
+        ),
+      }
+    : splitPrimaryAndAdditionalTruncations(dedupedTruncations);
 
   return {
     warnings,
     ...(truncation ? { truncation } : {}),
-    ...(truncations && truncations.length > 1 ? { truncations } : {}),
+    ...(truncations ? { truncations } : {}),
     ...(input.limits ? { limits: input.limits } : {}),
     ...(notes?.length ? { notes } : {}),
   };

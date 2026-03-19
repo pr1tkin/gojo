@@ -7,6 +7,7 @@ export interface FindPrecedentsInput {
   patternId?: string;
   fileId?: string;
   limit?: number;
+  repoId?: string;
 }
 
 export interface PrecedentDiscoveryTarget {
@@ -37,5 +38,6 @@ export interface PrecedentCandidate {
 export interface PrecedentDiscoveryResult {
   target: PrecedentDiscoveryTarget;
   candidates: PrecedentCandidate[];
+  totalCandidateCount: number;
   summary: string;
 }
