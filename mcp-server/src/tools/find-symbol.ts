@@ -3,6 +3,7 @@ import { rankSymbolCandidates } from '../ranking/index.js';
 import { loadSymbolIndex } from '../symbol-index/store.js';
 import type { FindSymbolInput } from '../types.js';
 import { findSymbolWithTypeScriptFallback } from '../typescript/fallback.js';
+import { buildStructuralTrustMetadata } from './trust-metadata.js';
 
 export const findSymbolToolDefinition = {
   name: 'find_symbol',
@@ -28,12 +29,20 @@ export async function runFindSymbolTool(
       stats: index.stats,
     },
   ).map((entry) => entry.item);
+  const metadata = await buildStructuralTrustMetadata();
 
   return {
     content: [
       {
         type: 'text',
-        text: JSON.stringify(rankedMatches, null, 2),
+        text: JSON.stringify(
+          {
+            matches: rankedMatches,
+            metadata,
+          },
+          null,
+          2,
+        ),
       },
     ],
   };

@@ -5,6 +5,7 @@ import {
   getPatternMatchesForSymbol,
 } from '../orchestrator/index.js';
 import type { SearchPatternsInput } from '../types.js';
+import { buildPatternTrustMetadata } from './trust-metadata.js';
 
 const DEFAULT_MATCH_LIMIT = 6;
 
@@ -30,6 +31,7 @@ export async function runSearchPatternsTool(
       : mode === 'symbol'
         ? await getPatternMatchesForSymbol(input.name, options)
         : await getPatternMatchesForComponent(input.name, options);
+  const metadata = await buildPatternTrustMetadata(result);
 
   return {
     content: [
@@ -40,6 +42,7 @@ export async function runSearchPatternsTool(
             requestedName: input.name,
             requestedRepo: input.repo,
             requestedMode: mode,
+            metadata,
             ...result,
           },
           null,

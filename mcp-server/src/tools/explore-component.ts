@@ -5,6 +5,7 @@ import {
   getUiHierarchySummary,
 } from '../orchestrator/index.js';
 import type { ExploreComponentInput } from '../types.js';
+import { buildExploreComponentTrustMetadata } from './trust-metadata.js';
 
 const DEFAULT_CANDIDATE_LIMIT = 5;
 const DEFAULT_RELATED_LIMIT = 10;
@@ -74,6 +75,10 @@ export async function runExploreComponentTool(
     definedSymbols: fileContext?.definedSymbols ?? [],
     exportedSymbols: fileContext?.exportedSymbols ?? symbolContext.exportedSymbols,
     ...(uiHierarchy ? { uiHierarchy } : {}),
+    metadata: await buildExploreComponentTrustMetadata({
+      renderTree: uiHierarchy?.renderTree,
+      completeness: uiHierarchy?.renderTreeSummary.completeness,
+    }),
     summary: {
       relatedFileCount: (fileContext?.relatedFiles ?? symbolContext.relatedFiles).length,
       definedSymbolCount: fileContext?.definedSymbols.length ?? 0,

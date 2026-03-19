@@ -5,10 +5,12 @@ const {
   getPatternMatchesForComponentMock,
   getPatternMatchesForFileMock,
   getPatternMatchesForSymbolMock,
+  buildPatternTrustMetadataMock,
 } = vi.hoisted(() => ({
   getPatternMatchesForComponentMock: vi.fn(),
   getPatternMatchesForFileMock: vi.fn(),
   getPatternMatchesForSymbolMock: vi.fn(),
+  buildPatternTrustMetadataMock: vi.fn(),
 }));
 
 vi.mock('../../src/orchestrator/index.js', () => ({
@@ -17,11 +19,23 @@ vi.mock('../../src/orchestrator/index.js', () => ({
   getPatternMatchesForSymbol: getPatternMatchesForSymbolMock,
 }));
 
+vi.mock('../../src/tools/trust-metadata.js', () => ({
+  buildPatternTrustMetadata: buildPatternTrustMetadataMock,
+}));
+
 import { runSearchPatternsTool, searchPatternsToolDefinition } from '../../src/tools/search-patterns.js';
 
 describe('search_patterns tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    buildPatternTrustMetadataMock.mockResolvedValue({
+      coverage: {
+        filesAnalyzed: 60,
+        filesTotal: 100,
+        ratio: 0.6,
+      },
+      confidence: 'medium',
+    });
   });
 
   it('accepts the narrow public input shape', () => {
@@ -91,6 +105,14 @@ describe('search_patterns tool', () => {
         requestedName: 'Button',
         requestedRepo: 'example-saas-dashboard',
         requestedMode: 'component',
+        metadata: {
+          coverage: {
+            filesAnalyzed: 60,
+            filesTotal: 100,
+            ratio: 0.6,
+          },
+          confidence: 'medium',
+        },
         summary: {
           matchCount: 1,
           strongMatchCount: 1,
@@ -181,6 +203,14 @@ describe('search_patterns tool', () => {
       ambiguityDetected: false,
       selectedCandidate: null,
       alternativeCandidates: [],
+    });
+    expect(parsed.metadata).toEqual({
+      coverage: {
+        filesAnalyzed: 60,
+        filesTotal: 100,
+        ratio: 0.6,
+      },
+      confidence: 'medium',
     });
   });
 });

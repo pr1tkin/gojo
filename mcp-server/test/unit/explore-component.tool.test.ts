@@ -5,10 +5,12 @@ const {
   getFileExplorationContextMock,
   getSymbolExplorationContextMock,
   getUiHierarchySummaryMock,
+  buildExploreComponentTrustMetadataMock,
 } = vi.hoisted(() => ({
   getFileExplorationContextMock: vi.fn(),
   getSymbolExplorationContextMock: vi.fn(),
   getUiHierarchySummaryMock: vi.fn(),
+  buildExploreComponentTrustMetadataMock: vi.fn(),
 }));
 
 vi.mock('../../src/orchestrator/index.js', () => ({
@@ -17,12 +19,24 @@ vi.mock('../../src/orchestrator/index.js', () => ({
   getUiHierarchySummary: getUiHierarchySummaryMock,
 }));
 
+vi.mock('../../src/tools/trust-metadata.js', () => ({
+  buildExploreComponentTrustMetadata: buildExploreComponentTrustMetadataMock,
+}));
+
 import { exploreComponentToolDefinition, runExploreComponentTool } from '../../src/tools/explore-component.js';
 
 describe('explore_component tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getUiHierarchySummaryMock.mockResolvedValue(null);
+    buildExploreComponentTrustMetadataMock.mockResolvedValue({
+      coverage: {
+        filesAnalyzed: 95,
+        filesTotal: 100,
+        ratio: 0.95,
+      },
+      confidence: 'high',
+    });
   });
 
   it('accepts the narrow public input shape', () => {
@@ -345,6 +359,14 @@ describe('explore_component tool', () => {
             { propName: 'disabled', count: 1 },
           ],
         },
+        metadata: {
+          coverage: {
+            filesAnalyzed: 95,
+            filesTotal: 100,
+            ratio: 0.95,
+          },
+          confidence: 'high',
+        },
         summary: {
           relatedFileCount: 2,
           definedSymbolCount: 1,
@@ -540,6 +562,14 @@ describe('explore_component tool', () => {
         definedSymbolCount: 0,
         exportedSymbolCount: 0,
       },
+      metadata: {
+        coverage: {
+          filesAnalyzed: 95,
+          filesTotal: 100,
+          ratio: 0.95,
+        },
+        confidence: 'high',
+      },
     });
     expect(getUiHierarchySummaryMock).not.toHaveBeenCalled();
   });
@@ -593,6 +623,14 @@ describe('explore_component tool', () => {
         relatedFileCount: 0,
         definedSymbolCount: 0,
         exportedSymbolCount: 0,
+      },
+      metadata: {
+        coverage: {
+          filesAnalyzed: 95,
+          filesTotal: 100,
+          ratio: 0.95,
+        },
+        confidence: 'high',
       },
     });
     expect(getUiHierarchySummaryMock).not.toHaveBeenCalled();

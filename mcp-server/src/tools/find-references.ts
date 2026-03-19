@@ -12,6 +12,7 @@ import type {
 } from '../types.js';
 import { findReferencesWithTypeScriptFallback } from '../typescript/fallback.js';
 import { searchZoekt } from '../zoekt-client.js';
+import { buildStructuralTrustMetadata } from './trust-metadata.js';
 
 const DEFAULT_REFERENCE_LIMIT = 20;
 const REFERENCE_SEARCH_OVERSCAN_FACTOR = 5;
@@ -129,12 +130,20 @@ export async function runFindReferencesTool(
   const references = await findReferencesWithTypeScriptFallback(reposRoot, input, () =>
     findHeuristicReferences(zoektBaseUrl, input),
   );
+  const metadata = await buildStructuralTrustMetadata();
 
   return {
     content: [
       {
         type: 'text',
-        text: JSON.stringify(references, null, 2),
+        text: JSON.stringify(
+          {
+            references,
+            metadata,
+          },
+          null,
+          2,
+        ),
       },
     ],
   };
