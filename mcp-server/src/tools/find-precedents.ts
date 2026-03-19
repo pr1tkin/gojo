@@ -10,20 +10,19 @@ import {
   buildPatternTargetExplainability,
   buildPrecedentCandidateExplainability,
 } from './explainability.js';
+import {
+  SharedContextBuilder,
+  dedupeNavigationHints,
+  finalizeShapedResponse,
+  splitPrimarySecondary,
+  toScoreBucket,
+  type ResponseShapingOptions,
+} from './response-shaping.js';
 import { buildPatternTrustMetadata, type ToolTrustMetadata } from './trust-metadata.js';
 
 const DEFAULT_PRECEDENT_LIMIT = 3;
 
 type GroundingStrength = 'strong' | 'partial' | 'weak' | 'unknown';
-
-interface CompactClusterRef {
-  parentClusterId: string;
-  subClusterId?: string;
-  clusterRole?: string;
-  membership: 'core' | 'peripheral' | 'unknown';
-  relatedFamilies?: string[];
-  relatedClusterIds?: string[];
-}
 
 export const findPrecedentsToolDefinition = {
   name: 'find_precedents',
@@ -57,62 +56,13 @@ function toGroundingStrength(
   return 'strong';
 }
 
-function toClusterRef(
-  explanation: {
-    clusterContext?: {
-      parentClusterId?: string;
-      subClusterId?: string;
-      clusterRole?: string;
-      isCoreMember?: boolean;
-      relatedClusterIds?: string[];
-    };
-    relatedContext?: {
-      neighborTypes?: string[];
-    };
-  } | null | undefined,
-  detail: 'agent' | 'debug',
-): CompactClusterRef | null {
-  const clusterContext = explanation?.clusterContext;
-
-  if (!clusterContext?.parentClusterId) {
-    return null;
-  }
-
-  return {
-    parentClusterId: clusterContext.parentClusterId,
-    ...(clusterContext.subClusterId ? { subClusterId: clusterContext.subClusterId } : {}),
-    ...(clusterContext.clusterRole ? { clusterRole: clusterContext.clusterRole } : {}),
-    membership:
-      clusterContext.isCoreMember === true
-        ? 'core'
-        : clusterContext.isCoreMember === false
-          ? 'peripheral'
-          : 'unknown',
-    ...(explanation?.relatedContext?.neighborTypes?.length
-      ? { relatedFamilies: explanation.relatedContext.neighborTypes.slice(0, 3) }
-      : {}),
-    ...(detail === 'debug' && clusterContext.relatedClusterIds?.length
-      ? { relatedClusterIds: clusterContext.relatedClusterIds.slice(0, 3) }
-      : {}),
-  };
-}
-
-function summarizeSelectionReason(reason: string): string {
-  return reason;
-}
-
 function buildNavigationHints(input: {
   precedents: Array<{
     filePath: string;
     repoId: string;
-    symbolName: string;
-    selectionReason: string;
-    family?: string | null;
   }>;
-  familyContext: {
-    family?: string | null;
-    relatedFamilies?: string[];
-  } | null;
+  familyRef?: string;
+  relatedFamilyRefs?: string[];
 }): Array<Record<string, string>> {
   const hints: Array<Record<string, string>> = [];
   const [first, second] = input.precedents;
@@ -135,16 +85,24 @@ function buildNavigationHints(input: {
     });
   }
 
-  const relatedFamily = input.familyContext?.relatedFamilies?.[0];
+  const relatedFamily = input.relatedFamilyRefs?.[0];
   if (relatedFamily) {
     hints.push({
       type: 'inspect_related_family',
-      family: relatedFamily,
+      familyRef: relatedFamily,
       reason: 'related implementation family nearby',
     });
   }
 
-  return hints.slice(0, 3);
+  if (input.familyRef) {
+    hints.push({
+      type: 'stay_in_family',
+      familyRef: input.familyRef,
+      reason: 'target belongs to a known precedent family',
+    });
+  }
+
+  return dedupeNavigationHints(hints, 3);
 }
 
 function withAdditionalWarnings(metadata: ToolTrustMetadata, warnings: string[]): ToolTrustMetadata {
@@ -161,7 +119,14 @@ export async function runFindPrecedentsTool(
   const mode = input.mode ?? 'component';
   const detail = input.detail ?? 'agent';
   const limit = input.limit ?? DEFAULT_PRECEDENT_LIMIT;
-  const includeFamilyContext = input.includeFamilyContext ?? true;
+  const includeFamilyContext = input.includeFamilyContext ?? false;
+  const shaping: ResponseShapingOptions = {
+    detail,
+    expandClusters: input.expandClusters,
+    expandDebug: input.expandDebug,
+    expandRelated: input.expandRelated,
+  };
+  const sharedContext = new SharedContextBuilder(shaping);
   const options = {
     repo: input.repo,
     limit: Math.max(limit, DEFAULT_PRECEDENT_LIMIT),
@@ -174,7 +139,9 @@ export async function runFindPrecedentsTool(
         ? await getPatternMatchesForSymbol(input.name, options)
         : await getPatternMatchesForComponent(input.name, options);
 
-  const targetExplanation = await buildPatternTargetExplainability(patternContext.primaryTarget, detail);
+  const targetExplainability = sharedContext.registerExplainability(
+    await buildPatternTargetExplainability(patternContext.primaryTarget, detail),
+  );
   const metadata = await buildPatternTrustMetadata(patternContext);
   const precedentService = await createPrecedentDiscoveryService();
 
@@ -193,42 +160,42 @@ export async function runFindPrecedentsTool(
   const scopedCandidates = precedentResult
     ? precedentResult.candidates.filter((candidate) => (targetRepoId ? candidate.repoId === targetRepoId : true))
     : [];
-  const precedents = precedentResult
+  const compactPrecedents = precedentResult
     ? await Promise.all(
         scopedCandidates.slice(0, limit).map(async (candidate, index) => {
-          const explanation = await buildPrecedentCandidateExplainability(
-            candidate,
-            targetExplanation?.family ?? null,
-            detail,
+          const explanation = sharedContext.registerExplainability(
+            await buildPrecedentCandidateExplainability(
+              candidate,
+              targetExplainability?.familyRef ?? null,
+              detail,
+            ),
           );
           return {
             rank: index + 1,
             repoId: candidate.repoId,
             filePath: candidate.filePath,
             symbolName: candidate.symbolName,
-            patternKind: candidate.patternKind,
-            role: explanation.role,
-            ...(explanation.family ? { family: explanation.family } : {}),
-            confidence: explanation.confidence,
-            precedentScore: candidate.precedentScore,
-            structuralAlignment: {
-              graphAnchored: candidate.structuralAlignment.graphAnchored,
-              structuralContextStrength: candidate.structuralAlignment.structuralContextStrength,
-            },
+            role: explanation?.role ?? 'module',
+            confidence: explanation?.confidence ?? 'low',
+            matchStrength: toScoreBucket(candidate.precedentScore),
+            grounding: toGroundingStrength(candidate.structuralAlignment),
             relationship:
-              explanation.explanationSignals.familyMatch === true
+              explanation?.explanationSignals?.familyMatch === true
                 ? 'peer_family'
                 : candidate.structuralAlignment.graphAnchored
                   ? 'structural_neighbor'
                   : 'heuristic_neighbor',
-            selectionReason: summarizeSelectionReason(explanation.selectionReason),
-            ...(toClusterRef(explanation, detail) ? { clusterRef: toClusterRef(explanation, detail) } : {}),
-            ...(detail === 'debug'
+            selectionReason: explanation?.selectionReason ?? 'ranked precedent',
+            ...(explanation?.familyRef ? { familyRef: explanation.familyRef } : {}),
+            ...(explanation?.clusterRef ? { clusterRef: explanation.clusterRef } : {}),
+            ...(explanation?.explanationSignals ? { explanationSignals: explanation.explanationSignals } : {}),
+            ...(detail === 'debug' || input.expandDebug
               ? {
                   debug: {
+                    precedentScore: candidate.precedentScore,
                     similarityScore: candidate.similarityScore,
                     reasonSignals: candidate.reasonSignals,
-                    ...(explanation.debug ? { explanation: explanation.debug } : {}),
+                    ...(explanation?.debug ? { explanation: explanation.debug } : {}),
                   },
                 }
               : {}),
@@ -236,60 +203,53 @@ export async function runFindPrecedentsTool(
         }),
       )
     : [];
+  const precedents = splitPrimarySecondary(compactPrecedents, Math.min(2, compactPrecedents.length));
 
   const familyContext =
-    includeFamilyContext && targetExplanation
+    includeFamilyContext && targetExplainability
       ? {
-          ...(targetExplanation.family ? { family: targetExplanation.family } : {}),
-          role: targetExplanation.role,
-          confidence: targetExplanation.confidence,
-          ...(targetExplanation.relatedContext?.neighborTypes?.length
-            ? { relatedFamilies: targetExplanation.relatedContext.neighborTypes.slice(0, 3) }
-            : {}),
-          ...(toClusterRef(targetExplanation, detail) ? { clusterRef: toClusterRef(targetExplanation, detail) } : {}),
+          role: targetExplainability.role,
+          confidence: targetExplainability.confidence,
+          ...(targetExplainability.familyRef ? { familyRef: targetExplainability.familyRef } : {}),
+          ...(targetExplainability.clusterRef ? { clusterRef: targetExplainability.clusterRef } : {}),
+          ...(targetExplainability.membership ? { membership: targetExplainability.membership } : {}),
         }
       : null;
 
   const target = {
     status: patternContext.resolution.status,
-    mode,
-    requestedName: input.name,
-    requestedRepo: input.repo,
     filePath: patternContext.primaryTarget.file?.filePath ?? precedentResult?.target.filePath ?? null,
     repoId: patternContext.primaryTarget.file?.repoId ?? precedentResult?.target.repoId ?? null,
     symbolName:
       patternContext.primaryTarget.symbol?.name ??
       precedentResult?.target.symbolName ??
       (mode === 'file' ? null : input.name),
-    confidence: targetExplanation?.confidence ?? 'low',
+    confidence: targetExplainability?.confidence ?? 'low',
     grounding: toGroundingStrength(patternContext.primaryTarget.structuralAlignment),
-    structuralAlignment: patternContext.primaryTarget.structuralAlignment
-      ? {
-          graphAnchored: patternContext.primaryTarget.structuralAlignment.graphAnchored,
-          structuralContextStrength: patternContext.primaryTarget.structuralAlignment.structuralContextStrength,
-        }
-      : null,
-    ...(targetExplanation?.role ? { role: targetExplanation.role } : {}),
-    ...(targetExplanation?.family ? { family: targetExplanation.family } : {}),
-    ...(toClusterRef(targetExplanation, detail) ? { clusterRef: toClusterRef(targetExplanation, detail) } : {}),
+    ...(targetExplainability?.role ? { role: targetExplainability.role } : {}),
+    ...(targetExplainability?.familyRef ? { familyRef: targetExplainability.familyRef } : {}),
+    ...(targetExplainability?.clusterRef ? { clusterRef: targetExplainability.clusterRef } : {}),
     resolution: {
       candidateCount: patternContext.resolution.candidateCount,
       ambiguityDetected: patternContext.resolution.ambiguityDetected,
     },
   };
 
+  const builtSharedContext = sharedContext.build();
+  const targetFamilyRefs =
+    targetExplainability?.familyRef && builtSharedContext?.families?.[targetExplainability.familyRef]?.relatedFamilyRefs
+      ? builtSharedContext.families[targetExplainability.familyRef].relatedFamilyRefs
+      : [];
   const navigationHints = buildNavigationHints({
-    precedents: precedents.map((entry) => ({
+    precedents: [...precedents.primary, ...precedents.secondary].map((entry) => ({
       filePath: entry.filePath,
       repoId: entry.repoId,
-      symbolName: entry.symbolName,
-      selectionReason: entry.selectionReason,
-      family: 'family' in entry ? entry.family : null,
     })),
-    familyContext,
+    familyRef: targetExplainability?.familyRef,
+    relatedFamilyRefs: targetFamilyRefs,
   });
 
-  const output = {
+  const shapedOutput = finalizeShapedResponse({
     requestedName: input.name,
     requestedRepo: input.repo,
     requestedMode: mode,
@@ -297,19 +257,20 @@ export async function runFindPrecedentsTool(
     metadata: withAdditionalWarnings(
       metadata,
       [
-        ...(precedents.length === 0 ? ['No reusable precedents were found for the resolved target'] : []),
+        ...(compactPrecedents.length === 0 ? ['No reusable precedents were found for the resolved target'] : []),
         ...(precedentResult && scopedCandidates.length === 0 && precedentResult.candidates.length > 0
           ? ['No repo-local precedents remained after scoping results to the resolved target repository']
           : []),
       ],
     ),
     target,
-    precedents,
+    results: precedents,
+    ...(builtSharedContext ? { sharedContext: builtSharedContext } : {}),
     ...(familyContext ? { familyContext } : {}),
     navigationHints,
     summary: {
-      precedentCount: precedents.length,
-      hasStrongPrecedent: precedents.some((entry) => entry.confidence === 'high'),
+      resultCount: compactPrecedents.length,
+      strongMatches: compactPrecedents.filter((entry) => entry.confidence === 'high').length,
       targetGrounding: target.grounding,
     },
     ...(detail === 'debug' && precedentResult
@@ -323,13 +284,13 @@ export async function runFindPrecedentsTool(
           },
         }
       : {}),
-  };
+  });
 
   return {
     content: [
       {
         type: 'text',
-        text: JSON.stringify(output, null, 2),
+        text: JSON.stringify(shapedOutput, null, 2),
       },
     ],
   };

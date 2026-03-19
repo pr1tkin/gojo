@@ -40,6 +40,11 @@ describe('collect_refactor_context tool', () => {
       confidence: 'high',
       selectionReason: 'resolved primary symbol',
       explanationSignals: {},
+      clusterContext: {
+        parentClusterId: 'cluster:article-content',
+        clusterRole: 'ui_component',
+        isCoreMember: true,
+      },
     });
     buildNearbyFileExplainabilityMock.mockResolvedValue({
       family: 'support_runtime',
@@ -70,6 +75,7 @@ describe('collect_refactor_context tool', () => {
       repo: 'example-news-app',
       mode: 'component',
       limit: 8,
+      expandRelated: true,
     });
 
     expect(parsed).toEqual({
@@ -77,10 +83,11 @@ describe('collect_refactor_context tool', () => {
       repo: 'example-news-app',
       mode: 'component',
       limit: 8,
+      expandRelated: true,
     });
   });
 
-  it('delegates to the orchestrator service and returns structured refactor context', async () => {
+  it('returns shaped refactor context with related tiers and nearby/candidate sections', async () => {
     getCollectRefactorContextMock.mockResolvedValue({
       target: {
         requestedName: 'ArticleContent',
@@ -122,7 +129,19 @@ describe('collect_refactor_context tool', () => {
         },
       ],
       definedSymbols: [{ name: 'ArticleContent' }],
-      symbolCandidates: [],
+      symbolCandidates: [
+        {
+          symbolId: 'candidate:article-header',
+          fileId: 'example-news-app:src/app/_components/articleHeaderText/ArticleHeaderText.tsx',
+          repo: 'example-news-app',
+          filePath: 'src/app/_components/articleHeaderText/ArticleHeaderText.tsx',
+          name: 'ArticleHeaderText',
+          kind: 'function',
+          exported: true,
+          score: 9,
+          reasons: [{ signal: 'graph_connection', value: 4 }],
+        },
+      ],
       summary: {
         importingFileCount: 1,
         importedFileCount: 1,
@@ -153,26 +172,50 @@ describe('collect_refactor_context tool', () => {
       limit: 8,
     });
     expect(parsed.explainabilityMode).toBe('agent');
-    expect(parsed.target.symbol.explanation).toEqual(
+    expect(parsed.target).toEqual(
       expect.objectContaining({
-        selectionReason: 'resolved primary symbol',
+        filePath: 'src/app/articles/[id]/ArticleContent.tsx',
+        role: 'component',
+        familyRef: 'ui_component',
+        clusterRef: 'cluster:article-content',
       }),
     );
-    expect(parsed.relatedFiles[0].explanation).toEqual(
+    expect(parsed.results.primary).toEqual([
       expect.objectContaining({
+        filePath: 'src/app/_components/articleHeaderText/ArticleHeaderText.tsx',
         selectionReason: 'graph-related file context',
       }),
-    );
-    expect(parsed.nearbyFiles[0].explanation).toEqual(
+    ]);
+    expect(parsed.results.nearby).toEqual([
       expect.objectContaining({
+        category: 'bundle_family',
+        filePath: 'src/app/articles/[id]/ArticleContent.stories.tsx',
         selectionReason: 'bundle-family companion',
       }),
+    ]);
+    expect(parsed.results.candidates).toEqual([
+      expect.objectContaining({
+        filePath: 'src/app/_components/articleHeaderText/ArticleHeaderText.tsx',
+        name: 'ArticleHeaderText',
+        selectionReason: 'ranked symbol candidate',
+      }),
+    ]);
+    expect(parsed.navigationHints).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'open_related',
+          filePath: 'src/app/_components/articleHeaderText/ArticleHeaderText.tsx',
+        }),
+      ]),
     );
-    expect(parsed.summary).toEqual(expect.objectContaining({
-      importingFileCount: 1,
-      relatedFileCount: 1,
-      ambiguityDetected: false,
-    }));
+    expect(parsed.summary).toEqual(
+      expect.objectContaining({
+        resultCount: 3,
+        importingFileCount: 1,
+        importedFileCount: 1,
+      }),
+    );
+    expect(parsed.summary.tokenEstimate).toBeGreaterThan(0);
   });
 
   it('defaults to component mode and preserves weak contexts safely', async () => {
@@ -220,8 +263,9 @@ describe('collect_refactor_context tool', () => {
       limit: undefined,
     });
     expect(parsed.explainabilityMode).toBe('agent');
-    expect(parsed.primaryFile).toBeNull();
     expect(parsed.summary.notes).toContain('target could not be resolved from the current symbol index and graph');
+    expect(parsed.results.primary).toEqual([]);
+    expect(parsed.results.secondary).toEqual([]);
   });
 
   it('passes debug explainability mode through helper calls', async () => {
@@ -272,6 +316,7 @@ describe('collect_refactor_context tool', () => {
     await runCollectRefactorContextTool({
       name: 'ArticleContent',
       detail: 'debug',
+      expandDebug: true,
     });
 
     expect(buildIndexedSymbolExplainabilityMock).toHaveBeenCalledWith(expect.any(Object), 'debug');

@@ -76,6 +76,14 @@ describe('search_patterns tool', () => {
       explanationSignals: {
         alignment: 'medium',
       },
+      clusterContext: {
+        parentClusterId: 'cluster:component:button',
+        clusterRole: 'ui_component',
+        isCoreMember: true,
+      },
+      relatedContext: {
+        neighborTypes: ['state_or_store'],
+      },
     });
     buildPatternResolutionExplainabilityMock.mockImplementation(async (resolution: Record<string, unknown>) => resolution);
     buildPatternMatchExplainabilityMock.mockResolvedValue({
@@ -109,6 +117,7 @@ describe('search_patterns tool', () => {
       repo: 'example-saas-dashboard',
       limit: 4,
       mode: 'component',
+      expandRelated: true,
     });
 
     expect(parsed).toEqual({
@@ -116,16 +125,21 @@ describe('search_patterns tool', () => {
       repo: 'example-saas-dashboard',
       limit: 4,
       mode: 'component',
+      expandRelated: true,
     });
   });
 
-  it('uses component mode by default and returns structured results', async () => {
+  it('uses component mode by default and returns compact shaped results', async () => {
     getPatternMatchesForComponentMock.mockResolvedValue({
       query: 'Button',
       mode: 'component',
       repo: 'example-saas-dashboard',
       primaryTarget: {
-        file: { fileId: 'example-saas-dashboard:components/Button.tsx', filePath: 'components/Button.tsx' },
+        file: {
+          fileId: 'example-saas-dashboard:components/Button.tsx',
+          filePath: 'components/Button.tsx',
+          repoId: 'example-saas-dashboard',
+        },
         symbol: null,
         definedSymbols: [{ name: 'Button', kind: 'function' }],
         exportedSymbols: [{ name: 'Button', kind: 'function' }],
@@ -139,7 +153,11 @@ describe('search_patterns tool', () => {
       },
       patternMatches: [
         {
-          file: { fileId: 'example-saas-dashboard:components/IconButton.tsx', filePath: 'components/IconButton.tsx' },
+          file: {
+            fileId: 'example-saas-dashboard:components/IconButton.tsx',
+            filePath: 'components/IconButton.tsx',
+            repoId: 'example-saas-dashboard',
+          },
           score: 18,
           reason: 'similar export surface',
           reasons: [{ signal: 'shared_export_names', value: 4 }],
@@ -186,53 +204,42 @@ describe('search_patterns tool', () => {
         requestedRepo: 'example-saas-dashboard',
         requestedMode: 'component',
         explainabilityMode: 'agent',
-        metadata: {
-          coverage: {
-            filesAnalyzed: 80,
-            filesTotal: 100,
-            ratio: 0.8,
-            scope: 'relevant_source',
-            raw: {
-              filesAnalyzed: 80,
-              filesTotal: 400,
-              ratio: 0.2,
-            },
-            relevant: {
-              filesAnalyzed: 80,
-              filesTotal: 100,
-              ratio: 0.8,
-            },
-          },
+        metadata: expect.objectContaining({
           confidence: 'medium',
-          patternCoverage: {
-            filesAnalyzed: 60,
-            filesTotal: 80,
-            ratio: 0.75,
-          },
-          structuralAlignment: {
-            graphAnchored: true,
-            structuralContextStrength: 'medium',
-          },
+        }),
+        target: expect.objectContaining({
+          filePath: 'components/Button.tsx',
+          role: 'component',
+          familyRef: 'ui_component',
+          clusterRef: 'cluster:component:button',
+        }),
+        results: {
+          primary: [
+            expect.objectContaining({
+              rank: 1,
+              filePath: 'components/IconButton.tsx',
+              role: 'component',
+              confidence: 'medium',
+              matchStrength: 'high',
+              familyRef: 'ui_component',
+              clusterRef: 'cluster:component:sub:button',
+            }),
+          ],
+          secondary: [],
         },
-        summary: {
+        sharedContext: expect.objectContaining({
+          families: expect.objectContaining({
+            ui_component: expect.objectContaining({ role: 'component' }),
+          }),
+        }),
+        summary: expect.objectContaining({
           matchCount: 1,
-          strongMatchCount: 1,
-          graphAnchoredMatchCount: 1,
-        },
+          strongMatches: 0,
+          graphAnchoredMatches: 1,
+        }),
       }),
     );
-    expect(parsed.primaryTarget.explanation).toEqual(
-      expect.objectContaining({
-        family: 'ui_component',
-        role: 'component',
-      }),
-    );
-    expect(parsed.patternMatches[0].explanation).toEqual(
-      expect.objectContaining({
-        subClusterId: 'cluster:component:sub:button',
-        confidence: 'medium',
-      }),
-    );
+    expect(parsed.summary.tokenEstimate).toBeGreaterThan(0);
   });
 
   it('passes debug explainability mode through the helper layer', async () => {
@@ -263,10 +270,12 @@ describe('search_patterns tool', () => {
       },
     });
 
-    await runSearchPatternsTool({
+    const result = await runSearchPatternsTool({
       name: 'Button',
       detail: 'debug',
+      expandDebug: true,
     });
+    const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
 
     expect(buildPatternTargetExplainabilityMock).toHaveBeenCalledWith(
       expect.any(Object),
@@ -275,6 +284,13 @@ describe('search_patterns tool', () => {
     expect(buildPatternResolutionExplainabilityMock).toHaveBeenCalledWith(
       expect.any(Object),
       'debug',
+    );
+    expect(parsed.debug).toEqual(
+      expect.objectContaining({
+        resolution: expect.objectContaining({
+          candidateCount: 0,
+        }),
+      }),
     );
   });
 
@@ -357,41 +373,14 @@ describe('search_patterns tool', () => {
       repo: 'example-news-app',
       limit: 6,
     });
-    expect(parsed.resolution).toEqual({
-      status: 'missing',
-      mode: 'file',
-      candidateCount: 0,
-      ambiguityDetected: false,
-      selectedCandidate: null,
-      alternativeCandidates: [],
-    });
-    expect(parsed.metadata).toEqual({
-      coverage: {
-        filesAnalyzed: 80,
-        filesTotal: 100,
-        ratio: 0.8,
-        scope: 'relevant_source',
-        raw: {
-          filesAnalyzed: 80,
-          filesTotal: 400,
-          ratio: 0.2,
-        },
-        relevant: {
-          filesAnalyzed: 80,
-          filesTotal: 100,
-          ratio: 0.8,
-        },
-      },
-      confidence: 'medium',
-      patternCoverage: {
-        filesAnalyzed: 60,
-        filesTotal: 80,
-        ratio: 0.75,
-      },
-      structuralAlignment: {
-        graphAnchored: true,
-        structuralContextStrength: 'medium',
-      },
+    expect(parsed.target).toEqual(
+      expect.objectContaining({
+        status: 'missing',
+      }),
+    );
+    expect(parsed.results).toEqual({
+      primary: [],
+      secondary: [],
     });
   });
 });

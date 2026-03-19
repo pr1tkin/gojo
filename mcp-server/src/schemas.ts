@@ -41,6 +41,9 @@ export const exploreComponentInputSchema = {
   limit: z.number().int().min(1).max(10).optional(),
   relatedLimit: z.number().int().min(1).max(20).optional(),
   detail: z.enum(['agent', 'debug']).optional(),
+  expandClusters: z.boolean().optional(),
+  expandDebug: z.boolean().optional(),
+  expandRelated: z.boolean().optional(),
 };
 
 export const searchPatternsInputSchema = {
@@ -49,6 +52,9 @@ export const searchPatternsInputSchema = {
   limit: z.number().int().min(1).max(10).optional(),
   mode: z.enum(['component', 'symbol', 'file']).optional(),
   detail: z.enum(['agent', 'debug']).optional(),
+  expandClusters: z.boolean().optional(),
+  expandDebug: z.boolean().optional(),
+  expandRelated: z.boolean().optional(),
 };
 
 export const findPrecedentsInputSchema = {
@@ -58,6 +64,9 @@ export const findPrecedentsInputSchema = {
   mode: z.enum(['component', 'symbol', 'file']).optional(),
   detail: z.enum(['agent', 'debug']).optional(),
   includeFamilyContext: z.boolean().optional(),
+  expandClusters: z.boolean().optional(),
+  expandDebug: z.boolean().optional(),
+  expandRelated: z.boolean().optional(),
 };
 
 export const collectRefactorContextInputSchema = {
@@ -66,6 +75,9 @@ export const collectRefactorContextInputSchema = {
   mode: z.enum(['component', 'symbol', 'file']).optional(),
   limit: z.number().int().min(1).max(20).optional(),
   detail: z.enum(['agent', 'debug']).optional(),
+  expandClusters: z.boolean().optional(),
+  expandDebug: z.boolean().optional(),
+  expandRelated: z.boolean().optional(),
 };
 
 export const analyzeSymbolInputSchema = {

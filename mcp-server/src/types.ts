@@ -153,6 +153,9 @@ export interface ExploreComponentInput {
   limit?: number;
   relatedLimit?: number;
   detail?: 'agent' | 'debug';
+  expandClusters?: boolean;
+  expandDebug?: boolean;
+  expandRelated?: boolean;
 }
 
 export type SearchPatternsMode = 'component' | 'symbol' | 'file';
@@ -163,6 +166,9 @@ export interface SearchPatternsInput {
   limit?: number;
   mode?: SearchPatternsMode;
   detail?: 'agent' | 'debug';
+  expandClusters?: boolean;
+  expandDebug?: boolean;
+  expandRelated?: boolean;
 }
 
 export interface FindPrecedentsToolInput {
@@ -172,6 +178,9 @@ export interface FindPrecedentsToolInput {
   mode?: SearchPatternsMode;
   detail?: 'agent' | 'debug';
   includeFamilyContext?: boolean;
+  expandClusters?: boolean;
+  expandDebug?: boolean;
+  expandRelated?: boolean;
 }
 
 export type RefactorContextMode = 'file' | 'symbol' | 'component';
@@ -182,6 +191,9 @@ export interface CollectRefactorContextInput {
   mode?: RefactorContextMode;
   limit?: number;
   detail?: 'agent' | 'debug';
+  expandClusters?: boolean;
+  expandDebug?: boolean;
+  expandRelated?: boolean;
 }
 
 export interface AnalyzeSymbolInput {
