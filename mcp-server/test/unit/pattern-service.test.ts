@@ -164,6 +164,71 @@ const candidateWeak = {
   },
 };
 
+const candidateRoleMismatch = {
+  fileId: 'repo-a:src/utils/buildButtonTokens.ts',
+  repo: 'repo-a',
+  filePath: 'src/utils/buildButtonTokens.ts',
+  classification: 'source',
+  symbolIds: ['button-utils-symbol'],
+  symbolNames: ['buildButtonTokens'],
+  imports: [
+    {
+      fileId: 'repo-a:src/utils/buildButtonTokens.ts',
+      source: '../components/Button.styles',
+      bindings: [],
+      resolvedKind: 'local-file',
+      resolvedTargetFileId: 'repo-a:src/components/Button.styles.ts',
+    },
+  ],
+  exports: [
+    {
+      fileId: 'repo-a:src/utils/buildButtonTokens.ts',
+      kind: 'named',
+      exportedName: 'buildButtonTokens',
+      localName: 'buildButtonTokens',
+      symbolId: 'button-utils-symbol',
+    },
+  ],
+  importTokens: ['Button.styles', 'clsx'],
+  structuralAnchor: {
+    structurallyIndexed: true,
+    resolvedLocalDependencyFileIds: ['repo-a:src/components/Button.styles.ts'],
+    localDependencyFamilyTokens: ['components', 'button', 'styles', 'src'],
+  },
+};
+
+const candidateTextHeavyLowAlignment = {
+  fileId: 'repo-a:src/components/Button.stories.tsx',
+  repo: 'repo-a',
+  filePath: 'src/components/Button.stories.tsx',
+  classification: 'source',
+  symbolIds: ['button-stories-symbol'],
+  symbolNames: ['ButtonStory'],
+  imports: [
+    {
+      fileId: 'repo-a:src/components/Button.stories.tsx',
+      source: './Button',
+      bindings: [],
+      resolvedKind: 'local-file',
+    },
+  ],
+  exports: [
+    {
+      fileId: 'repo-a:src/components/Button.stories.tsx',
+      kind: 'named',
+      exportedName: 'Button',
+      localName: 'ButtonStory',
+      symbolId: 'button-stories-symbol',
+    },
+  ],
+  importTokens: ['Button.styles', 'clsx'],
+  structuralAnchor: {
+    structurallyIndexed: true,
+    resolvedLocalDependencyFileIds: [],
+    localDependencyFamilyTokens: [],
+  },
+};
+
 const otherRepoCandidate = {
   fileId: 'repo-b:src/components/Button.tsx',
   repo: 'repo-b',
@@ -218,12 +283,36 @@ describe('pattern orchestrator service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    listFileRelationsMock.mockResolvedValue([targetRelation, candidateStrong, candidatePeer, candidateWeak, otherRepoCandidate]);
+    listFileRelationsMock.mockResolvedValue([
+      targetRelation,
+      candidateStrong,
+      candidatePeer,
+      candidateWeak,
+      candidateRoleMismatch,
+      candidateTextHeavyLowAlignment,
+      otherRepoCandidate,
+    ]);
     getFileRelationByIdMock.mockImplementation(async (fileId: string) => {
-      return [targetRelation, candidateStrong, candidatePeer, candidateWeak, otherRepoCandidate].find((entry) => entry.fileId === fileId) ?? null;
+      return [
+        targetRelation,
+        candidateStrong,
+        candidatePeer,
+        candidateWeak,
+        candidateRoleMismatch,
+        candidateTextHeavyLowAlignment,
+        otherRepoCandidate,
+      ].find((entry) => entry.fileId === fileId) ?? null;
     });
     getFileRelationMock.mockImplementation(async (filePath: string, repo?: string) => {
-      const match = [targetRelation, candidateStrong, candidatePeer, candidateWeak, otherRepoCandidate].find(
+      const match = [
+        targetRelation,
+        candidateStrong,
+        candidatePeer,
+        candidateWeak,
+        candidateRoleMismatch,
+        candidateTextHeavyLowAlignment,
+        otherRepoCandidate,
+      ].find(
         (entry) => entry.filePath === filePath && (!repo || entry.repo === repo),
       );
 
@@ -234,7 +323,15 @@ describe('pattern orchestrator service', () => {
       return match;
     });
     getFileNodeMock.mockImplementation(async (fileId: string) => {
-      const match = [targetRelation, candidateStrong, candidatePeer, candidateWeak, otherRepoCandidate].find((entry) => entry.fileId === fileId);
+      const match = [
+        targetRelation,
+        candidateStrong,
+        candidatePeer,
+        candidateWeak,
+        candidateRoleMismatch,
+        candidateTextHeavyLowAlignment,
+        otherRepoCandidate,
+      ].find((entry) => entry.fileId === fileId);
       return match ? fileNode(match.fileId, match.repo, match.filePath) : null;
     });
     getDefinedSymbolsMock.mockImplementation(async (fileId: string) => {
@@ -252,6 +349,14 @@ describe('pattern orchestrator service', () => {
 
       if (fileId === candidateWeak.fileId) {
         return [symbolNode('form-field-symbol', candidateWeak.fileId, 'repo-a', candidateWeak.filePath, 'FormField')];
+      }
+
+      if (fileId === candidateRoleMismatch.fileId) {
+        return [symbolNode('button-utils-symbol', candidateRoleMismatch.fileId, 'repo-a', candidateRoleMismatch.filePath, 'buildButtonTokens')];
+      }
+
+      if (fileId === candidateTextHeavyLowAlignment.fileId) {
+        return [symbolNode('button-stories-symbol', candidateTextHeavyLowAlignment.fileId, 'repo-a', candidateTextHeavyLowAlignment.filePath, 'ButtonStory')];
       }
 
       return [symbolNode('repo-b-button', otherRepoCandidate.fileId, 'repo-b', otherRepoCandidate.filePath, 'Button')];
@@ -273,6 +378,14 @@ describe('pattern orchestrator service', () => {
         return [symbolNode('form-field-symbol', candidateWeak.fileId, 'repo-a', candidateWeak.filePath, 'FormField')];
       }
 
+      if (fileId === candidateRoleMismatch.fileId) {
+        return [symbolNode('button-utils-symbol', candidateRoleMismatch.fileId, 'repo-a', candidateRoleMismatch.filePath, 'buildButtonTokens')];
+      }
+
+      if (fileId === candidateTextHeavyLowAlignment.fileId) {
+        return [symbolNode('button-stories-symbol', candidateTextHeavyLowAlignment.fileId, 'repo-a', candidateTextHeavyLowAlignment.filePath, 'Button')];
+      }
+
       return [symbolNode('repo-b-button', otherRepoCandidate.fileId, 'repo-b', otherRepoCandidate.filePath, 'Button')];
     });
     getFileExplorationContextMock.mockImplementation(async (fileId: string) => ({
@@ -289,7 +402,7 @@ describe('pattern orchestrator service', () => {
                 reasons: [{ signal: 'graph_connection', value: 9 }],
                 via: ['file_imports_file'],
               },
-            ]
+              ]
           : fileId === candidateStrong.fileId
             ? [
                 {
@@ -300,6 +413,16 @@ describe('pattern orchestrator service', () => {
                   via: ['file_imports_file'],
                 },
               ]
+            : fileId === candidateRoleMismatch.fileId
+              ? [
+                  {
+                    file: fileNode('repo-a:src/components/Button.styles.ts', 'repo-a', 'src/components/Button.styles.ts'),
+                    score: 12,
+                    reason: 'direct import',
+                    reasons: [{ signal: 'graph_connection', value: 6 }],
+                    via: ['file_imports_file'],
+                  },
+                ]
           : [],
       neighboringFiles: [],
       definedSymbols: [],
@@ -390,7 +513,7 @@ describe('pattern orchestrator service', () => {
     expect(result.patternMatches[0]).toEqual(
       expect.objectContaining({
         file: expect.objectContaining({ fileId: candidateStrong.fileId }),
-        reason: 'shared local dependency anchors',
+        reason: 'shared dependencies + same responsibility + high structural alignment',
         structuralAlignment: expect.objectContaining({
           graphAnchored: true,
           structuralContextStrength: 'high',
@@ -400,13 +523,17 @@ describe('pattern orchestrator service', () => {
     );
     expect(result.patternMatches[0].reasons).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ signal: 'same_repo' }),
-        expect.objectContaining({ signal: 'path_closeness' }),
+        expect.objectContaining({ signal: 'structural_alignment', note: 'high' }),
+        expect.objectContaining({ signal: 'dependency_overlap' }),
         expect.objectContaining({ signal: 'shared_local_dependencies' }),
+        expect.objectContaining({ signal: 'responsibility_similarity' }),
       ]),
     );
     expect(result.patternMatches[0].score).toBeGreaterThan(result.patternMatches[1].score);
-    expect(result.patternMatches[1]).toEqual(
+    const lowAlignmentMatch = result.patternMatches.find(
+      (match) => match.file.fileId === candidatePeer.fileId,
+    );
+    expect(lowAlignmentMatch).toEqual(
       expect.objectContaining({
         file: expect.objectContaining({ fileId: candidatePeer.fileId }),
         structuralAlignment: expect.objectContaining({
@@ -415,13 +542,41 @@ describe('pattern orchestrator service', () => {
         }),
       }),
     );
+    expect(lowAlignmentMatch?.score).toBeLessThan(result.patternMatches[0].score);
     expect(result.primaryTarget.structuralAlignment).toEqual(
       expect.objectContaining({
         graphAnchored: true,
         structuralContextStrength: 'high',
       }),
     );
-    expect(result.summary.graphAnchoredMatchCount).toBe(1);
+    expect(result.summary.graphAnchoredMatchCount).toBe(2);
+  });
+
+  it('prioritizes structural alignment over superficial similarity', async () => {
+    const result = await getPatternMatchesForComponent('Button', { repo: 'repo-a', limit: 5 });
+    const rankedFileIds = result.patternMatches.map((entry) => entry.file.fileId);
+
+    expect(rankedFileIds.indexOf(candidateStrong.fileId)).toBeLessThan(
+      rankedFileIds.indexOf(candidateTextHeavyLowAlignment.fileId),
+    );
+  });
+
+  it('prefers same-responsibility matches when structural grounding is otherwise similar', async () => {
+    const result = await getPatternMatchesForComponent('Button', { repo: 'repo-a', limit: 5 });
+    const rankedFileIds = result.patternMatches.map((entry) => entry.file.fileId);
+
+    expect(rankedFileIds.indexOf(candidateStrong.fileId)).toBeLessThan(
+      rankedFileIds.indexOf(candidateRoleMismatch.fileId),
+    );
+  });
+
+  it('returns a stable ranking order across repeated runs', async () => {
+    const first = await getPatternMatchesForComponent('Button', { repo: 'repo-a', limit: 5 });
+    const second = await getPatternMatchesForComponent('Button', { repo: 'repo-a', limit: 5 });
+
+    expect(first.patternMatches.map((entry) => entry.file.fileId)).toEqual(
+      second.patternMatches.map((entry) => entry.file.fileId),
+    );
   });
 
   it('applies repo filtering to keep pattern matches in the requested repository', async () => {

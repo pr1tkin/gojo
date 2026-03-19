@@ -17,8 +17,14 @@ import { getSymbolExplorationContext } from './symbol-service.js';
 import type { PatternMatchContext, PatternMatchItem, PatternResolutionSummary, PatternTargetSummary } from './types.js';
 
 const DEFAULT_MATCH_LIMIT = 6;
-const STRONG_MATCH_THRESHOLD = 10;
+const STRONG_MATCH_THRESHOLD = 0.72;
 const COMMON_FILE_SUFFIXES = ['test', 'spec', 'stories', 'story', 'styles', 'style'];
+const STRUCTURAL_ALIGNMENT_WEIGHT = 0.4;
+const DEPENDENCY_OVERLAP_WEIGHT = 0.3;
+const RESPONSIBILITY_SIMILARITY_WEIGHT = 0.2;
+const MATCH_STRENGTH_WEIGHT = 0.1;
+
+type ResponsibilityKind = 'page' | 'hook' | 'component' | 'utility' | 'handler' | 'test' | 'story' | 'module';
 
 interface PatternServiceOptions {
   repo?: string;
@@ -45,9 +51,31 @@ interface CandidateScore {
   score: number;
   reason: string;
   reasons: RankingReason[];
+  signalScores: {
+    structuralAlignment: number;
+    dependencyOverlap: number;
+    responsibilitySimilarity: number;
+    matchStrength: number;
+  };
 }
 
 function compareScores(left: CandidateScore, right: CandidateScore): number {
+  if (right.signalScores.structuralAlignment !== left.signalScores.structuralAlignment) {
+    return right.signalScores.structuralAlignment - left.signalScores.structuralAlignment;
+  }
+
+  if (right.signalScores.dependencyOverlap !== left.signalScores.dependencyOverlap) {
+    return right.signalScores.dependencyOverlap - left.signalScores.dependencyOverlap;
+  }
+
+  if (right.signalScores.responsibilitySimilarity !== left.signalScores.responsibilitySimilarity) {
+    return right.signalScores.responsibilitySimilarity - left.signalScores.responsibilitySimilarity;
+  }
+
+  if (right.signalScores.matchStrength !== left.signalScores.matchStrength) {
+    return right.signalScores.matchStrength - left.signalScores.matchStrength;
+  }
+
   if (right.score !== left.score) {
     return right.score - left.score;
   }
@@ -117,6 +145,144 @@ function collectBundleSuffixes(target: FileRelation, relations: FileRelation[]):
 
 function mapSymbolSummaries(symbols: Array<{ name: string; kind: SymbolKind }>): Array<{ name: string; kind: SymbolKind }> {
   return symbols.slice().sort((left, right) => left.name.localeCompare(right.name) || left.kind.localeCompare(right.kind));
+}
+
+function roundScore(value: number): number {
+  return Number(value.toFixed(3));
+}
+
+function jaccard(left: string[], right: string[]): number {
+  if (left.length === 0 && right.length === 0) {
+    return 0;
+  }
+
+  const leftSet = new Set(left);
+  const rightSet = new Set(right);
+  const union = new Set([...leftSet, ...rightSet]);
+
+  if (union.size === 0) {
+    return 0;
+  }
+
+  let intersection = 0;
+
+  for (const value of leftSet) {
+    if (rightSet.has(value)) {
+      intersection += 1;
+    }
+  }
+
+  return intersection / union.size;
+}
+
+function getStructuralAlignmentScore(alignment: PatternStructuralAlignment): number {
+  if (!alignment.graphAnchored) {
+    return 0.2;
+  }
+
+  if (alignment.structuralContextStrength === 'high') {
+    return 1;
+  }
+
+  if (alignment.structuralContextStrength === 'medium') {
+    return 0.6;
+  }
+
+  return 0.2;
+}
+
+function inferResponsibilityKind(relation: FileRelation): ResponsibilityKind {
+  const normalizedFilePath = relation.filePath.toLowerCase();
+  const extension = path.extname(normalizedFilePath);
+  const baseName = path.posix.basename(normalizedFilePath);
+
+  if (/(\.|\/)(stories|story)\.(tsx?|jsx?)$/i.test(normalizedFilePath)) {
+    return 'story';
+  }
+
+  if (/(\.|\/)(test|spec)\.(tsx?|jsx?)$/i.test(normalizedFilePath)) {
+    return 'test';
+  }
+
+  if (/(\.|\/)(page|layout)\.(tsx?|jsx?)$/i.test(normalizedFilePath)) {
+    return 'page';
+  }
+
+  if (/(\.|\/)route\.(tsx?|jsx?)$/i.test(normalizedFilePath) || /^pages\/api\//i.test(normalizedFilePath)) {
+    return 'handler';
+  }
+
+  if (
+    relation.symbolNames.some((name) => /^use[A-Z0-9_]/.test(name)) ||
+    normalizedFilePath.includes('/hooks/') ||
+    /^use[a-z0-9_-]*/.test(baseName)
+  ) {
+    return 'hook';
+  }
+
+  if (
+    normalizedFilePath.includes('/components/') ||
+    ((extension === '.tsx' || extension === '.jsx') && relation.symbolNames.some((name) => /^[A-Z]/.test(name)))
+  ) {
+    return 'component';
+  }
+
+  if (
+    normalizedFilePath.includes('/utils/') ||
+    normalizedFilePath.includes('/helpers/') ||
+    normalizedFilePath.includes('/services/')
+  ) {
+    return 'utility';
+  }
+
+  return 'module';
+}
+
+function getResponsibilitySimilarityScore(target: ResponsibilityKind, candidate: ResponsibilityKind): number {
+  if (target === candidate) {
+    return 1;
+  }
+
+  if ((target === 'page' && candidate === 'component') || (target === 'component' && candidate === 'page')) {
+    return 0.4;
+  }
+
+  if ((target === 'utility' && candidate === 'handler') || (target === 'handler' && candidate === 'utility')) {
+    return 0.35;
+  }
+
+  if ((target === 'component' && candidate === 'hook') || (target === 'hook' && candidate === 'component')) {
+    return 0.2;
+  }
+
+  return 0;
+}
+
+function buildCandidateRelatedFileIdsByFileId(allRelations: FileRelation[]): Record<string, string[]> {
+  const relatedFileIdsByFileId = Object.create(null) as Record<string, string[]>;
+
+  const record = (fromFileId: string, toFileId: string) => {
+    const existing = relatedFileIdsByFileId[fromFileId] ?? [];
+
+    if (!existing.includes(toFileId)) {
+      existing.push(toFileId);
+      existing.sort((left, right) => left.localeCompare(right));
+      relatedFileIdsByFileId[fromFileId] = existing;
+    }
+  };
+
+  for (const relation of allRelations) {
+    for (const importRecord of relation.imports) {
+      if (!importRecord.resolvedTargetFileId) {
+        continue;
+      }
+
+      record(relation.fileId, importRecord.resolvedTargetFileId);
+      record(importRecord.resolvedTargetFileId, relation.fileId);
+    }
+  }
+
+  return relatedFileIdsByFileId;
 }
 
 function buildResolutionFromSymbolCandidates(
@@ -200,8 +366,37 @@ async function loadTargetProfile(fileId: string, allRelations: FileRelation[]): 
 }
 
 function determineReason(reasons: RankingReason[]): string {
-  if (reasons.some((reason) => reason.signal === 'shared_local_dependencies')) {
-    return 'shared local dependency anchors';
+  const hasHighStructuralAlignment = reasons.some(
+    (reason) => reason.signal === 'structural_alignment' && reason.note === 'high',
+  );
+  const hasMediumStructuralAlignment = reasons.some(
+    (reason) => reason.signal === 'structural_alignment' && reason.note === 'medium',
+  );
+  const hasDependencyOverlap = reasons.some((reason) => reason.signal === 'dependency_overlap');
+  const hasResponsibilitySimilarity = reasons.some((reason) => reason.signal === 'responsibility_similarity');
+
+  if (hasHighStructuralAlignment && hasDependencyOverlap && hasResponsibilitySimilarity) {
+    return 'shared dependencies + same responsibility + high structural alignment';
+  }
+
+  if ((hasHighStructuralAlignment || hasMediumStructuralAlignment) && hasDependencyOverlap) {
+    return 'shared dependencies + strong structural alignment';
+  }
+
+  if ((hasHighStructuralAlignment || hasMediumStructuralAlignment) && hasResponsibilitySimilarity) {
+    return 'same responsibility + strong structural alignment';
+  }
+
+  if (hasHighStructuralAlignment || hasMediumStructuralAlignment) {
+    return 'strong structural alignment';
+  }
+
+  if (hasDependencyOverlap) {
+    return 'shared dependency context';
+  }
+
+  if (hasResponsibilitySimilarity) {
+    return 'same responsibility';
   }
 
   if (reasons.some((reason) => reason.signal === 'shared_export_names')) {
@@ -233,25 +428,24 @@ function determineReason(reasons: RankingReason[]): string {
 
 function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, allRelations: FileRelation[]): CandidateScore | null {
   const reasons: RankingReason[] = [];
-  let score = 0;
   const filesById = Object.fromEntries(allRelations.map((relation) => [relation.fileId, relation]));
+  const relatedFileIdsByFileId = buildCandidateRelatedFileIdsByFileId(allRelations);
   const candidateExportNames = dedupe(candidate.exports.map((entry) => entry.exportedName).filter((value): value is string => Boolean(value)));
   const targetExportNames = profile.exportedSymbols.map((symbol) => symbol.name);
-  const sharedExportNames = countIntersection(targetExportNames, candidateExportNames);
-  const sharedImportTokens = countIntersection(profile.relation.importTokens, candidate.importTokens);
-  const sharedSymbolNames = countIntersection(profile.relation.symbolNames, candidate.symbolNames);
-  const sharedNamingTokens = countIntersection(
+  const exportNameOverlap = jaccard(targetExportNames, candidateExportNames);
+  const importTokenOverlap = jaccard(profile.relation.importTokens, candidate.importTokens);
+  const symbolNameOverlap = jaccard(profile.relation.symbolNames, candidate.symbolNames);
+  const candidateNamingTokenOverlap = jaccard(
     profile.namingTokens,
     dedupe([...tokenizeName(path.posix.basename(candidate.filePath)), ...candidate.symbolNames.flatMap((name) => tokenizeName(name))]),
   );
   const pathCloseness = computePathCloseness(profile.relation.filePath, candidate.filePath);
   const candidateBundleSuffixes = collectBundleSuffixes(candidate, allRelations);
   const bundleOverlap = countIntersection(profile.bundleSuffixes, candidateBundleSuffixes);
-  const candidateRelatedFileIds = dedupe(candidate.imports.map((entry) => entry.resolvedTargetFileId).filter((value): value is string => Boolean(value)));
-  const sharedRelatedFiles = countIntersection(profile.relatedFileIds, candidateRelatedFileIds);
   const candidateResolvedLocalDependencyFileIds = candidate.imports
     .map((entry) => entry.resolvedTargetFileId)
     .filter((value): value is string => Boolean(value));
+  const candidateRelatedFileIds = relatedFileIdsByFileId[candidate.fileId] ?? [];
   const sharedLocalDependencies = countIntersection(
     profile.resolvedLocalDependencyFileIds,
     candidateResolvedLocalDependencyFileIds,
@@ -264,72 +458,92 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
     profile.localDependencyFamilyTokens,
     candidateDependencyFamilyTokens,
   );
-  const sameRepo = candidate.repo === profile.relation.repo ? 1 : 0;
+  const dependencyJaccard = jaccard(profile.resolvedLocalDependencyFileIds, candidateResolvedLocalDependencyFileIds);
+  const dependencyFamilyOverlap = jaccard(profile.localDependencyFamilyTokens, candidateDependencyFamilyTokens);
+  const sharedRelatedFileOverlap = jaccard(profile.relatedFileIds, candidateRelatedFileIds);
+  const dependencyOverlap = Math.max(
+    dependencyJaccard,
+    dependencyFamilyOverlap * 0.7,
+    sharedRelatedFileOverlap * 0.5,
+    sharedLocalDependencies >= 2 ? 0.85 : 0,
+  );
+  const candidateStructuralAlignment = mapPatternStructuralAlignment({
+    structurallyIndexed: candidate.classification === 'source',
+    resolvedLocalDependencyFileIds: candidateResolvedLocalDependencyFileIds,
+    relatedLocalFileIds: candidateRelatedFileIds,
+    filesById,
+  });
+  const structuralAlignmentScore = getStructuralAlignmentScore(candidateStructuralAlignment);
+  const responsibilitySimilarity = getResponsibilitySimilarityScore(
+    inferResponsibilityKind(profile.relation),
+    inferResponsibilityKind(candidate),
+  );
   const sameBundleStem = getBundleStem(candidate.filePath) === profile.bundleStem ? 1 : 0;
+  const heuristicMatchStrength = Math.max(
+    0,
+    Math.min(
+      1,
+      importTokenOverlap * 0.25 +
+        exportNameOverlap * 0.2 +
+        symbolNameOverlap * 0.15 +
+        candidateNamingTokenOverlap * 0.2 +
+        Math.min(pathCloseness, 3) / 3 * 0.1 +
+        (sameBundleStem ? 1 : bundleOverlap > 0 ? 0.6 : 0) * 0.1,
+    ),
+  );
 
-  if (sameRepo) {
-    score += 4;
-    reasons.push(createReason('same_repo', 4, candidate.repo));
+  if (structuralAlignmentScore > 0) {
+    reasons.push(
+      createReason(
+        'structural_alignment',
+        roundScore(structuralAlignmentScore * STRUCTURAL_ALIGNMENT_WEIGHT),
+        candidateStructuralAlignment.structuralContextStrength,
+      ),
+    );
   }
 
-  if (pathCloseness > 0) {
-    const value = pathCloseness * 2;
-    score += value;
-    reasons.push(createReason('path_closeness', value));
-  }
-
-  if (sharedExportNames > 0) {
-    const value = sharedExportNames * 4;
-    score += value;
-    reasons.push(createReason('shared_export_names', value));
-  }
-
-  if (sharedImportTokens > 0) {
-    const value = Math.min(sharedImportTokens * 2, 8);
-    score += value;
-    reasons.push(createReason('shared_import_tokens', value));
-  }
-
-  if (sharedSymbolNames > 0) {
-    const value = Math.min(sharedSymbolNames * 2, 6);
-    score += value;
-    reasons.push(createReason('shared_symbol_names', value));
-  }
-
-  if (sharedNamingTokens > 0) {
-    const value = Math.min(sharedNamingTokens * 2, 6);
-    score += value;
-    reasons.push(createReason('naming_family_overlap', value));
-  }
-
-  if (bundleOverlap > 0) {
-    const value = Math.min(bundleOverlap * 2, 6);
-    score += value;
-    reasons.push(createReason('bundle_shape_overlap', value, candidateBundleSuffixes.join(',')));
-  }
-
-  if (sameBundleStem > 0) {
-    score += 2;
-    reasons.push(createReason('same_bundle_stem', 2, getBundleStem(candidate.filePath)));
-  }
-
-  if (sharedRelatedFiles > 0) {
-    const value = sharedRelatedFiles * 3;
-    score += value;
-    reasons.push(createReason('shared_related_files', value));
+  if (dependencyOverlap > 0) {
+    reasons.push(createReason('dependency_overlap', roundScore(dependencyOverlap * DEPENDENCY_OVERLAP_WEIGHT)));
   }
 
   if (sharedLocalDependencies > 0) {
-    const value = sharedLocalDependencies * 4;
-    score += value;
-    reasons.push(createReason('shared_local_dependencies', value));
+    reasons.push(createReason('shared_local_dependencies', sharedLocalDependencies));
   }
 
   if (sharedDependencyFamilies > 0) {
-    const value = Math.min(sharedDependencyFamilies * 2, 4);
-    score += value;
-    reasons.push(createReason('shared_dependency_families', value));
+    reasons.push(createReason('shared_dependency_families', sharedDependencyFamilies));
   }
+
+  if (responsibilitySimilarity > 0) {
+    reasons.push(createReason('responsibility_similarity', roundScore(responsibilitySimilarity * RESPONSIBILITY_SIMILARITY_WEIGHT)));
+  }
+
+  if (heuristicMatchStrength > 0) {
+    reasons.push(createReason('match_strength', roundScore(heuristicMatchStrength * MATCH_STRENGTH_WEIGHT)));
+  }
+
+  if (exportNameOverlap > 0) {
+    reasons.push(createReason('shared_export_names', roundScore(exportNameOverlap), candidateExportNames.join(',')));
+  }
+
+  if (candidateNamingTokenOverlap > 0) {
+    reasons.push(createReason('naming_family_overlap', roundScore(candidateNamingTokenOverlap)));
+  }
+
+  if (pathCloseness > 0) {
+    reasons.push(createReason('path_closeness', roundScore(Math.min(pathCloseness, 3) / 3)));
+  }
+
+  if (sameBundleStem > 0 || bundleOverlap > 0) {
+    reasons.push(createReason('bundle_shape_overlap', roundScore(sameBundleStem ? 1 : 0.6), candidateBundleSuffixes.join(',')));
+  }
+
+  const score = roundScore(
+    structuralAlignmentScore * STRUCTURAL_ALIGNMENT_WEIGHT +
+      dependencyOverlap * DEPENDENCY_OVERLAP_WEIGHT +
+      responsibilitySimilarity * RESPONSIBILITY_SIMILARITY_WEIGHT +
+      heuristicMatchStrength * MATCH_STRENGTH_WEIGHT,
+  );
 
   if (score === 0) {
     return null;
@@ -340,6 +554,12 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
     score,
     reason: determineReason(reasons),
     reasons,
+    signalScores: {
+      structuralAlignment: roundScore(structuralAlignmentScore),
+      dependencyOverlap: roundScore(dependencyOverlap),
+      responsibilitySimilarity: roundScore(responsibilitySimilarity),
+      matchStrength: roundScore(heuristicMatchStrength),
+    },
   };
 }
 
