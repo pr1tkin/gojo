@@ -6,11 +6,17 @@ const {
   getPatternMatchesForFileMock,
   getPatternMatchesForSymbolMock,
   buildPatternTrustMetadataMock,
+  buildPatternMatchExplainabilityMock,
+  buildPatternResolutionExplainabilityMock,
+  buildPatternTargetExplainabilityMock,
 } = vi.hoisted(() => ({
   getPatternMatchesForComponentMock: vi.fn(),
   getPatternMatchesForFileMock: vi.fn(),
   getPatternMatchesForSymbolMock: vi.fn(),
   buildPatternTrustMetadataMock: vi.fn(),
+  buildPatternMatchExplainabilityMock: vi.fn(),
+  buildPatternResolutionExplainabilityMock: vi.fn(),
+  buildPatternTargetExplainabilityMock: vi.fn(),
 }));
 
 vi.mock('../../src/orchestrator/index.js', () => ({
@@ -21,6 +27,12 @@ vi.mock('../../src/orchestrator/index.js', () => ({
 
 vi.mock('../../src/tools/trust-metadata.js', () => ({
   buildPatternTrustMetadata: buildPatternTrustMetadataMock,
+}));
+
+vi.mock('../../src/tools/explainability.js', () => ({
+  buildPatternMatchExplainability: buildPatternMatchExplainabilityMock,
+  buildPatternResolutionExplainability: buildPatternResolutionExplainabilityMock,
+  buildPatternTargetExplainability: buildPatternTargetExplainabilityMock,
 }));
 
 import { runSearchPatternsTool, searchPatternsToolDefinition } from '../../src/tools/search-patterns.js';
@@ -54,6 +66,39 @@ describe('search_patterns tool', () => {
       structuralAlignment: {
         graphAnchored: true,
         structuralContextStrength: 'medium',
+      },
+    });
+    buildPatternTargetExplainabilityMock.mockResolvedValue({
+      family: 'ui_component',
+      role: 'component',
+      confidence: 'medium',
+      selectionReason: 'resolved primary target',
+      explanationSignals: {
+        alignment: 'medium',
+      },
+    });
+    buildPatternResolutionExplainabilityMock.mockImplementation(async (resolution: Record<string, unknown>) => resolution);
+    buildPatternMatchExplainabilityMock.mockResolvedValue({
+      family: 'ui_component',
+      subClusterId: 'cluster:component:sub:button',
+      role: 'component',
+      confidence: 'medium',
+      selectionReason: 'same component family + local neighborhood match',
+      explanationSignals: {
+        alignment: 'medium',
+        dependencyOverlap: 'medium',
+        familyMatch: true,
+      },
+      clusterContext: {
+        parentClusterId: 'cluster:component:button',
+        subClusterId: 'cluster:component:sub:button',
+        clusterRole: 'ui_component',
+        isCoreMember: true,
+        relatedClusterIds: ['cluster:store:button'],
+      },
+      relatedContext: {
+        relatedClusterIds: ['cluster:store:button'],
+        neighborTypes: ['state_or_store'],
       },
     });
   });
@@ -140,6 +185,7 @@ describe('search_patterns tool', () => {
         requestedName: 'Button',
         requestedRepo: 'example-saas-dashboard',
         requestedMode: 'component',
+        explainabilityMode: 'agent',
         metadata: {
           coverage: {
             filesAnalyzed: 80,
@@ -174,6 +220,61 @@ describe('search_patterns tool', () => {
           graphAnchoredMatchCount: 1,
         },
       }),
+    );
+    expect(parsed.primaryTarget.explanation).toEqual(
+      expect.objectContaining({
+        family: 'ui_component',
+        role: 'component',
+      }),
+    );
+    expect(parsed.patternMatches[0].explanation).toEqual(
+      expect.objectContaining({
+        subClusterId: 'cluster:component:sub:button',
+        confidence: 'medium',
+      }),
+    );
+  });
+
+  it('passes debug explainability mode through the helper layer', async () => {
+    getPatternMatchesForComponentMock.mockResolvedValue({
+      query: 'Button',
+      mode: 'component',
+      repo: 'example-saas-dashboard',
+      primaryTarget: {
+        file: { fileId: 'example-saas-dashboard:components/Button.tsx', filePath: 'components/Button.tsx' },
+        symbol: null,
+        definedSymbols: [],
+        exportedSymbols: [],
+        structuralAlignment: null,
+      },
+      patternMatches: [],
+      resolution: {
+        status: 'resolved',
+        mode: 'component',
+        candidateCount: 0,
+        ambiguityDetected: false,
+        selectedCandidate: null,
+        alternativeCandidates: [],
+      },
+      summary: {
+        matchCount: 0,
+        strongMatchCount: 0,
+        graphAnchoredMatchCount: 0,
+      },
+    });
+
+    await runSearchPatternsTool({
+      name: 'Button',
+      detail: 'debug',
+    });
+
+    expect(buildPatternTargetExplainabilityMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      'debug',
+    );
+    expect(buildPatternResolutionExplainabilityMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      'debug',
     );
   });
 

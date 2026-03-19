@@ -40,6 +40,7 @@ export const exploreComponentInputSchema = {
   repo: z.string().min(1).optional(),
   limit: z.number().int().min(1).max(10).optional(),
   relatedLimit: z.number().int().min(1).max(20).optional(),
+  detail: z.enum(['agent', 'debug']).optional(),
 };
 
 export const searchPatternsInputSchema = {
@@ -47,6 +48,7 @@ export const searchPatternsInputSchema = {
   repo: z.string().min(1).optional(),
   limit: z.number().int().min(1).max(10).optional(),
   mode: z.enum(['component', 'symbol', 'file']).optional(),
+  detail: z.enum(['agent', 'debug']).optional(),
 };
 
 export const collectRefactorContextInputSchema = {
@@ -54,6 +56,7 @@ export const collectRefactorContextInputSchema = {
   repo: z.string().min(1).optional(),
   mode: z.enum(['component', 'symbol', 'file']).optional(),
   limit: z.number().int().min(1).max(20).optional(),
+  detail: z.enum(['agent', 'debug']).optional(),
 };
 
 export const analyzeSymbolInputSchema = {

@@ -6,11 +6,17 @@ const {
   getSymbolExplorationContextMock,
   getUiHierarchySummaryMock,
   buildExploreComponentTrustMetadataMock,
+  buildIndexedSymbolExplainabilityMock,
+  buildRelatedFileExplainabilityMock,
+  buildSymbolCandidateExplainabilityMock,
 } = vi.hoisted(() => ({
   getFileExplorationContextMock: vi.fn(),
   getSymbolExplorationContextMock: vi.fn(),
   getUiHierarchySummaryMock: vi.fn(),
   buildExploreComponentTrustMetadataMock: vi.fn(),
+  buildIndexedSymbolExplainabilityMock: vi.fn(),
+  buildRelatedFileExplainabilityMock: vi.fn(),
+  buildSymbolCandidateExplainabilityMock: vi.fn(),
 }));
 
 vi.mock('../../src/orchestrator/index.js', () => ({
@@ -23,12 +29,39 @@ vi.mock('../../src/tools/trust-metadata.js', () => ({
   buildExploreComponentTrustMetadata: buildExploreComponentTrustMetadataMock,
 }));
 
+vi.mock('../../src/tools/explainability.js', () => ({
+  buildIndexedSymbolExplainability: buildIndexedSymbolExplainabilityMock,
+  buildRelatedFileExplainability: buildRelatedFileExplainabilityMock,
+  buildSymbolCandidateExplainability: buildSymbolCandidateExplainabilityMock,
+}));
+
 import { exploreComponentToolDefinition, runExploreComponentTool } from '../../src/tools/explore-component.js';
 
 describe('explore_component tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getUiHierarchySummaryMock.mockResolvedValue(null);
+    buildIndexedSymbolExplainabilityMock.mockResolvedValue({
+      family: 'ui_component',
+      role: 'component',
+      confidence: 'high',
+      selectionReason: 'resolved primary symbol',
+      explanationSignals: {},
+    });
+    buildRelatedFileExplainabilityMock.mockResolvedValue({
+      family: 'ui_component',
+      role: 'component',
+      confidence: 'medium',
+      selectionReason: 'graph-related file context',
+      explanationSignals: {},
+    });
+    buildSymbolCandidateExplainabilityMock.mockResolvedValue({
+      family: 'ui_component',
+      role: 'component',
+      confidence: 'high',
+      selectionReason: 'exact name match',
+      explanationSignals: {},
+    });
     buildExploreComponentTrustMetadataMock.mockResolvedValue({
       coverage: {
         filesAnalyzed: 95,
@@ -296,6 +329,7 @@ describe('explore_component tool', () => {
       expect.objectContaining({
         requestedName: 'Button',
         requestedRepo: 'repo-gamma',
+        explainabilityMode: 'agent',
         resolution: expect.objectContaining({
           status: 'resolved',
           candidateCount: 1,
@@ -304,6 +338,16 @@ describe('explore_component tool', () => {
             fileId: 'repo-gamma:components/ui/Button.tsx',
             name: 'Button',
             score: 16,
+            explanation: expect.objectContaining({
+              role: 'component',
+              confidence: 'high',
+            }),
+          }),
+        }),
+        resolvedPrimarySymbol: expect.objectContaining({
+          symbolId: 'repo-gamma:components/ui/Button.tsx:function:Button:1',
+          explanation: expect.objectContaining({
+            selectionReason: 'resolved primary symbol',
           }),
         }),
         resolvedPrimaryFile: expect.objectContaining({
@@ -313,10 +357,16 @@ describe('explore_component tool', () => {
           expect.objectContaining({
             file: expect.objectContaining({ fileId: 'repo-gamma:components/ui/DownloadButton.tsx' }),
             score: 25,
+            explanation: expect.objectContaining({
+              selectionReason: 'graph-related file context',
+            }),
           }),
           expect.objectContaining({
             file: expect.objectContaining({ fileId: 'repo-gamma:components/ContractList.tsx' }),
             score: 20,
+            explanation: expect.objectContaining({
+              selectionReason: 'graph-related file context',
+            }),
           }),
         ],
         definedSymbols: [expect.objectContaining({ name: 'Button' })],
@@ -530,10 +580,16 @@ describe('explore_component tool', () => {
         ambiguityDetected: true,
         selectedCandidate: expect.objectContaining({
           fileId: 'repo-beta:pages/admin/cleanup.tsx',
+          explanation: expect.objectContaining({
+            role: 'component',
+          }),
         }),
         alternativeCandidates: [
           expect.objectContaining({
             fileId: 'repo-beta:pages/admin/project.tsx',
+            explanation: expect.objectContaining({
+              role: 'component',
+            }),
           }),
         ],
       }),
@@ -567,6 +623,7 @@ describe('explore_component tool', () => {
     expect(parsed).toEqual({
       requestedName: 'MissingComponent',
       requestedRepo: undefined,
+      explainabilityMode: 'agent',
       resolution: {
         status: 'missing',
         candidateCount: 0,
@@ -640,6 +697,7 @@ describe('explore_component tool', () => {
     expect(parsed).toEqual({
       requestedName: 'Button',
       requestedRepo: 'missing-repo',
+      explainabilityMode: 'agent',
       resolution: {
         status: 'missing',
         candidateCount: 0,
@@ -757,5 +815,83 @@ describe('explore_component tool', () => {
     const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
 
     expect(parsed).not.toHaveProperty('uiHierarchy');
+  });
+
+  it('passes debug explainability mode through helper calls', async () => {
+    getSymbolExplorationContextMock.mockResolvedValue({
+      query: 'Card',
+      repo: 'repo-gamma',
+      kind: undefined,
+      primarySymbol: {
+        symbolId: 'repo-gamma:components/ui/Card.tsx:function:Card:1',
+        fileId: 'repo-gamma:components/ui/Card.tsx',
+        name: 'Card',
+        kind: 'function',
+        repo: 'repo-gamma',
+        filePath: 'components/ui/Card.tsx',
+        startLine: 1,
+        endLine: 12,
+        exported: true,
+      },
+      primaryFile: {
+        nodeType: 'file',
+        fileId: 'repo-gamma:components/ui/Card.tsx',
+        repoId: 'repo-gamma',
+        filePath: 'components/ui/Card.tsx',
+        classification: 'source',
+      },
+      rankedSymbols: [
+        {
+          item: {
+            symbolId: 'repo-gamma:components/ui/Card.tsx:function:Card:1',
+            fileId: 'repo-gamma:components/ui/Card.tsx',
+            name: 'Card',
+            kind: 'function',
+            repo: 'repo-gamma',
+            filePath: 'components/ui/Card.tsx',
+            startLine: 1,
+            endLine: 12,
+            exported: true,
+          },
+          score: 14,
+          reasons: [{ signal: 'exact_name', value: 10 }],
+        },
+      ],
+      relatedFiles: [],
+      exportedSymbols: [],
+      summary: {
+        candidateCount: 1,
+        relatedFileCount: 0,
+        exportedSymbolCount: 0,
+      },
+      rawContext: {},
+    });
+    getFileExplorationContextMock.mockResolvedValue({
+      fileId: 'repo-gamma:components/ui/Card.tsx',
+      primaryFile: {
+        nodeType: 'file',
+        fileId: 'repo-gamma:components/ui/Card.tsx',
+        repoId: 'repo-gamma',
+        filePath: 'components/ui/Card.tsx',
+        classification: 'source',
+      },
+      repo: 'repo-gamma',
+      relatedFiles: [],
+      neighboringFiles: [],
+      definedSymbols: [],
+      exportedSymbols: [],
+      summary: {
+        relatedFileCount: 0,
+        neighboringFileCount: 0,
+        definedSymbolCount: 0,
+        exportedSymbolCount: 0,
+      },
+      rawContext: {},
+    });
+
+    await runExploreComponentTool({ name: 'Card', repo: 'repo-gamma', detail: 'debug' });
+
+    expect(buildSymbolCandidateExplainabilityMock).toHaveBeenCalledWith(expect.any(Object), 'debug');
+    expect(buildIndexedSymbolExplainabilityMock).toHaveBeenCalledWith(expect.any(Object), 'debug');
   });
 });

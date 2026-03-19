@@ -6,6 +6,47 @@ import type { RankingReason } from '../ranking/index.js';
 import type { IndexedSymbol } from '../symbol-index/types.js';
 import type { RefactorContextMode, SearchPatternsMode, SymbolKind } from '../types.js';
 
+export type ExplainabilityMode = 'agent' | 'debug';
+export type ExplainabilityConfidence = 'high' | 'medium' | 'low';
+export type ExplainabilitySignalStrength = 'high' | 'medium' | 'low';
+
+export interface ResultExplainabilitySignals {
+  alignment?: ExplainabilitySignalStrength;
+  dependencyOverlap?: ExplainabilitySignalStrength;
+  familyMatch?: boolean;
+  clusterCohesion?: ExplainabilitySignalStrength;
+}
+
+export interface ResultExplainabilityClusterContext {
+  parentClusterId?: string;
+  subClusterId?: string;
+  clusterRole?: string;
+  isCoreMember?: boolean;
+  relatedClusterIds?: string[];
+}
+
+export interface ResultExplainabilityRelatedContext {
+  relatedClusterIds?: string[];
+  neighborTypes?: string[];
+}
+
+export interface ResultExplainability {
+  family?: string | null;
+  subClusterId?: string | null;
+  role: string;
+  confidence: ExplainabilityConfidence;
+  selectionReason: string;
+  explanationSignals: ResultExplainabilitySignals;
+  clusterContext?: ResultExplainabilityClusterContext;
+  relatedContext?: ResultExplainabilityRelatedContext;
+  debug?: {
+    score?: number;
+    baseScore?: number;
+    rawReasons?: RankingReason[];
+    signalScores?: Record<string, number>;
+  };
+}
+
 export interface FileExplorationContext {
   fileId: string;
   primaryFile: FileNode | null;
@@ -63,6 +104,7 @@ export interface PatternMatchItem {
     siblingFiles: string[];
   };
   structuralAlignment: PatternStructuralAlignment;
+  explanation?: ResultExplainability;
 }
 
 export interface PatternTargetSummary {
@@ -71,6 +113,7 @@ export interface PatternTargetSummary {
   definedSymbols: Array<{ name: string; kind: SymbolKind }>;
   exportedSymbols: Array<{ name: string; kind: SymbolKind }>;
   structuralAlignment: PatternStructuralAlignment | null;
+  explanation?: ResultExplainability | null;
 }
 
 export interface PatternResolutionSummary {
@@ -89,6 +132,7 @@ export interface PatternResolutionSummary {
         exported: boolean;
         score: number;
         reasons: RankingReason[];
+        explanation?: ResultExplainability;
       }
     | null;
   alternativeCandidates: Array<{
@@ -101,6 +145,7 @@ export interface PatternResolutionSummary {
     exported: boolean;
     score: number;
     reasons: RankingReason[];
+    explanation?: ResultExplainability;
   }>;
 }
 
@@ -136,11 +181,13 @@ export interface RefactorSymbolCandidate {
   exported: boolean;
   score: number;
   reasons: RankingReason[];
+  explanation?: ResultExplainability;
 }
 
 export interface RefactorNearbyFile {
   file: FileNode;
   category: 'same_directory' | 'bundle_family';
+  explanation?: ResultExplainability;
 }
 
 export interface RefactorContext {

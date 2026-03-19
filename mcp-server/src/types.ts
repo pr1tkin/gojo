@@ -152,6 +152,7 @@ export interface ExploreComponentInput {
   repo?: string;
   limit?: number;
   relatedLimit?: number;
+  detail?: 'agent' | 'debug';
 }
 
 export type SearchPatternsMode = 'component' | 'symbol' | 'file';
@@ -161,6 +162,7 @@ export interface SearchPatternsInput {
   repo?: string;
   limit?: number;
   mode?: SearchPatternsMode;
+  detail?: 'agent' | 'debug';
 }
 
 export type RefactorContextMode = 'file' | 'symbol' | 'component';
@@ -170,6 +172,7 @@ export interface CollectRefactorContextInput {
   repo?: string;
   mode?: RefactorContextMode;
   limit?: number;
+  detail?: 'agent' | 'debug';
 }
 
 export interface AnalyzeSymbolInput {

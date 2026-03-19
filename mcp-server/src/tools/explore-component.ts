@@ -5,6 +5,11 @@ import {
   getUiHierarchySummary,
 } from '../orchestrator/index.js';
 import type { ExploreComponentInput } from '../types.js';
+import {
+  buildIndexedSymbolExplainability,
+  buildRelatedFileExplainability,
+  buildSymbolCandidateExplainability,
+} from './explainability.js';
 import { buildExploreComponentTrustMetadata } from './trust-metadata.js';
 
 const DEFAULT_CANDIDATE_LIMIT = 5;
@@ -36,6 +41,7 @@ function buildCandidateSummary(
 export async function runExploreComponentTool(
   input: ExploreComponentInput,
 ): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
+  const detail = input.detail ?? 'agent';
   const symbolContext = await getSymbolExplorationContext(input.name, {
     repo: input.repo,
     limit: input.limit ?? DEFAULT_CANDIDATE_LIMIT,
@@ -48,7 +54,15 @@ export async function runExploreComponentTool(
         relatedLimit: input.relatedLimit ?? DEFAULT_RELATED_LIMIT,
       })
     : null;
-  const candidateSummaries = symbolContext.rankedSymbols.map(buildCandidateSummary);
+  const candidateSummaries = await Promise.all(
+    symbolContext.rankedSymbols.map(async (entry) => {
+      const summary = buildCandidateSummary(entry);
+      return {
+        ...summary,
+        explanation: await buildSymbolCandidateExplainability(summary, detail),
+      };
+    }),
+  );
   const ambiguityDetected = candidateSummaries.length > 1;
   const uiHierarchy =
     symbolContext.primarySymbol && (fileContext?.primaryFile ?? symbolContext.primaryFile)
@@ -58,10 +72,23 @@ export async function runExploreComponentTool(
           symbolName: symbolContext.primarySymbol.name,
         })
       : null;
+  const relatedFiles = await Promise.all(
+    (fileContext?.relatedFiles ?? symbolContext.relatedFiles).map(async (entry) => ({
+      ...entry,
+      explanation: await buildRelatedFileExplainability(entry, detail),
+    })),
+  );
+  const resolvedPrimarySymbol = symbolContext.primarySymbol
+    ? {
+        ...symbolContext.primarySymbol,
+        explanation: await buildIndexedSymbolExplainability(symbolContext.primarySymbol, detail),
+      }
+    : null;
 
   const result = {
     requestedName: input.name,
     requestedRepo: input.repo,
+    explainabilityMode: detail,
     resolution: {
       status: symbolContext.primarySymbol ? 'resolved' : 'missing',
       candidateCount: candidateSummaries.length,
@@ -69,9 +96,9 @@ export async function runExploreComponentTool(
       selectedCandidate: candidateSummaries[0] ?? null,
       alternativeCandidates: ambiguityDetected ? candidateSummaries.slice(1) : [],
     },
-    resolvedPrimarySymbol: symbolContext.primarySymbol,
+    resolvedPrimarySymbol,
     resolvedPrimaryFile: fileContext?.primaryFile ?? symbolContext.primaryFile,
-    relatedFiles: fileContext?.relatedFiles ?? symbolContext.relatedFiles,
+    relatedFiles,
     definedSymbols: fileContext?.definedSymbols ?? [],
     exportedSymbols: fileContext?.exportedSymbols ?? symbolContext.exportedSymbols,
     ...(uiHierarchy ? { uiHierarchy } : {}),
@@ -80,7 +107,7 @@ export async function runExploreComponentTool(
       completeness: uiHierarchy?.renderTreeSummary.completeness,
     }),
     summary: {
-      relatedFileCount: (fileContext?.relatedFiles ?? symbolContext.relatedFiles).length,
+      relatedFileCount: relatedFiles.length,
       definedSymbolCount: fileContext?.definedSymbols.length ?? 0,
       exportedSymbolCount: (fileContext?.exportedSymbols ?? symbolContext.exportedSymbols).length,
     },

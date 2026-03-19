@@ -1,4 +1,5 @@
 import type { FileNode, GraphEdgeType, SymbolNode } from '../graph/types.js';
+import type { ResultExplainability } from '../orchestrator/types.js';
 import type { RankedSymbolCandidate, RankingReason } from '../ranking/index.js';
 import type { IndexedSymbol } from '../symbol-index/types.js';
 import type { SymbolKind } from '../types.js';
@@ -9,6 +10,7 @@ export interface RankedFileContextItem {
   reason: string;
   reasons: RankingReason[];
   via: GraphEdgeType[];
+  explanation?: ResultExplainability;
 }
 
 export interface FileContextBundle {
