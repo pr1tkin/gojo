@@ -1,10 +1,13 @@
 # 🧰 Tools
 
-> The tool surface is intentionally **small**.
+> The tool surface is intentionally small.
 
 ---
 
 ## 🎯 Core Tools (Public)
+
+### build_change_context
+Bundle exploration, precedents, refactor context, and optional planning into one agent workflow.
 
 ### explore_component
 Understand structure, dependencies, role.
@@ -64,10 +67,12 @@ Includes:
 ## 🧭 Recommended Flow
 
 ```text
+build_change_context
+or
 explore_component
-→ find_precedents
-→ collect_refactor_context
-→ plan_change
+-> find_precedents
+-> collect_refactor_context
+-> plan_change
 ```
 
 ---
@@ -82,4 +87,4 @@ explore_component
 
 ## 🎯 Principle
 
-> Fewer tools → better agents.
+> Fewer tools -> better agents.

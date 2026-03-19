@@ -72,6 +72,7 @@ It exists to power **better decisions**, not APIs.
 The **only public interface**.
 
 - `explore_component`
+- `build_change_context`
 - `find_precedents`
 - `collect_refactor_context`
 - `plan_change`

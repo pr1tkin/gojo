@@ -214,3 +214,13 @@ export interface PlanChangeInput {
   repo?: string;
   mode?: PlanChangeMode;
 }
+
+export type BuildChangeContextIntent = 'refactor' | 'feature' | 'fix';
+
+export interface BuildChangeContextInput {
+  symbolName?: string;
+  filePath?: string;
+  repo?: string;
+  intent?: BuildChangeContextIntent;
+  detail?: 'agent' | 'debug';
+}

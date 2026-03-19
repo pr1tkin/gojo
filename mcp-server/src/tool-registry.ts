@@ -2,6 +2,10 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 import { runAnalyzeSymbolTool, analyzeSymbolToolDefinition } from './tools/analyze-symbol.js';
 import {
+  buildChangeContextToolDefinition,
+  runBuildChangeContextTool,
+} from './tools/build-change-context.js';
+import {
   collectRefactorContextToolDefinition,
   runCollectRefactorContextTool,
 } from './tools/collect-refactor-context.js';
@@ -31,6 +35,7 @@ interface ToolRegistration {
 }
 
 export const PUBLIC_TOOL_NAMES = [
+  'build_change_context',
   'explore_component',
   'find_precedents',
   'collect_refactor_context',
@@ -77,6 +82,11 @@ function registerTool(
 
 export function getToolRegistrations(): ToolRegistration[] {
   return [
+    {
+      definition: buildChangeContextToolDefinition,
+      register: (server, _config) =>
+        registerTool(server, buildChangeContextToolDefinition, async (input) => runBuildChangeContextTool(input)),
+    },
     {
       definition: exploreComponentToolDefinition,
       register: (server, _config) =>

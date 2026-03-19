@@ -6,7 +6,7 @@ describe('tool registry visibility enforcement', () => {
   it('marks all tools with explicit visibility metadata', () => {
     const registrations = getToolRegistrations();
 
-    expect(registrations).toHaveLength(12);
+    expect(registrations).toHaveLength(13);
     expect(registrations.every((entry) => entry.definition.visibility === 'public' || entry.definition.visibility === 'internal')).toBe(true);
   });
 
@@ -14,6 +14,7 @@ describe('tool registry visibility enforcement', () => {
     const registrations = getVisibleToolRegistrations(false);
 
     expect(registrations.map((entry) => entry.definition.name)).toEqual([
+      'build_change_context',
       'explore_component',
       'find_precedents',
       'collect_refactor_context',
@@ -25,6 +26,7 @@ describe('tool registry visibility enforcement', () => {
     const registrations = getVisibleToolRegistrations(true);
 
     expect(registrations.map((entry) => entry.definition.name)).toEqual([
+      'build_change_context',
       'explore_component',
       'find_precedents',
       'collect_refactor_context',
@@ -52,7 +54,7 @@ describe('tool registry visibility enforcement', () => {
       includeInternalTools: false,
     });
 
-    expect(registerTool).toHaveBeenCalledTimes(4);
+    expect(registerTool).toHaveBeenCalledTimes(5);
     const descriptions = registerTool.mock.calls.map((call) => call[1].description);
     expect(descriptions.every((entry) => String(entry).startsWith('Recommended entry point.'))).toBe(true);
   });

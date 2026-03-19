@@ -25,6 +25,7 @@ It shows you:
 
 **Gojo helps coding agents answer the questions that matter before they write code:**
 
+- **Can I bundle the main context in one pass?** → `build_change_context`
 - **What is this thing?** → `explore_component`
 - **How has something like this already been built?** → `find_precedents`
 - **What else is affected if I touch it?** → `collect_refactor_context`
@@ -64,6 +65,9 @@ when an agent or developer needs grounded context, not guesses.
 
 These are the **recommended public entry points**:
 
+- `build_change_context`  
+  Bundle exploration, precedents, refactor context, and optional planning in one tool call.
+
 - `explore_component`  
   Understand structure, dependencies, role, and UI context.
 
@@ -81,6 +85,8 @@ These are the **recommended public entry points**:
 ## 🧭 Example Workflow
 
 ```text
+build_change_context("ContractDetailPage")
+or
 explore_component("ContractDetailPage")
 → find_precedents(...)
 → collect_refactor_context(...)

@@ -93,3 +93,11 @@ export const planChangeInputSchema = {
   repo: z.string().min(1).optional(),
   mode: z.enum(['safe', 'exploratory']).optional(),
 };
+
+export const buildChangeContextInputSchema = {
+  symbolName: z.string().min(1).optional(),
+  filePath: z.string().min(1).optional(),
+  repo: z.string().min(1).optional(),
+  intent: z.enum(['refactor', 'feature', 'fix']).optional(),
+  detail: z.enum(['agent', 'debug']).optional(),
+};
