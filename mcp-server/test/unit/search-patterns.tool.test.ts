@@ -51,6 +51,10 @@ describe('search_patterns tool', () => {
         filesTotal: 80,
         ratio: 0.75,
       },
+      structuralAlignment: {
+        graphAnchored: true,
+        structuralContextStrength: 'medium',
+      },
     });
   });
 
@@ -158,6 +162,10 @@ describe('search_patterns tool', () => {
             filesAnalyzed: 60,
             filesTotal: 80,
             ratio: 0.75,
+          },
+          structuralAlignment: {
+            graphAnchored: true,
+            structuralContextStrength: 'medium',
           },
         },
         summary: {
@@ -278,6 +286,10 @@ describe('search_patterns tool', () => {
         filesAnalyzed: 60,
         filesTotal: 80,
         ratio: 0.75,
+      },
+      structuralAlignment: {
+        graphAnchored: true,
+        structuralContextStrength: 'medium',
       },
     });
   });

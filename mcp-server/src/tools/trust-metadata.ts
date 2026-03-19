@@ -1,5 +1,6 @@
 import { loadCurrentGenerationState } from '../indexing/generation-store.js';
 import type { SearchRepoFingerprint } from '../indexing/types.js';
+import type { PatternStructuralAlignment } from '../patterns/structural-alignment.js';
 import { loadPatternIndexResult } from '../patterns/store.js';
 import type { PatternMatchContext } from '../orchestrator/types.js';
 import type { UiHierarchyTreeNode } from '../orchestrator/ui-hierarchy-types.js';
@@ -22,6 +23,10 @@ export interface ToolTrustMetadata {
   confidence: 'high' | 'medium' | 'low';
   warnings?: string[];
   patternCoverage?: ToolCoverageScopeSnapshot;
+  structuralAlignment?: {
+    graphAnchored: boolean;
+    structuralContextStrength: PatternStructuralAlignment['structuralContextStrength'];
+  } | null;
 }
 
 interface StructuralCoverageSnapshot {
@@ -114,6 +119,19 @@ function formatPercent(value: number): string {
 
 function dedupeWarnings(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
+}
+
+function summarizePatternStructuralAlignment(
+  alignment: PatternStructuralAlignment | null,
+): ToolTrustMetadata['structuralAlignment'] {
+  if (!alignment) {
+    return null;
+  }
+
+  return {
+    graphAnchored: alignment.graphAnchored,
+    structuralContextStrength: alignment.structuralContextStrength,
+  };
 }
 
 function sumRawSearchVisibleFiles(repoFingerprints: SearchRepoFingerprint[]): number {
@@ -350,6 +368,7 @@ export async function buildPatternTrustMetadata(result: PatternMatchContext): Pr
   const warnings = [...snapshot.warnings];
   const strongMatchRatio =
     result.summary.matchCount === 0 ? 0 : result.summary.strongMatchCount / result.summary.matchCount;
+  const targetStructuralAlignment = result.primaryTarget.structuralAlignment;
   const criticalUnresolvedSignals =
     result.resolution.status === 'missing' ||
     (result.summary.matchCount > 0 && strongMatchRatio < 0.4);
@@ -374,11 +393,44 @@ export async function buildPatternTrustMetadata(result: PatternMatchContext): Pr
     warnings.push('No similar pattern matches were found');
   }
 
-  return buildTrustMetadata({
+  const baseMetadata = buildTrustMetadata({
     coverage: snapshot.coverage,
     completeness: result.summary.matchCount === 0 ? 0 : strongMatchRatio,
     warnings,
     criticalUnresolvedSignals,
     patternCoverage: snapshot.patternCoverage,
   });
+
+  if (!targetStructuralAlignment) {
+    return {
+      ...baseMetadata,
+      structuralAlignment: null,
+    };
+  }
+
+  const structuralWarnings = [...(baseMetadata.warnings ?? [])];
+  let confidence = baseMetadata.confidence;
+  const hasVeryStrongMatches = result.summary.matchCount > 0 && strongMatchRatio >= 0.8;
+
+  if (!targetStructuralAlignment.graphAnchored || targetStructuralAlignment.structuralContextStrength === 'low') {
+    if ((targetStructuralAlignment.resolvedLocalDependencies?.length ?? 0) === 0) {
+      structuralWarnings.push('Target has weak structural grounding (no resolved local dependencies)');
+    }
+    structuralWarnings.push('Pattern matches are based on heuristic similarity, not graph-backed structure');
+    confidence = hasVeryStrongMatches && baseMetadata.confidence !== 'low' ? 'medium' : 'low';
+  } else if (
+    targetStructuralAlignment.graphAnchored &&
+    targetStructuralAlignment.structuralContextStrength === 'medium' &&
+    baseMetadata.confidence === 'high'
+  ) {
+    structuralWarnings.push('Target has partial structural grounding (limited resolved local dependencies)');
+    confidence = 'medium';
+  }
+
+  return {
+    ...baseMetadata,
+    confidence,
+    ...(structuralWarnings.length > 0 ? { warnings: dedupeWarnings(structuralWarnings) } : {}),
+    structuralAlignment: summarizePatternStructuralAlignment(targetStructuralAlignment),
+  };
 }
