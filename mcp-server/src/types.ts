@@ -165,6 +165,15 @@ export interface SearchPatternsInput {
   detail?: 'agent' | 'debug';
 }
 
+export interface FindPrecedentsToolInput {
+  name: string;
+  repo?: string;
+  limit?: number;
+  mode?: SearchPatternsMode;
+  detail?: 'agent' | 'debug';
+  includeFamilyContext?: boolean;
+}
+
 export type RefactorContextMode = 'file' | 'symbol' | 'component';
 
 export interface CollectRefactorContextInput {

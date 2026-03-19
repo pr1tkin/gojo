@@ -10,6 +10,7 @@ import type {
   ResultExplainability,
 } from '../orchestrator/types.js';
 import type { PatternMatchItem, PatternTargetSummary, PatternResolutionSummary } from '../orchestrator/types.js';
+import type { PrecedentCandidate } from '../orchestrator/precedent-discovery-types.js';
 import type { RankingReason } from '../ranking/index.js';
 import type { IndexedSymbol } from '../symbol-index/types.js';
 import type { SymbolKind } from '../types.js';
@@ -605,4 +606,73 @@ export async function buildIndexedSymbolExplainability(
     selectionReason: 'resolved primary symbol',
     confidence: symbol.exported ? 'high' : 'medium',
   }));
+}
+
+function inferDependencyOverlapFromReasonSignals(reasonSignals: string[]): ExplainabilitySignalStrength | undefined {
+  if (reasonSignals.includes('shared-local-dependencies')) {
+    return 'high';
+  }
+
+  if (reasonSignals.includes('shared-imports') || reasonSignals.includes('responsibility-match')) {
+    return 'medium';
+  }
+
+  return undefined;
+}
+
+function buildPrecedentSelectionReason(reasonSignals: string[]): string {
+  if (reasonSignals.includes('shared-local-dependencies') && reasonSignals.includes('responsibility-match')) {
+    return 'same family + strong dependency overlap';
+  }
+
+  if (reasonSignals.includes('high-structural-similarity') && reasonSignals.includes('graph-anchored')) {
+    return 'top structural alignment';
+  }
+
+  if (reasonSignals.includes('responsibility-match')) {
+    return 'same responsibility family';
+  }
+
+  if (reasonSignals.includes('shared-imports')) {
+    return 'shared import surface';
+  }
+
+  if (reasonSignals.includes('graph-anchored')) {
+    return 'graph-anchored precedent';
+  }
+
+  return 'ranked precedent';
+}
+
+export async function buildPrecedentCandidateExplainability(
+  candidate: PrecedentCandidate,
+  targetFamily: string | null | undefined,
+  detail: ExplainabilityMode,
+): Promise<ResultExplainability> {
+  const clusterLookup = await loadPatternClusterLookup();
+  const clusterEntry = clusterLookup.byFileId.get(candidate.fileId);
+  const family = clusterEntry?.family ?? null;
+  const familyMatch = targetFamily ? family === targetFamily : undefined;
+  const explanation = await buildExplainability({
+    detail,
+    fileId: candidate.fileId,
+    filePath: candidate.filePath,
+    family,
+    familyMatch,
+    role: inferRoleFromFile(candidate.filePath, [candidate.symbolName], undefined),
+    score: candidate.precedentScore,
+    alignment: mapAlignmentStrength(candidate.structuralAlignment),
+    dependencyOverlap: inferDependencyOverlapFromReasonSignals(candidate.reasonSignals),
+    selectionReason: buildPrecedentSelectionReason(candidate.reasonSignals),
+  });
+
+  if (detail === 'debug') {
+    explanation.debug = {
+      ...(explanation.debug ?? {}),
+      score: candidate.precedentScore,
+      reasonSignals: candidate.reasonSignals,
+    };
+  }
+
+  return explanation;
 }

@@ -7,6 +7,7 @@ import {
   runCollectRefactorContextTool,
 } from './tools/collect-refactor-context.js';
 import { exploreComponentToolDefinition, runExploreComponentTool } from './tools/explore-component.js';
+import { findPrecedentsToolDefinition, runFindPrecedentsTool } from './tools/find-precedents.js';
 import { planChangeToolDefinition, runPlanChangeTool } from './tools/plan-change.js';
 import { loadConfig } from './config.js';
 import { cleanupGenerationDebris } from './indexing/generation-debris.js';
@@ -78,6 +79,16 @@ async function main(): Promise<void> {
       inputSchema: searchPatternsToolDefinition.inputSchema,
     },
     async (input) => runSearchPatternsTool(input),
+  );
+
+  server.registerTool(
+    findPrecedentsToolDefinition.name,
+    {
+      title: findPrecedentsToolDefinition.title,
+      description: findPrecedentsToolDefinition.description,
+      inputSchema: findPrecedentsToolDefinition.inputSchema,
+    },
+    async (input) => runFindPrecedentsTool(input),
   );
 
   server.registerTool(

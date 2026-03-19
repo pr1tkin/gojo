@@ -44,6 +44,7 @@ export interface ResultExplainability {
     baseScore?: number;
     rawReasons?: RankingReason[];
     signalScores?: Record<string, number>;
+    reasonSignals?: string[];
   };
 }
 

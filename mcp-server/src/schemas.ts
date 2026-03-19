@@ -51,6 +51,15 @@ export const searchPatternsInputSchema = {
   detail: z.enum(['agent', 'debug']).optional(),
 };
 
+export const findPrecedentsInputSchema = {
+  name: z.string().min(1),
+  repo: z.string().min(1).optional(),
+  limit: z.number().int().min(1).max(5).optional(),
+  mode: z.enum(['component', 'symbol', 'file']).optional(),
+  detail: z.enum(['agent', 'debug']).optional(),
+  includeFamilyContext: z.boolean().optional(),
+};
+
 export const collectRefactorContextInputSchema = {
   name: z.string().min(1),
   repo: z.string().min(1).optional(),
