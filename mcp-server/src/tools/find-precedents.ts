@@ -63,6 +63,7 @@ function buildNavigationHints(input: {
   }>;
   familyRef?: string;
   relatedFamilyRefs?: string[];
+  weakTarget?: boolean;
 }): Array<Record<string, string>> {
   const hints: Array<Record<string, string>> = [];
   const [first, second] = input.precedents;
@@ -74,6 +75,10 @@ function buildNavigationHints(input: {
       repoId: first.repoId,
       reason: 'best reusable precedent',
     });
+  }
+
+  if (input.weakTarget) {
+    return dedupeNavigationHints(hints, 1);
   }
 
   if (second) {
@@ -103,6 +108,53 @@ function buildNavigationHints(input: {
   }
 
   return dedupeNavigationHints(hints, 3);
+}
+
+function collectUniqueRefs(
+  target: { familyRef?: string; clusterRef?: string } | null | undefined,
+  precedents: Array<{ familyRef?: string; clusterRef?: string }>,
+): {
+  familyRefs: Set<string>;
+  clusterRefs: Set<string>;
+  familyReuse: boolean;
+  clusterReuse: boolean;
+} {
+  const familyCounts = new Map<string, number>();
+  const clusterCounts = new Map<string, number>();
+
+  const register = (value: string | undefined, counts: Map<string, number>) => {
+    if (!value) {
+      return;
+    }
+
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  };
+
+  register(target?.familyRef, familyCounts);
+  register(target?.clusterRef, clusterCounts);
+  for (const precedent of precedents) {
+    register(precedent.familyRef, familyCounts);
+    register(precedent.clusterRef, clusterCounts);
+  }
+
+  return {
+    familyRefs: new Set(familyCounts.keys()),
+    clusterRefs: new Set(clusterCounts.keys()),
+    familyReuse: Array.from(familyCounts.values()).some((count) => count > 1),
+    clusterReuse: Array.from(clusterCounts.values()).some((count) => count > 1),
+  };
+}
+
+function shouldUseMicroShaper(input: {
+  precedentCount: number;
+  targetGrounding: GroundingStrength;
+  precedents: Array<{ confidence: string }>;
+}): boolean {
+  return (
+    input.precedentCount <= 1 ||
+    input.targetGrounding === 'weak' ||
+    (input.precedentCount > 0 && input.precedents.every((entry) => entry.confidence === 'low'))
+  );
 }
 
 function withAdditionalWarnings(metadata: ToolTrustMetadata, warnings: string[]): ToolTrustMetadata {
@@ -235,7 +287,18 @@ export async function runFindPrecedentsTool(
     },
   };
 
-  const builtSharedContext = sharedContext.build();
+  const microShaperEnabled = shouldUseMicroShaper({
+    precedentCount: compactPrecedents.length,
+    targetGrounding: target.grounding,
+    precedents: compactPrecedents,
+  });
+  const refUsage = collectUniqueRefs(target, compactPrecedents);
+  const collapseSharedContext =
+    microShaperEnabled &&
+    (refUsage.familyRefs.size <= 1 ||
+      refUsage.clusterRefs.size <= 1 ||
+      (!refUsage.familyReuse && !refUsage.clusterReuse));
+  const builtSharedContext = collapseSharedContext ? undefined : sharedContext.build();
   const targetFamilyRefs =
     targetExplainability?.familyRef && builtSharedContext?.families?.[targetExplainability.familyRef]?.relatedFamilyRefs
       ? builtSharedContext.families[targetExplainability.familyRef].relatedFamilyRefs
@@ -247,7 +310,15 @@ export async function runFindPrecedentsTool(
     })),
     familyRef: targetExplainability?.familyRef,
     relatedFamilyRefs: targetFamilyRefs,
+    weakTarget: microShaperEnabled && target.grounding === 'weak',
   });
+
+  const shapedResults =
+    microShaperEnabled && compactPrecedents.length <= 1
+      ? {
+          primary: precedents.primary,
+        }
+      : precedents;
 
   const shapedOutput = finalizeShapedResponse({
     requestedName: input.name,
@@ -264,15 +335,20 @@ export async function runFindPrecedentsTool(
       ],
     ),
     target,
-    results: precedents,
+    results: shapedResults,
     ...(builtSharedContext ? { sharedContext: builtSharedContext } : {}),
-    ...(familyContext ? { familyContext } : {}),
+    ...(!microShaperEnabled && familyContext ? { familyContext } : {}),
     navigationHints,
-    summary: {
-      resultCount: compactPrecedents.length,
-      strongMatches: compactPrecedents.filter((entry) => entry.confidence === 'high').length,
-      targetGrounding: target.grounding,
-    },
+    summary: microShaperEnabled
+      ? {
+          precedentCount: compactPrecedents.length,
+          targetGrounding: target.grounding,
+        }
+      : {
+          resultCount: compactPrecedents.length,
+          strongMatches: compactPrecedents.filter((entry) => entry.confidence === 'high').length,
+          targetGrounding: target.grounding,
+        },
     ...(detail === 'debug' && precedentResult
       ? {
           debug: {

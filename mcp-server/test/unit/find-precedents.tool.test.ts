@@ -249,28 +249,9 @@ describe('find_precedents tool', () => {
           clusterRef: 'cluster:page:edit:sub:contracts',
         }),
       ]);
-    expect(parsed.results.secondary).toEqual([]);
-    expect(parsed.familyContext).toEqual(
-      expect.objectContaining({
-        familyRef: 'routed_page_or_screen',
-        role: 'page',
-        clusterRef: 'cluster:page:detail',
-        membership: 'core',
-      }),
-    );
-    expect(parsed.sharedContext).toEqual(
-      expect.objectContaining({
-        families: expect.objectContaining({
-          routed_page_or_screen: expect.objectContaining({ role: 'page' }),
-        }),
-        clusters: expect.objectContaining({
-          'cluster:page:detail': expect.objectContaining({
-            role: 'routed_page_or_screen',
-            membership: 'core',
-          }),
-        }),
-      }),
-    );
+    expect(parsed.results).not.toHaveProperty('secondary');
+    expect(parsed).not.toHaveProperty('familyContext');
+    expect(parsed).not.toHaveProperty('sharedContext');
     expect(parsed.navigationHints).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -278,15 +259,14 @@ describe('find_precedents tool', () => {
           filePath: 'app/contracts/[contractId]/edit/ContractEditPage.tsx',
         }),
         expect.objectContaining({
-          type: 'inspect_related_family',
-          familyRef: 'ui_wrapper_or_shell',
+          type: 'stay_in_family',
+          familyRef: 'routed_page_or_screen',
         }),
       ]),
     );
     expect(parsed.summary).toEqual(
       expect.objectContaining({
-        resultCount: 1,
-        strongMatches: 1,
+        precedentCount: 1,
         targetGrounding: 'strong',
       }),
     );
@@ -337,9 +317,14 @@ describe('find_precedents tool', () => {
     );
     expect(parsed.results).toEqual({
       primary: [],
-      secondary: [],
     });
     expect(parsed.metadata.warnings).toContain('No reusable precedents were found for the resolved target');
+    expect(parsed.summary).toEqual(
+      expect.objectContaining({
+        precedentCount: 0,
+        targetGrounding: 'unknown',
+      }),
+    );
   });
 
   it('supports debug mode and file entrypoint', async () => {
@@ -541,5 +526,149 @@ describe('find_precedents tool', () => {
 
     expect(parsed.results.primary).toHaveLength(1);
     expect(parsed.results.primary[0].repoId).toBe('ibm-strings');
+    expect(parsed.results).not.toHaveProperty('secondary');
+    expect(parsed).not.toHaveProperty('sharedContext');
+    expect(parsed).not.toHaveProperty('familyContext');
+    expect(parsed.navigationHints).toEqual([
+      expect.objectContaining({
+        type: 'open_first',
+        filePath: 'components/common/error-state.tsx',
+      }),
+    ]);
+    expect(parsed.summary).toEqual(
+      expect.objectContaining({
+        precedentCount: 1,
+        targetGrounding: 'weak',
+      }),
+    );
+  });
+
+  it('keeps strong multi-result responses on the regular shaped path', async () => {
+    getPatternMatchesForComponentMock.mockResolvedValue({
+      query: 'ContractDetailPage',
+      mode: 'component',
+      repo: 'ifdt-gui',
+      primaryTarget: {
+        file: {
+          fileId: 'ifdt-gui:app/contracts/[contractId]/ContractDetailPage.tsx',
+          repoId: 'ifdt-gui',
+          filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
+        },
+        symbol: {
+          symbolId: 'contract-detail-symbol',
+          fileId: 'ifdt-gui:app/contracts/[contractId]/ContractDetailPage.tsx',
+          repo: 'ifdt-gui',
+          filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
+          name: 'ContractDetailPage',
+        },
+        definedSymbols: [],
+        exportedSymbols: [],
+        structuralAlignment: {
+          graphAnchored: true,
+          structuralContextStrength: 'high',
+        },
+      },
+      patternMatches: [],
+      resolution: {
+        status: 'resolved',
+        mode: 'component',
+        candidateCount: 1,
+        ambiguityDetected: false,
+        selectedCandidate: {
+          symbolId: 'contract-detail-symbol',
+          fileId: 'ifdt-gui:app/contracts/[contractId]/ContractDetailPage.tsx',
+          repo: 'ifdt-gui',
+          filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
+          name: 'ContractDetailPage',
+          kind: 'function',
+          exported: true,
+          score: 17,
+          reasons: [{ signal: 'exact_name', value: 10 }],
+        },
+        alternativeCandidates: [],
+      },
+      summary: {
+        matchCount: 0,
+        strongMatchCount: 0,
+        graphAnchoredMatchCount: 0,
+      },
+    });
+    findPrecedentsForSymbolMock.mockReturnValue({
+      target: {
+        symbolId: 'contract-detail-symbol',
+        fileId: 'ifdt-gui:app/contracts/[contractId]/ContractDetailPage.tsx',
+        filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
+        repoId: 'ifdt-gui',
+        symbolName: 'ContractDetailPage',
+        patternKind: 'component',
+      },
+      candidates: [
+        {
+          symbolId: 'contract-edit-symbol',
+          patternId: 'pattern:contract-edit',
+          fileId: 'ifdt-gui:app/contracts/[contractId]/edit/ContractEditPage.tsx',
+          filePath: 'app/contracts/[contractId]/edit/ContractEditPage.tsx',
+          repoId: 'ifdt-gui',
+          symbolName: 'ContractEditPage',
+          patternKind: 'component',
+          similarityScore: 0.91,
+          precedentScore: 0.96,
+          reasonSignals: ['shared-local-dependencies'],
+          structuralAlignment: {
+            graphAnchored: true,
+            structuralContextStrength: 'high',
+          },
+        },
+        {
+          symbolId: 'customer-detail-symbol',
+          patternId: 'pattern:customer-detail',
+          fileId: 'ifdt-gui:app/customers/[id]/CustomerDetailPage.tsx',
+          filePath: 'app/customers/[id]/CustomerDetailPage.tsx',
+          repoId: 'ifdt-gui',
+          symbolName: 'CustomerDetailPage',
+          patternKind: 'component',
+          similarityScore: 0.9,
+          precedentScore: 0.95,
+          reasonSignals: ['shared-local-dependencies'],
+          structuralAlignment: {
+            graphAnchored: true,
+            structuralContextStrength: 'high',
+          },
+        },
+        {
+          symbolId: 'case-detail-symbol',
+          patternId: 'pattern:case-detail',
+          fileId: 'ifdt-gui:app/cases/[id]/CaseDetailPage.tsx',
+          filePath: 'app/cases/[id]/CaseDetailPage.tsx',
+          repoId: 'ifdt-gui',
+          symbolName: 'CaseDetailPage',
+          patternKind: 'component',
+          similarityScore: 0.89,
+          precedentScore: 0.92,
+          reasonSignals: ['shared-local-dependencies'],
+          structuralAlignment: {
+            graphAnchored: true,
+            structuralContextStrength: 'high',
+          },
+        },
+      ],
+      summary: 'Found 3 precedents for ContractDetailPage.',
+    });
+
+    const result = await runFindPrecedentsTool({
+      name: 'ContractDetailPage',
+      repo: 'ifdt-gui',
+    });
+    const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
+
+    expect(parsed.results.secondary).toHaveLength(1);
+    expect(parsed.sharedContext).toBeDefined();
+    expect(parsed.summary).toEqual(
+      expect.objectContaining({
+        resultCount: 3,
+        strongMatches: 3,
+        targetGrounding: 'strong',
+      }),
+    );
   });
 });
