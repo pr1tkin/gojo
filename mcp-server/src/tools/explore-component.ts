@@ -13,12 +13,16 @@ import {
 import {
   SharedContextBuilder,
   dedupeNavigationHints,
-  finalizeShapedResponse,
   splitPrimarySecondary,
   toScoreBucket,
   type ResponseShapingOptions,
 } from './response-shaping.js';
 import { buildExploreComponentTrustMetadata } from './trust-metadata.js';
+import {
+  normalizeExploreComponentResponse,
+  type RawExploreComponentResponse,
+  type RawExploreComponentUiTreeNode,
+} from '../tool-response/normalize-explore-component.js';
 
 const DEFAULT_CANDIDATE_LIMIT = 5;
 const DEFAULT_RELATED_LIMIT = 10;
@@ -34,7 +38,7 @@ export const exploreComponentToolDefinition = {
 function compactTreeNodes(
   nodes: Array<Record<string, any>> | null | undefined,
   options: { expandRelated?: boolean },
-): Array<Record<string, unknown>> {
+): RawExploreComponentUiTreeNode[] {
   return (nodes ?? []).map((node) => ({
     name: node.name,
     resolution: node.resolution,
@@ -196,7 +200,7 @@ export async function runExploreComponentTool(
   const builtSharedContext = sharedContext.build();
 
   const target = {
-    status: symbolContext.primarySymbol ? 'resolved' : 'missing',
+    status: (symbolContext.primarySymbol ? 'resolved' : 'missing') as 'resolved' | 'missing',
     requestedName: input.name,
     requestedRepo: input.repo,
     symbolId: symbolContext.primarySymbol?.symbolId ?? null,
@@ -227,7 +231,7 @@ export async function runExploreComponentTool(
       : {}),
   };
 
-  const shapedOutput = finalizeShapedResponse({
+  const shapedOutput: RawExploreComponentResponse = {
     requestedName: input.name,
     requestedRepo: input.repo,
     explainabilityMode: detail,
@@ -268,13 +272,26 @@ export async function runExploreComponentTool(
       alternativeCandidateCount: Math.max(candidateSummaries.length - 1, 0),
       uiCompleteness: uiHierarchy?.renderTreeSummary.completeness ?? null,
     },
+    internal: {
+      totalRelatedCount: fileContext?.summary.relatedFileCount ?? symbolContext.summary.relatedFileCount,
+      returnedRelatedCount: relatedFiles.length,
+      appliedRelatedLimit: input.relatedLimit ?? DEFAULT_RELATED_LIMIT,
+      totalCandidateCount: symbolContext.summary.candidateCount,
+      returnedCandidateCount: candidateSummaries.length,
+      appliedCandidateLimit: input.limit ?? DEFAULT_CANDIDATE_LIMIT,
+      navigationHintLimit: 3,
+    },
+  };
+  const normalizedOutput = normalizeExploreComponentResponse({
+    rawResponse: shapedOutput,
+    mode: detail,
   });
 
   return {
     content: [
       {
         type: 'text',
-        text: JSON.stringify(shapedOutput, null, 2),
+        text: JSON.stringify(normalizedOutput, null, 2),
       },
     ],
   };

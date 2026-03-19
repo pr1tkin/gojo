@@ -116,7 +116,7 @@ describe('explore_component tool', () => {
     });
   });
 
-  it('returns shaped target, related-file tiers, and compact UI context', async () => {
+  it('returns a normalized component response with target structure and related-file results', async () => {
     getSymbolExplorationContextMock.mockResolvedValue({
       query: 'Button',
       repo: 'repo-gamma',
@@ -320,62 +320,130 @@ describe('explore_component tool', () => {
       limit: 5,
       relatedLimit: 8,
     });
+    expect(parsed).toEqual(
+      expect.objectContaining({
+        tool: 'explore_component',
+        version: '1',
+        mode: 'agent',
+        query: expect.objectContaining({
+          target: 'Button',
+          repo: 'repo-gamma',
+          filePath: 'components/ui/Button.tsx',
+          symbolName: 'Button',
+        }),
+      }),
+    );
     expect(parsed.target).toEqual(
       expect.objectContaining({
         status: 'resolved',
         symbolId: 'repo-gamma:components/ui/Button.tsx:function:Button:1',
         role: 'component',
-        familyRef: 'ui_component',
+        family: 'ui_component',
         clusterRef: 'cluster:component:button',
+        confidence: 'high',
+        ui: expect.objectContaining({
+          renderTreeSummary: expect.objectContaining({
+            completeness: 0.5,
+          }),
+          renderedByTreeSummary: expect.objectContaining({
+            completeness: 1,
+          }),
+          observedProps: [
+            { propName: 'variant', count: 2 },
+            { propName: 'disabled', count: 1 },
+          ],
+        }),
       }),
     );
     expect(parsed.results.primary).toEqual([
       expect.objectContaining({
+        kind: 'related_file',
+        title: 'components/ui/DownloadButton.tsx',
         rank: 1,
         filePath: 'components/ui/DownloadButton.tsx',
         role: 'component',
         confidence: 'medium',
+        matchStrength: 'high',
+        relationshipKinds: ['file_imports_file'],
+        family: 'ui_component',
       }),
       expect.objectContaining({
+        kind: 'related_file',
         rank: 2,
         filePath: 'components/ContractList.tsx',
       }),
     ]);
-    expect(parsed.results.ui).toEqual(
-      expect.objectContaining({
-        renders: [
-          expect.objectContaining({
-            name: 'Icon',
-            resolution: 'resolved_local',
-            children: [
-              expect.objectContaining({
-                name: 'Tooltip',
-                resolution: 'external_dependency',
-              }),
-            ],
-          }),
-        ],
-      }),
-    );
-    expect(parsed.navigationHints).toEqual(
+    expect(parsed.results).not.toHaveProperty('secondary');
+    expect(parsed.alternatives).toBeUndefined();
+    expect(parsed.evidence).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: 'open_related',
-          filePath: 'components/ui/DownloadButton.tsx',
+          kind: 'target_family',
+          value: 'ui_component',
         }),
         expect.objectContaining({
-          type: 'inspect_ui_gaps',
+          kind: 'ui_completeness',
+          value: '50%',
+        }),
+      ]),
+    );
+    expect(parsed.nextActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tool: 'explore_component',
+          reason: 'inspect the strongest related component',
+          query: expect.objectContaining({
+            name: 'components/ui/DownloadButton.tsx',
+            repo: 'repo-gamma',
+          }),
+        }),
+        expect.objectContaining({
+          tool: 'find_precedents',
+          query: expect.objectContaining({
+            name: 'components/ui/Button.tsx',
+            repo: 'repo-gamma',
+            mode: 'file',
+          }),
+        }),
+        expect.objectContaining({
+          tool: 'collect_refactor_context',
+          query: expect.objectContaining({
+            name: 'components/ui/Button.tsx',
+            repo: 'repo-gamma',
+            mode: 'file',
+          }),
         }),
       ]),
     );
     expect(parsed.summary).toEqual(
       expect.objectContaining({
         resultCount: 2,
-        relatedFileCount: 2,
-        uiCompleteness: 0.5,
+        primaryCount: 2,
+        confidence: 'high',
       }),
     );
-    expect(parsed.summary.tokenEstimate).toBeGreaterThan(0);
+    expect(parsed.diagnostics).toEqual(
+      expect.objectContaining({
+        warnings: [],
+        limits: expect.objectContaining({
+          resultLimit: 8,
+          navigationHintLimit: 3,
+        }),
+      }),
+    );
+    expect(parsed.expansions).toEqual(
+      expect.objectContaining({
+        'cluster:cluster:component:button': expect.objectContaining({
+          kind: 'cluster-context',
+        }),
+        'ui-renders:repo-gamma:components/ui/Button.tsx:function:Button:1': expect.objectContaining({
+          kind: 'ui-renders',
+        }),
+        'ui-rendered-by:repo-gamma:components/ui/Button.tsx:function:Button:1': expect.objectContaining({
+          kind: 'ui-rendered-by',
+        }),
+      }),
+    );
   });
 
   it('returns safe missing results when no symbol resolves', async () => {
@@ -405,7 +473,10 @@ describe('explore_component tool', () => {
       }),
     );
     expect(parsed.results.primary).toEqual([]);
-    expect(parsed.results.secondary).toEqual([]);
+    expect(parsed.results).not.toHaveProperty('secondary');
+    expect(parsed.diagnostics.notes).toEqual(
+      expect.arrayContaining(['No primary symbol resolved for the requested component']),
+    );
   });
 
   it('passes debug explainability mode through helper calls', async () => {
@@ -452,12 +523,14 @@ describe('explore_component tool', () => {
       rawContext: {},
     });
 
-    await runExploreComponentTool({
+    const result = await runExploreComponentTool({
       name: 'Button',
       detail: 'debug',
       expandDebug: true,
     });
+    const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
 
     expect(buildIndexedSymbolExplainabilityMock).toHaveBeenCalledWith(expect.any(Object), 'debug');
+    expect(parsed.mode).toBe('debug');
   });
 });

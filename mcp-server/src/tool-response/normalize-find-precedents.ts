@@ -2,13 +2,12 @@ import type { ToolTrustMetadata } from '../tools/trust-metadata.js';
 import type { ResultExplainabilitySignals } from '../orchestrator/types.js';
 import { buildNormalizedDiagnostics, buildNormalizedTruncation, mergeNormalizedDiagnostics } from './diagnostics-builder.js';
 import { buildNormalizedExpansion } from './expansion-builder.js';
-import { buildNormalizedExplanation } from './explanation-builder.js';
+import { buildNormalizedExplanation, normalizeExplanationSignals } from './explanation-builder.js';
 import { buildNormalizedNextAction } from './next-actions-builder.js';
 import { createNormalizedResponse } from './normalized-response.js';
 import { buildNormalizedResultTiers, buildNormalizedSummary } from './summary-builder.js';
 import type {
   ConfidenceLevel,
-  NormalizedExplanationSignalValue,
   NormalizedEvidenceItem,
   NormalizedExpansion,
   NormalizedMode,
@@ -149,29 +148,6 @@ function toStringArray(values: string[] | undefined): string[] | undefined {
   return values;
 }
 
-function sanitizeExplanationSignals(
-  signals: ResultExplainabilitySignals | undefined,
-): Record<string, NormalizedExplanationSignalValue> | undefined {
-  if (!signals) {
-    return undefined;
-  }
-
-  const entries = Object.entries(signals).filter(([, value]) => {
-    return (
-      value === null ||
-      typeof value === 'string' ||
-      typeof value === 'number' ||
-      typeof value === 'boolean'
-    );
-  }) as Array<[string, NormalizedExplanationSignalValue]>;
-
-  if (entries.length === 0) {
-    return undefined;
-  }
-
-  return Object.fromEntries(entries);
-}
-
 function buildExpansionSummary(parts: Array<string | undefined>): string | undefined {
   const values = parts.map((part) => part?.trim()).filter(Boolean) as string[];
   return values.length > 0 ? values.join(' | ') : undefined;
@@ -264,7 +240,7 @@ function normalizeResult(
     explanation: buildNormalizedExplanation({
       mode,
       short: result.selectionReason,
-      signals: sanitizeExplanationSignals(result.explanationSignals),
+      signals: normalizeExplanationSignals(result.explanationSignals),
     }),
     references: {
       filePaths: [result.filePath],
