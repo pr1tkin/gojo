@@ -7,11 +7,12 @@ export interface BuildNormalizedNextActionsOptions {
 }
 
 function buildNextActionKey(action: NormalizedNextAction): string {
-  return `${action.tool}::${action.reason}::${JSON.stringify(action.query ?? {})}`;
+  return `${action.action ?? action.tool}::${action.reason}::${JSON.stringify(action.query ?? {})}`;
 }
 
 export function buildNormalizedNextAction(input: NormalizedNextAction): NormalizedNextAction {
   return {
+    action: input.action ?? input.tool,
     tool: input.tool,
     reason: input.reason,
     ...(input.query ? { query: input.query } : {}),

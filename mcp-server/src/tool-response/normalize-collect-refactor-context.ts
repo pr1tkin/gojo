@@ -626,6 +626,7 @@ export function normalizeCollectRefactorContextResponse(
   const nearbyTruncation =
     internal?.totalNearbyCount !== undefined && internal.totalNearbyCount > internal.returnedNearbyCount
       ? buildNormalizedTruncation({
+          type: 'nearby_files',
           returnedCount: internal.returnedNearbyCount,
           totalCount: internal.totalNearbyCount,
           limitApplied: internal.appliedNearbyLimit,
@@ -635,6 +636,7 @@ export function normalizeCollectRefactorContextResponse(
   const candidateTruncation =
     internal?.totalCandidateCount !== undefined && internal.totalCandidateCount > internal.returnedCandidateCount
       ? buildNormalizedTruncation({
+          type: 'symbol_candidates',
           returnedCount: internal.returnedCandidateCount,
           totalCount: internal.totalCandidateCount,
           limitApplied: internal.appliedCandidateLimit,
@@ -644,6 +646,7 @@ export function normalizeCollectRefactorContextResponse(
   const relatedTruncation =
     internal?.totalRelatedCount !== undefined && internal.totalRelatedCount > internal.returnedRelatedCount
       ? buildNormalizedTruncation({
+          type: 'related_files',
           returnedCount: internal.returnedRelatedCount,
           totalCount: internal.totalRelatedCount,
           limitApplied: internal.appliedRelatedLimit,
@@ -665,10 +668,13 @@ export function normalizeCollectRefactorContextResponse(
           ? { navigationHintLimit: raw.internal.navigationHintLimit }
           : {}),
         ...(raw.internal?.appliedNearbyLimit !== undefined ? { relatedItemLimit: raw.internal.appliedNearbyLimit } : {}),
+        ...(raw.internal?.appliedCandidateLimit !== undefined ? { candidateLimit: raw.internal.appliedCandidateLimit } : {}),
       },
     }),
     buildNormalizedDiagnostics({
-      truncation: relatedTruncation ?? nearbyTruncation ?? candidateTruncation,
+      truncations: [relatedTruncation, nearbyTruncation, candidateTruncation].filter(
+        (value): value is NonNullable<typeof value> => Boolean(value),
+      ),
     }),
   );
 

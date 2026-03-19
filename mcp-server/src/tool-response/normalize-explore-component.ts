@@ -619,6 +619,7 @@ export function normalizeExploreComponentResponse(
   const relatedTruncation =
     raw.internal?.totalRelatedCount !== undefined && raw.internal.totalRelatedCount > raw.internal.returnedRelatedCount
       ? buildNormalizedTruncation({
+          type: 'related_files',
           returnedCount: raw.internal.returnedRelatedCount,
           totalCount: raw.internal.totalRelatedCount,
           limitApplied: raw.internal.appliedRelatedLimit,
@@ -628,6 +629,7 @@ export function normalizeExploreComponentResponse(
   const candidateTruncation =
     raw.internal?.totalCandidateCount !== undefined && raw.internal.totalCandidateCount > raw.internal.returnedCandidateCount
       ? buildNormalizedTruncation({
+          type: 'symbol_candidates',
           returnedCount: raw.internal.returnedCandidateCount,
           totalCount: raw.internal.totalCandidateCount,
           limitApplied: raw.internal.appliedCandidateLimit,
@@ -643,6 +645,7 @@ export function normalizeExploreComponentResponse(
         ...(raw.internal?.navigationHintLimit !== undefined
           ? { navigationHintLimit: raw.internal.navigationHintLimit }
           : {}),
+        ...(raw.internal?.appliedCandidateLimit !== undefined ? { candidateLimit: raw.internal.appliedCandidateLimit } : {}),
       },
       notes: [
         ...(raw.target.status === 'missing' ? ['No primary symbol resolved for the requested component'] : []),
@@ -655,7 +658,9 @@ export function normalizeExploreComponentResponse(
       ],
     }),
     buildNormalizedDiagnostics({
-      truncation: relatedTruncation ?? candidateTruncation,
+      truncations: [relatedTruncation, candidateTruncation].filter(
+        (value): value is NonNullable<typeof value> => Boolean(value),
+      ),
     }),
   );
 

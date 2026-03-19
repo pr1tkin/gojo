@@ -3,6 +3,7 @@ import type { NormalizedDiagnostics } from './normalized-types.js';
 export interface BuildNormalizedDiagnosticsInput {
   warnings?: string[];
   truncation?: NormalizedDiagnostics['truncation'];
+  truncations?: NormalizedDiagnostics['truncations'];
   limits?: NormalizedDiagnostics['limits'];
   notes?: string[];
 }
@@ -16,6 +17,7 @@ function dedupe(values: string[] | undefined): string[] | undefined {
 }
 
 export interface BuildNormalizedTruncationInput {
+  type?: string;
   returnedCount: number;
   totalCount?: number;
   limitApplied?: number;
@@ -34,11 +36,29 @@ export function buildNormalizedTruncation(
   }
 
   return {
+    ...(input.type ? { type: input.type } : {}),
     truncated,
+    ...(input.totalCount !== undefined ? { totalCount } : {}),
     ...(input.limitApplied !== undefined ? { limitApplied: input.limitApplied } : {}),
     ...(omittedCount > 0 ? { omittedCount } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
   };
+}
+
+function buildTruncationKey(truncation: NonNullable<NormalizedDiagnostics['truncation']>): string {
+  return JSON.stringify(truncation);
+}
+
+function dedupeTruncations(
+  truncations: Array<NormalizedDiagnostics['truncation'] | undefined>,
+): NormalizedDiagnostics['truncations'] | undefined {
+  const values = truncations.filter(Boolean) as NonNullable<NormalizedDiagnostics['truncation']>[];
+
+  if (values.length === 0) {
+    return undefined;
+  }
+
+  return Array.from(new Map(values.map((truncation) => [buildTruncationKey(truncation), truncation])).values());
 }
 
 export function mergeNormalizedDiagnostics(
@@ -46,12 +66,16 @@ export function mergeNormalizedDiagnostics(
 ): NormalizedDiagnostics {
   const warnings = dedupe(inputs.flatMap((input) => input?.warnings ?? [])) ?? [];
   const notes = dedupe(inputs.flatMap((input) => input?.notes ?? []));
-  const truncation = inputs.map((input) => input?.truncation).filter(Boolean).at(-1);
+  const truncations = dedupeTruncations(
+    inputs.flatMap((input) => [input?.truncation, ...(input?.truncations ?? [])]),
+  );
+  const truncation = truncations?.[0];
   const limits = Object.assign({}, ...inputs.map((input) => input?.limits ?? {}));
 
   return buildNormalizedDiagnostics({
     warnings,
     ...(truncation ? { truncation } : {}),
+    ...(truncations && truncations.length > 1 ? { truncations } : {}),
     ...(Object.keys(limits).length > 0 ? { limits } : {}),
     ...(notes ? { notes } : {}),
   });
@@ -62,10 +86,13 @@ export function buildNormalizedDiagnostics(
 ): NormalizedDiagnostics {
   const warnings = dedupe(input.warnings) ?? [];
   const notes = dedupe(input.notes);
+  const truncations = dedupeTruncations([input.truncation, ...(input.truncations ?? [])]);
+  const truncation = input.truncation ?? truncations?.[0];
 
   return {
     warnings,
-    ...(input.truncation ? { truncation: input.truncation } : {}),
+    ...(truncation ? { truncation } : {}),
+    ...(truncations && truncations.length > 1 ? { truncations } : {}),
     ...(input.limits ? { limits: input.limits } : {}),
     ...(notes?.length ? { notes } : {}),
   };

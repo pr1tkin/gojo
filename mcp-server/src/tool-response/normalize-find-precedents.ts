@@ -377,6 +377,7 @@ export function normalizeFindPrecedentsResponse(
     }),
     buildNormalizedDiagnostics({
       truncation: buildNormalizedTruncation({
+        type: 'results',
         returnedCount: raw.internal?.scopedCandidateCount ?? normalizedItems.length,
         totalCount: raw.internal?.totalCandidateCount,
         limitApplied: raw.internal?.appliedLimit,

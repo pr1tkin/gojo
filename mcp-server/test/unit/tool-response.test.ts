@@ -50,7 +50,9 @@ describe('tool response normalization foundations', () => {
       buildNormalizedDiagnostics({
         warnings: ['partial result'],
         truncation: {
+          type: 'results',
           truncated: true,
+          totalCount: 5,
           limitApplied: 3,
           omittedCount: 2,
         },
@@ -58,7 +60,9 @@ describe('tool response normalization foundations', () => {
     ).toEqual({
       warnings: ['partial result'],
       truncation: {
+        type: 'results',
         truncated: true,
+        totalCount: 5,
         limitApplied: 3,
         omittedCount: 2,
       },
@@ -138,13 +142,14 @@ describe('tool response normalization foundations', () => {
         { mode: 'agent' },
       ),
     ).toEqual([
-      { tool: 'explore_component', reason: 'inspect target', query: { target: 'Button' } },
-      { tool: 'find_precedents', reason: 'find peers', query: { target: 'Button' } },
+      { action: 'explore_component', tool: 'explore_component', reason: 'inspect target', query: { target: 'Button' } },
+      { action: 'find_precedents', tool: 'find_precedents', reason: 'find peers', query: { target: 'Button' } },
     ]);
   });
 
   it('builds truncation, merges diagnostics, and keeps warnings consistent', () => {
     const truncation = buildNormalizedTruncation({
+      type: 'results',
       returnedCount: 3,
       totalCount: 7,
       limitApplied: 3,
@@ -152,7 +157,9 @@ describe('tool response normalization foundations', () => {
     });
 
     expect(truncation).toEqual({
+      type: 'results',
       truncated: true,
+      totalCount: 7,
       limitApplied: 3,
       omittedCount: 4,
       reason: 'top-k limit applied',
@@ -166,6 +173,15 @@ describe('tool response normalization foundations', () => {
         },
         {
           warnings: ['search freshness pending'],
+          truncations: [
+            buildNormalizedTruncation({
+              type: 'candidates',
+              returnedCount: 2,
+              totalCount: 5,
+              limitApplied: 2,
+              reason: 'candidate limit applied',
+            }),
+          ],
           limits: { resultLimit: 3 },
           notes: ['repo-local scope applied'],
         },
@@ -173,6 +189,17 @@ describe('tool response normalization foundations', () => {
     ).toEqual({
       warnings: ['partial result', 'search freshness pending'],
       truncation,
+      truncations: [
+        truncation,
+        {
+          type: 'candidates',
+          truncated: true,
+          totalCount: 5,
+          limitApplied: 2,
+          omittedCount: 3,
+          reason: 'candidate limit applied',
+        },
+      ],
       limits: { resultLimit: 3 },
       notes: ['repo-local scope applied'],
     });

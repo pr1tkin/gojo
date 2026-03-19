@@ -19,18 +19,24 @@ export interface NormalizedSummary {
   confidence?: ConfidenceLevel;
 }
 
+export interface NormalizedTruncation {
+  type?: string;
+  truncated: boolean;
+  totalCount?: number;
+  limitApplied?: number;
+  omittedCount?: number;
+  reason?: string;
+}
+
 export interface NormalizedDiagnostics {
   warnings: string[];
-  truncation?: {
-    truncated: boolean;
-    limitApplied?: number;
-    omittedCount?: number;
-    reason?: string;
-  };
+  truncation?: NormalizedTruncation;
+  truncations?: NormalizedTruncation[];
   limits?: {
     resultLimit?: number;
     navigationHintLimit?: number;
     relatedItemLimit?: number;
+    candidateLimit?: number;
   };
   notes?: string[];
 }
@@ -69,6 +75,7 @@ export interface NormalizedEvidenceItem {
 }
 
 export interface NormalizedNextAction {
+  action?: string;
   tool: string;
   reason: string;
   query?: Record<string, unknown>;
