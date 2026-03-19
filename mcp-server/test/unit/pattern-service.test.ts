@@ -107,6 +107,39 @@ const candidateStrong = {
   },
 };
 
+const candidateTestArtifactStrong = {
+  fileId: 'repo-a:src/components/IconButton.test.tsx',
+  repo: 'repo-a',
+  filePath: 'src/components/IconButton.test.tsx',
+  classification: 'source',
+  symbolIds: ['icon-button-test-symbol'],
+  symbolNames: ['IconButtonTest'],
+  imports: [
+    {
+      fileId: 'repo-a:src/components/IconButton.test.tsx',
+      source: './Button.styles',
+      bindings: [],
+      resolvedKind: 'local-file',
+      resolvedTargetFileId: 'repo-a:src/components/Button.styles.ts',
+    },
+  ],
+  exports: [
+    {
+      fileId: 'repo-a:src/components/IconButton.test.tsx',
+      kind: 'named',
+      exportedName: 'IconButtonTest',
+      localName: 'IconButtonTest',
+      symbolId: 'icon-button-test-symbol',
+    },
+  ],
+  importTokens: ['Button.styles', 'clsx'],
+  structuralAnchor: {
+    structurallyIndexed: true,
+    resolvedLocalDependencyFileIds: ['repo-a:src/components/Button.styles.ts'],
+    localDependencyFamilyTokens: ['components', 'button', 'styles', 'src'],
+  },
+};
+
 const candidatePeer = {
   fileId: 'repo-a:src/components/ButtonShell.tsx',
   repo: 'repo-a',
@@ -139,6 +172,39 @@ const candidatePeer = {
   },
 };
 
+const candidateStoryPeer = {
+  fileId: 'repo-a:src/components/IconButton.stories.tsx',
+  repo: 'repo-a',
+  filePath: 'src/components/IconButton.stories.tsx',
+  classification: 'source',
+  symbolIds: ['icon-button-story-symbol'],
+  symbolNames: ['IconButtonStory'],
+  imports: [
+    {
+      fileId: 'repo-a:src/components/IconButton.stories.tsx',
+      source: './Button',
+      bindings: [],
+      resolvedKind: 'local-file',
+      resolvedTargetFileId: 'repo-a:src/components/Button.tsx',
+    },
+  ],
+  exports: [
+    {
+      fileId: 'repo-a:src/components/IconButton.stories.tsx',
+      kind: 'named',
+      exportedName: 'IconButtonStory',
+      localName: 'IconButtonStory',
+      symbolId: 'icon-button-story-symbol',
+    },
+  ],
+  importTokens: ['Button', 'Button.styles', 'clsx'],
+  structuralAnchor: {
+    structurallyIndexed: true,
+    resolvedLocalDependencyFileIds: ['repo-a:src/components/Button.tsx'],
+    localDependencyFamilyTokens: ['button', 'components', 'src'],
+  },
+};
+
 const candidateWeak = {
   fileId: 'repo-a:src/forms/FormField.tsx',
   repo: 'repo-a',
@@ -154,6 +220,31 @@ const candidateWeak = {
       exportedName: 'FormField',
       localName: 'FormField',
       symbolId: 'form-field-symbol',
+    },
+  ],
+  importTokens: ['react'],
+  structuralAnchor: {
+    structurallyIndexed: true,
+    resolvedLocalDependencyFileIds: [],
+    localDependencyFamilyTokens: [],
+  },
+};
+
+const candidateNoise = {
+  fileId: 'repo-a:src/misc/Noise.ts',
+  repo: 'repo-a',
+  filePath: 'src/misc/Noise.ts',
+  classification: 'source',
+  symbolIds: ['noise-symbol'],
+  symbolNames: ['Noise'],
+  imports: [],
+  exports: [
+    {
+      fileId: 'repo-a:src/misc/Noise.ts',
+      kind: 'named',
+      exportedName: 'Noise',
+      localName: 'Noise',
+      symbolId: 'noise-symbol',
     },
   ],
   importTokens: ['react'],
@@ -286,8 +377,11 @@ describe('pattern orchestrator service', () => {
     listFileRelationsMock.mockResolvedValue([
       targetRelation,
       candidateStrong,
+      candidateTestArtifactStrong,
       candidatePeer,
+      candidateStoryPeer,
       candidateWeak,
+      candidateNoise,
       candidateRoleMismatch,
       candidateTextHeavyLowAlignment,
       otherRepoCandidate,
@@ -296,8 +390,11 @@ describe('pattern orchestrator service', () => {
       return [
         targetRelation,
         candidateStrong,
+        candidateTestArtifactStrong,
         candidatePeer,
+        candidateStoryPeer,
         candidateWeak,
+        candidateNoise,
         candidateRoleMismatch,
         candidateTextHeavyLowAlignment,
         otherRepoCandidate,
@@ -307,8 +404,11 @@ describe('pattern orchestrator service', () => {
       const match = [
         targetRelation,
         candidateStrong,
+        candidateTestArtifactStrong,
         candidatePeer,
+        candidateStoryPeer,
         candidateWeak,
+        candidateNoise,
         candidateRoleMismatch,
         candidateTextHeavyLowAlignment,
         otherRepoCandidate,
@@ -326,8 +426,11 @@ describe('pattern orchestrator service', () => {
       const match = [
         targetRelation,
         candidateStrong,
+        candidateTestArtifactStrong,
         candidatePeer,
+        candidateStoryPeer,
         candidateWeak,
+        candidateNoise,
         candidateRoleMismatch,
         candidateTextHeavyLowAlignment,
         otherRepoCandidate,
@@ -343,12 +446,24 @@ describe('pattern orchestrator service', () => {
         return [symbolNode('icon-button-symbol', candidateStrong.fileId, 'repo-a', candidateStrong.filePath, 'IconButton')];
       }
 
+      if (fileId === candidateTestArtifactStrong.fileId) {
+        return [symbolNode('icon-button-test-symbol', candidateTestArtifactStrong.fileId, 'repo-a', candidateTestArtifactStrong.filePath, 'IconButtonTest')];
+      }
+
       if (fileId === candidatePeer.fileId) {
         return [symbolNode('button-shell-symbol', candidatePeer.fileId, 'repo-a', candidatePeer.filePath, 'ButtonShell')];
       }
 
+      if (fileId === candidateStoryPeer.fileId) {
+        return [symbolNode('icon-button-story-symbol', candidateStoryPeer.fileId, 'repo-a', candidateStoryPeer.filePath, 'IconButtonStory')];
+      }
+
       if (fileId === candidateWeak.fileId) {
         return [symbolNode('form-field-symbol', candidateWeak.fileId, 'repo-a', candidateWeak.filePath, 'FormField')];
+      }
+
+      if (fileId === candidateNoise.fileId) {
+        return [symbolNode('noise-symbol', candidateNoise.fileId, 'repo-a', candidateNoise.filePath, 'Noise')];
       }
 
       if (fileId === candidateRoleMismatch.fileId) {
@@ -370,12 +485,24 @@ describe('pattern orchestrator service', () => {
         return [symbolNode('icon-button-symbol', candidateStrong.fileId, 'repo-a', candidateStrong.filePath, 'Button')];
       }
 
+      if (fileId === candidateTestArtifactStrong.fileId) {
+        return [symbolNode('icon-button-test-symbol', candidateTestArtifactStrong.fileId, 'repo-a', candidateTestArtifactStrong.filePath, 'IconButtonTest')];
+      }
+
       if (fileId === candidatePeer.fileId) {
         return [symbolNode('button-shell-symbol', candidatePeer.fileId, 'repo-a', candidatePeer.filePath, 'Button')];
       }
 
+      if (fileId === candidateStoryPeer.fileId) {
+        return [symbolNode('icon-button-story-symbol', candidateStoryPeer.fileId, 'repo-a', candidateStoryPeer.filePath, 'IconButtonStory')];
+      }
+
       if (fileId === candidateWeak.fileId) {
         return [symbolNode('form-field-symbol', candidateWeak.fileId, 'repo-a', candidateWeak.filePath, 'FormField')];
+      }
+
+      if (fileId === candidateNoise.fileId) {
+        return [symbolNode('noise-symbol', candidateNoise.fileId, 'repo-a', candidateNoise.filePath, 'Noise')];
       }
 
       if (fileId === candidateRoleMismatch.fileId) {
@@ -410,9 +537,19 @@ describe('pattern orchestrator service', () => {
                   score: 14,
                   reason: 'direct import',
                   reasons: [{ signal: 'graph_connection', value: 7 }],
-                  via: ['file_imports_file'],
-                },
-              ]
+                    via: ['file_imports_file'],
+                  },
+                ]
+            : fileId === candidateTestArtifactStrong.fileId
+              ? [
+                  {
+                    file: fileNode('repo-a:src/components/Button.styles.ts', 'repo-a', 'src/components/Button.styles.ts'),
+                    score: 13,
+                    reason: 'direct import',
+                    reasons: [{ signal: 'graph_connection', value: 6 }],
+                    via: ['file_imports_file'],
+                  },
+                ]
             : fileId === candidateRoleMismatch.fileId
               ? [
                   {
@@ -423,6 +560,16 @@ describe('pattern orchestrator service', () => {
                     via: ['file_imports_file'],
                   },
                 ]
+              : fileId === candidateStoryPeer.fileId
+                ? [
+                    {
+                      file: fileNode('repo-a:src/components/Button.tsx', 'repo-a', 'src/components/Button.tsx'),
+                      score: 12,
+                      reason: 'direct import',
+                      reasons: [{ signal: 'graph_connection', value: 6 }],
+                      via: ['file_imports_file'],
+                    },
+                  ]
           : [],
       neighboringFiles: [],
       definedSymbols: [],
@@ -495,11 +642,11 @@ describe('pattern orchestrator service', () => {
   });
 
   it('finds similar component-style files with stable ranking and explainable reasons', async () => {
-    const result = await getPatternMatchesForComponent('Button', { repo: 'repo-a', limit: 3 });
+    const result = await getPatternMatchesForComponent('Button', { repo: 'repo-a', limit: 6 });
 
     expect(getSymbolExplorationContextMock).toHaveBeenCalledWith('Button', {
       repo: 'repo-a',
-      limit: 3,
+      limit: 6,
       relatedLimit: 20,
     });
     expect(result.resolution).toEqual(
@@ -513,7 +660,7 @@ describe('pattern orchestrator service', () => {
     expect(result.patternMatches[0]).toEqual(
       expect.objectContaining({
         file: expect.objectContaining({ fileId: candidateStrong.fileId }),
-        reason: 'shared dependencies + same responsibility + high structural alignment',
+        reason: 'runtime precedent with shared dependencies',
         structuralAlignment: expect.objectContaining({
           graphAnchored: true,
           structuralContextStrength: 'high',
@@ -527,6 +674,7 @@ describe('pattern orchestrator service', () => {
         expect.objectContaining({ signal: 'dependency_overlap' }),
         expect.objectContaining({ signal: 'shared_local_dependencies' }),
         expect.objectContaining({ signal: 'responsibility_similarity' }),
+        expect.objectContaining({ signal: 'runtime_role_bonus', note: 'component' }),
       ]),
     );
     expect(result.patternMatches[0].score).toBeGreaterThan(result.patternMatches[1].score);
@@ -543,22 +691,32 @@ describe('pattern orchestrator service', () => {
       }),
     );
     expect(lowAlignmentMatch?.score).toBeLessThan(result.patternMatches[0].score);
+    const testArtifactMatch = result.patternMatches.find(
+      (match) => match.file.fileId === candidateTestArtifactStrong.fileId,
+    );
+    expect(testArtifactMatch).toEqual(
+      expect.objectContaining({
+        file: expect.objectContaining({ fileId: candidateTestArtifactStrong.fileId }),
+        reasons: expect.arrayContaining([
+          expect.objectContaining({ signal: 'artifact_deprioritized', note: 'test_artifact' }),
+        ]),
+      }),
+    );
+    expect(result.patternMatches.map((entry) => entry.file.fileId)).not.toContain(candidateNoise.fileId);
     expect(result.primaryTarget.structuralAlignment).toEqual(
       expect.objectContaining({
         graphAnchored: true,
         structuralContextStrength: 'high',
       }),
     );
-    expect(result.summary.graphAnchoredMatchCount).toBe(2);
+    expect(result.summary.graphAnchoredMatchCount).toBe(4);
   });
 
   it('prioritizes structural alignment over superficial similarity', async () => {
     const result = await getPatternMatchesForComponent('Button', { repo: 'repo-a', limit: 5 });
     const rankedFileIds = result.patternMatches.map((entry) => entry.file.fileId);
 
-    expect(rankedFileIds.indexOf(candidateStrong.fileId)).toBeLessThan(
-      rankedFileIds.indexOf(candidateTextHeavyLowAlignment.fileId),
-    );
+    expect(rankedFileIds).not.toContain(candidateTextHeavyLowAlignment.fileId);
   });
 
   it('prefers same-responsibility matches when structural grounding is otherwise similar', async () => {
@@ -567,6 +725,45 @@ describe('pattern orchestrator service', () => {
 
     expect(rankedFileIds.indexOf(candidateStrong.fileId)).toBeLessThan(
       rankedFileIds.indexOf(candidateRoleMismatch.fileId),
+    );
+  });
+
+  it('prevents a strong test artifact from outranking a runtime component precedent', async () => {
+    const result = await getPatternMatchesForComponent('Button', { repo: 'repo-a', limit: 6 });
+    const rankedFileIds = result.patternMatches.map((entry) => entry.file.fileId);
+
+    expect(rankedFileIds.indexOf(candidateStrong.fileId)).toBeLessThan(
+      rankedFileIds.indexOf(candidateTestArtifactStrong.fileId),
+    );
+  });
+
+  it('keeps non-runtime artifact precedents available when the query target is itself a story artifact', async () => {
+    const result = await getPatternMatchesForFile(candidateTextHeavyLowAlignment.filePath, {
+      repo: 'repo-a',
+      limit: 6,
+    });
+
+    expect(result.patternMatches[0]).toEqual(
+      expect.objectContaining({
+        file: expect.objectContaining({ fileId: candidateStoryPeer.fileId }),
+      }),
+    );
+    expect(result.patternMatches.map((entry) => entry.file.fileId)).toContain(candidateStrong.fileId);
+  });
+
+  it('retains a non-runtime artifact when no strong runtime alternative exists', async () => {
+    listFileRelationsMock
+      .mockResolvedValueOnce([targetRelation, candidateTestArtifactStrong])
+      .mockResolvedValueOnce([targetRelation, candidateTestArtifactStrong]);
+    getFileRelationByIdMock.mockResolvedValueOnce(targetRelation);
+
+    const result = await getPatternMatchesForComponent('Button', { repo: 'repo-a', limit: 3 });
+
+    expect(result.patternMatches).toHaveLength(1);
+    expect(result.patternMatches[0]).toEqual(
+      expect.objectContaining({
+        file: expect.objectContaining({ fileId: candidateTestArtifactStrong.fileId }),
+      }),
     );
   });
 

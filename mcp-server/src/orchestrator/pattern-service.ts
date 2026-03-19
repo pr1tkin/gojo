@@ -23,6 +23,21 @@ const STRUCTURAL_ALIGNMENT_WEIGHT = 0.4;
 const DEPENDENCY_OVERLAP_WEIGHT = 0.3;
 const RESPONSIBILITY_SIMILARITY_WEIGHT = 0.2;
 const MATCH_STRENGTH_WEIGHT = 0.1;
+const SAME_ROLE_RUNTIME_BONUS = 0.12;
+const RELATED_RUNTIME_BONUS = 0.04;
+
+type CandidateArtifactClass =
+  | 'runtime_component'
+  | 'runtime_page'
+  | 'runtime_hook'
+  | 'runtime_util'
+  | 'runtime_handler'
+  | 'runtime_module'
+  | 'test_artifact'
+  | 'story_artifact'
+  | 'mock_or_fixture_artifact'
+  | 'support_or_wrapper_artifact'
+  | 'unknown';
 
 type ResponsibilityKind = 'page' | 'hook' | 'component' | 'utility' | 'handler' | 'test' | 'story' | 'module';
 
@@ -44,13 +59,18 @@ interface FilePatternProfile {
   resolvedLocalDependencyFileIds: string[];
   localDependencyFamilyTokens: string[];
   structuralAlignment: PatternStructuralAlignment;
+  responsibilityKind: ResponsibilityKind;
+  artifactClass: CandidateArtifactClass;
 }
 
 interface CandidateScore {
   relation: FileRelation;
   score: number;
+  baseScore: number;
   reason: string;
   reasons: RankingReason[];
+  artifactClass: CandidateArtifactClass;
+  responsibilityKind: ResponsibilityKind;
   signalScores: {
     structuralAlignment: number;
     dependencyOverlap: number;
@@ -64,6 +84,10 @@ function compareScores(left: CandidateScore, right: CandidateScore): number {
     return right.signalScores.structuralAlignment - left.signalScores.structuralAlignment;
   }
 
+  if (right.score !== left.score) {
+    return right.score - left.score;
+  }
+
   if (right.signalScores.dependencyOverlap !== left.signalScores.dependencyOverlap) {
     return right.signalScores.dependencyOverlap - left.signalScores.dependencyOverlap;
   }
@@ -74,10 +98,6 @@ function compareScores(left: CandidateScore, right: CandidateScore): number {
 
   if (right.signalScores.matchStrength !== left.signalScores.matchStrength) {
     return right.signalScores.matchStrength - left.signalScores.matchStrength;
-  }
-
-  if (right.score !== left.score) {
-    return right.score - left.score;
   }
 
   return left.relation.repo.localeCompare(right.relation.repo) || left.relation.filePath.localeCompare(right.relation.filePath);
@@ -191,6 +211,18 @@ function getStructuralAlignmentScore(alignment: PatternStructuralAlignment): num
   return 0.2;
 }
 
+function getStructuralAlignmentTier(score: number): 'high' | 'medium' | 'low' {
+  if (score >= 1) {
+    return 'high';
+  }
+
+  if (score >= 0.6) {
+    return 'medium';
+  }
+
+  return 'low';
+}
+
 function inferResponsibilityKind(relation: FileRelation): ResponsibilityKind {
   const normalizedFilePath = relation.filePath.toLowerCase();
   const extension = path.extname(normalizedFilePath);
@@ -256,6 +288,113 @@ function getResponsibilitySimilarityScore(target: ResponsibilityKind, candidate:
   }
 
   return 0;
+}
+
+function inferCandidateArtifactClass(relation: FileRelation): CandidateArtifactClass {
+  const normalizedFilePath = relation.filePath.toLowerCase();
+  const baseName = path.posix.basename(normalizedFilePath);
+
+  if (
+    /(^|\/)__tests__(\/|$)/.test(normalizedFilePath) ||
+    /(\.|\/)(test|spec)\.(tsx?|jsx?)$/i.test(normalizedFilePath)
+  ) {
+    return 'test_artifact';
+  }
+
+  if (
+    /(\.|\/)(stories|story)\.(tsx?|jsx?)$/i.test(normalizedFilePath) ||
+    /(^|\/)(stories|storybook)(\/|$)/.test(normalizedFilePath)
+  ) {
+    return 'story_artifact';
+  }
+
+  if (
+    /(^|\/)(__mocks__|__fixtures__|fixtures?|mocks?|samples?)(\/|$)/.test(normalizedFilePath) ||
+    /\.(mock|fixture)\.(tsx?|jsx?)$/i.test(baseName)
+  ) {
+    return 'mock_or_fixture_artifact';
+  }
+
+  if (
+    /(^|\/)(storybook|decorators?|wrappers?|preview|playground)(\/|$)/.test(normalizedFilePath) ||
+    /(decorator|wrapper)\.(tsx?|jsx?)$/i.test(baseName)
+  ) {
+    return 'support_or_wrapper_artifact';
+  }
+
+  switch (inferResponsibilityKind(relation)) {
+    case 'component':
+      return 'runtime_component';
+    case 'page':
+      return 'runtime_page';
+    case 'hook':
+      return 'runtime_hook';
+    case 'utility':
+      return 'runtime_util';
+    case 'handler':
+      return 'runtime_handler';
+    case 'module':
+      return 'runtime_module';
+    default:
+      return 'unknown';
+  }
+}
+
+function isRuntimeArtifactClass(artifactClass: CandidateArtifactClass): boolean {
+  return artifactClass.startsWith('runtime_');
+}
+
+function isRuntimeTargetArtifact(artifactClass: CandidateArtifactClass): boolean {
+  return isRuntimeArtifactClass(artifactClass);
+}
+
+function getArtifactPenalty(artifactClass: CandidateArtifactClass): number {
+  switch (artifactClass) {
+    case 'test_artifact':
+      return 0.18;
+    case 'story_artifact':
+      return 0.16;
+    case 'mock_or_fixture_artifact':
+      return 0.2;
+    case 'support_or_wrapper_artifact':
+      return 0.12;
+    case 'unknown':
+      return 0.08;
+    default:
+      return 0;
+  }
+}
+
+function shouldSuppressWeakSignalCandidate(
+  structuralAlignmentScore: number,
+  dependencyOverlap: number,
+  responsibilitySimilarity: number,
+  heuristicMatchStrength: number,
+): boolean {
+  return (
+    structuralAlignmentScore <= 0.2 &&
+    dependencyOverlap < 0.12 &&
+    responsibilitySimilarity < 0.2 &&
+    heuristicMatchStrength < 0.2
+  );
+}
+
+function shouldSuppressNonRuntimeArtifactNoise(
+  targetArtifactClass: CandidateArtifactClass,
+  candidateArtifactClass: CandidateArtifactClass,
+  structuralAlignmentScore: number,
+  dependencyOverlap: number,
+  responsibilitySimilarity: number,
+  heuristicMatchStrength: number,
+): boolean {
+  return (
+    isRuntimeTargetArtifact(targetArtifactClass) &&
+    !isRuntimeArtifactClass(candidateArtifactClass) &&
+    structuralAlignmentScore <= 0.6 &&
+    dependencyOverlap < 0.18 &&
+    responsibilitySimilarity < 1 &&
+    heuristicMatchStrength < 0.25
+  );
 }
 
 function buildCandidateRelatedFileIdsByFileId(allRelations: FileRelation[]): Record<string, string[]> {
@@ -335,6 +474,7 @@ async function loadTargetProfile(fileId: string, allRelations: FileRelation[]): 
     return null;
   }
   const filesById = Object.fromEntries(allRelations.map((entry) => [entry.fileId, entry]));
+  const responsibilityKind = inferResponsibilityKind(relation);
   const resolvedLocalDependencyFileIds = relation.imports
     .map((entry) => entry.resolvedTargetFileId)
     .filter((value): value is string => Boolean(value));
@@ -362,6 +502,8 @@ async function loadTargetProfile(fileId: string, allRelations: FileRelation[]): 
     resolvedLocalDependencyFileIds,
     localDependencyFamilyTokens: getLocalDependencyFamilyTokens(resolvedLocalDependencyFileIds, filesById),
     structuralAlignment,
+    responsibilityKind,
+    artifactClass: inferCandidateArtifactClass(relation),
   };
 }
 
@@ -374,6 +516,12 @@ function determineReason(reasons: RankingReason[]): string {
   );
   const hasDependencyOverlap = reasons.some((reason) => reason.signal === 'dependency_overlap');
   const hasResponsibilitySimilarity = reasons.some((reason) => reason.signal === 'responsibility_similarity');
+  const hasRuntimeRoleBonus = reasons.some((reason) => reason.signal === 'runtime_role_bonus');
+  const hasArtifactPenalty = reasons.some((reason) => reason.signal === 'artifact_deprioritized');
+
+  if ((hasHighStructuralAlignment || hasMediumStructuralAlignment) && hasDependencyOverlap && hasRuntimeRoleBonus) {
+    return 'runtime precedent with shared dependencies';
+  }
 
   if (hasHighStructuralAlignment && hasDependencyOverlap && hasResponsibilitySimilarity) {
     return 'shared dependencies + same responsibility + high structural alignment';
@@ -397,6 +545,10 @@ function determineReason(reasons: RankingReason[]): string {
 
   if (hasResponsibilitySimilarity) {
     return 'same responsibility';
+  }
+
+  if (hasArtifactPenalty) {
+    return 'runtime precedent favored over artifact match';
   }
 
   if (reasons.some((reason) => reason.signal === 'shared_export_names')) {
@@ -430,6 +582,8 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
   const reasons: RankingReason[] = [];
   const filesById = Object.fromEntries(allRelations.map((relation) => [relation.fileId, relation]));
   const relatedFileIdsByFileId = buildCandidateRelatedFileIdsByFileId(allRelations);
+  const candidateResponsibilityKind = inferResponsibilityKind(candidate);
+  const candidateArtifactClass = inferCandidateArtifactClass(candidate);
   const candidateExportNames = dedupe(candidate.exports.map((entry) => entry.exportedName).filter((value): value is string => Boolean(value)));
   const targetExportNames = profile.exportedSymbols.map((symbol) => symbol.name);
   const exportNameOverlap = jaccard(targetExportNames, candidateExportNames);
@@ -475,8 +629,8 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
   });
   const structuralAlignmentScore = getStructuralAlignmentScore(candidateStructuralAlignment);
   const responsibilitySimilarity = getResponsibilitySimilarityScore(
-    inferResponsibilityKind(profile.relation),
-    inferResponsibilityKind(candidate),
+    profile.responsibilityKind,
+    candidateResponsibilityKind,
   );
   const sameBundleStem = getBundleStem(candidate.filePath) === profile.bundleStem ? 1 : 0;
   const heuristicMatchStrength = Math.max(
@@ -491,13 +645,51 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
         (sameBundleStem ? 1 : bundleOverlap > 0 ? 0.6 : 0) * 0.1,
     ),
   );
+  const runtimeRoleBonus =
+    isRuntimeTargetArtifact(profile.artifactClass) && isRuntimeArtifactClass(candidateArtifactClass)
+      ? candidateResponsibilityKind === profile.responsibilityKind
+        ? SAME_ROLE_RUNTIME_BONUS
+        : responsibilitySimilarity >= 0.4
+          ? RELATED_RUNTIME_BONUS
+          : 0
+      : 0;
+  const artifactPenalty =
+    isRuntimeTargetArtifact(profile.artifactClass) && !isRuntimeArtifactClass(candidateArtifactClass)
+      ? getArtifactPenalty(candidateArtifactClass)
+      : 0;
+  const weakSignalPenalty =
+    structuralAlignmentScore <= 0.6 &&
+    dependencyOverlap < 0.2 &&
+    responsibilitySimilarity < 0.4 &&
+    heuristicMatchStrength < 0.25
+      ? 0.08
+      : 0;
+
+  if (
+    shouldSuppressWeakSignalCandidate(
+      structuralAlignmentScore,
+      dependencyOverlap,
+      responsibilitySimilarity,
+      heuristicMatchStrength,
+    ) ||
+    shouldSuppressNonRuntimeArtifactNoise(
+      profile.artifactClass,
+      candidateArtifactClass,
+      structuralAlignmentScore,
+      dependencyOverlap,
+      responsibilitySimilarity,
+      heuristicMatchStrength,
+    )
+  ) {
+    return null;
+  }
 
   if (structuralAlignmentScore > 0) {
     reasons.push(
       createReason(
         'structural_alignment',
         roundScore(structuralAlignmentScore * STRUCTURAL_ALIGNMENT_WEIGHT),
-        candidateStructuralAlignment.structuralContextStrength,
+        getStructuralAlignmentTier(structuralAlignmentScore),
       ),
     );
   }
@@ -516,6 +708,18 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
 
   if (responsibilitySimilarity > 0) {
     reasons.push(createReason('responsibility_similarity', roundScore(responsibilitySimilarity * RESPONSIBILITY_SIMILARITY_WEIGHT)));
+  }
+
+  if (runtimeRoleBonus > 0) {
+    reasons.push(createReason('runtime_role_bonus', roundScore(runtimeRoleBonus), candidateResponsibilityKind));
+  }
+
+  if (artifactPenalty > 0) {
+    reasons.push(createReason('artifact_deprioritized', -roundScore(artifactPenalty), candidateArtifactClass));
+  }
+
+  if (weakSignalPenalty > 0) {
+    reasons.push(createReason('weak_signal_penalty', -roundScore(weakSignalPenalty), 'weak structural/dependency evidence'));
   }
 
   if (heuristicMatchStrength > 0) {
@@ -538,12 +742,13 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
     reasons.push(createReason('bundle_shape_overlap', roundScore(sameBundleStem ? 1 : 0.6), candidateBundleSuffixes.join(',')));
   }
 
-  const score = roundScore(
+  const baseScore = roundScore(
     structuralAlignmentScore * STRUCTURAL_ALIGNMENT_WEIGHT +
       dependencyOverlap * DEPENDENCY_OVERLAP_WEIGHT +
       responsibilitySimilarity * RESPONSIBILITY_SIMILARITY_WEIGHT +
       heuristicMatchStrength * MATCH_STRENGTH_WEIGHT,
   );
+  const score = roundScore(Math.max(0, baseScore + runtimeRoleBonus - artifactPenalty - weakSignalPenalty));
 
   if (score === 0) {
     return null;
@@ -551,9 +756,12 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
 
   return {
     relation: candidate,
+    baseScore,
     score,
     reason: determineReason(reasons),
     reasons,
+    artifactClass: candidateArtifactClass,
+    responsibilityKind: candidateResponsibilityKind,
     signalScores: {
       structuralAlignment: roundScore(structuralAlignmentScore),
       dependencyOverlap: roundScore(dependencyOverlap),
