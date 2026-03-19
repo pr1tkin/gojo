@@ -226,52 +226,108 @@ describe('find_precedents tool', () => {
       limit: 3,
     });
     expect(findPrecedentsForSymbolMock).toHaveBeenCalledWith('contract-detail-symbol', 3);
+    expect(parsed).toEqual(
+      expect.objectContaining({
+        tool: 'find_precedents',
+        version: '1',
+        mode: 'agent',
+        query: expect.objectContaining({
+          target: 'ContractDetailPage',
+          repo: 'ifdt-gui',
+          mode: 'component',
+          filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
+          symbolName: 'ContractDetailPage',
+        }),
+      }),
+    );
     expect(parsed.target).toEqual(
       expect.objectContaining({
         status: 'resolved',
         role: 'page',
-        familyRef: 'routed_page_or_screen',
+        family: 'routed_page_or_screen',
         grounding: 'strong',
+        confidence: 'medium',
       }),
     );
     expect(parsed.results.primary).toEqual([
         expect.objectContaining({
-          rank: 1,
+          id: 'ifdt-gui:app/contracts/[contractId]/edit/ContractEditPage.tsx:ContractEditPage',
+          kind: 'precedent',
+          title: 'ContractEditPage',
           filePath: 'app/contracts/[contractId]/edit/ContractEditPage.tsx',
           symbolName: 'ContractEditPage',
           role: 'page',
           confidence: 'high',
+          rank: 1,
           matchStrength: 'high',
           grounding: 'strong',
           relationship: 'peer_family',
-          selectionReason: 'same family + strong dependency overlap',
-          familyRef: 'routed_page_or_screen',
-          clusterRef: 'cluster:page:edit:sub:contracts',
+          family: 'routed_page_or_screen',
+          expansionId: 'cluster:cluster:page:edit:sub:contracts',
+          explanation: expect.objectContaining({
+            short: 'same family + strong dependency overlap',
+          }),
+          references: {
+            filePaths: ['app/contracts/[contractId]/edit/ContractEditPage.tsx'],
+            symbolNames: ['ContractEditPage'],
+          },
         }),
       ]);
     expect(parsed.results).not.toHaveProperty('secondary');
-    expect(parsed).not.toHaveProperty('familyContext');
-    expect(parsed).not.toHaveProperty('sharedContext');
-    expect(parsed.navigationHints).toEqual(
+    expect(parsed.evidence).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: 'open_first',
-          filePath: 'app/contracts/[contractId]/edit/ContractEditPage.tsx',
+          kind: 'target_family',
+          value: 'routed_page_or_screen',
         }),
         expect.objectContaining({
-          type: 'stay_in_family',
-          familyRef: 'routed_page_or_screen',
+          kind: 'target_role',
+          value: 'page',
+        }),
+      ]),
+    );
+    expect(parsed.nextActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tool: 'explore_component',
+          reason: 'inspect the strongest precedent',
+          query: expect.objectContaining({
+            name: 'app/contracts/[contractId]/edit/ContractEditPage.tsx',
+            repo: 'ifdt-gui',
+          }),
+        }),
+        expect.objectContaining({
+          tool: 'collect_refactor_context',
+          query: expect.objectContaining({
+            name: 'app/contracts/[contractId]/ContractDetailPage.tsx',
+            repo: 'ifdt-gui',
+          }),
         }),
       ]),
     );
     expect(parsed.summary).toEqual(
       expect.objectContaining({
-        precedentCount: 1,
-        targetGrounding: 'strong',
+        resultCount: 1,
+        primaryCount: 1,
+        strongMatchCount: 1,
+        confidence: 'medium',
       }),
     );
-    expect(parsed.summary.tokenEstimate).toBeGreaterThan(0);
+    expect(parsed.diagnostics).toEqual(
+      expect.objectContaining({
+        warnings: [],
+        limits: expect.objectContaining({
+          resultLimit: 3,
+          navigationHintLimit: 3,
+        }),
+        truncation: expect.objectContaining({
+          truncated: false,
+          limitApplied: 3,
+        }),
+      }),
+    );
     expect(parsed.results.primary[0]).not.toHaveProperty('debug');
+    expect(parsed.expansions).toEqual({});
   });
 
   it('returns cautious output for unresolved targets', async () => {
@@ -309,6 +365,16 @@ describe('find_precedents tool', () => {
 
     expect(findPrecedentsForSymbolMock).not.toHaveBeenCalled();
     expect(findPrecedentsForFileMock).not.toHaveBeenCalled();
+    expect(parsed).toEqual(
+      expect.objectContaining({
+        tool: 'find_precedents',
+        mode: 'agent',
+        query: expect.objectContaining({
+          target: 'MissingThing',
+          mode: 'component',
+        }),
+      }),
+    );
     expect(parsed.target).toEqual(
       expect.objectContaining({
         status: 'missing',
@@ -318,11 +384,12 @@ describe('find_precedents tool', () => {
     expect(parsed.results).toEqual({
       primary: [],
     });
-    expect(parsed.metadata.warnings).toContain('No reusable precedents were found for the resolved target');
+    expect(parsed.diagnostics.warnings).toContain('No reusable precedents were found for the resolved target');
     expect(parsed.summary).toEqual(
       expect.objectContaining({
-        precedentCount: 0,
-        targetGrounding: 'unknown',
+        resultCount: 0,
+        primaryCount: 0,
+        confidence: 'medium',
       }),
     );
   });
@@ -417,7 +484,17 @@ describe('find_precedents tool', () => {
       limit: 3,
     });
     expect(findPrecedentsForFileMock).toHaveBeenCalledWith('repo-a:src/hooks/useGetJobs.ts', 1);
-    expect(parsed).not.toHaveProperty('familyContext');
+    expect(parsed).toEqual(
+      expect.objectContaining({
+        tool: 'find_precedents',
+        mode: 'debug',
+        query: expect.objectContaining({
+          target: 'src/hooks/useGetJobs.ts',
+          repo: 'repo-a',
+          mode: 'file',
+        }),
+      }),
+    );
     expect(parsed.results.primary[0].debug).toEqual(
       expect.objectContaining({
         precedentScore: 0.83,
@@ -430,6 +507,7 @@ describe('find_precedents tool', () => {
         serviceSummary: 'Found 1 precedents for file target.',
       }),
     );
+    expect(parsed.results.primary[0].score).toBe(0.83);
   });
 
   it('scopes precedents to the resolved target repository by default', async () => {
@@ -527,20 +605,24 @@ describe('find_precedents tool', () => {
     expect(parsed.results.primary).toHaveLength(1);
     expect(parsed.results.primary[0].repoId).toBe('ibm-strings');
     expect(parsed.results).not.toHaveProperty('secondary');
-    expect(parsed).not.toHaveProperty('sharedContext');
-    expect(parsed).not.toHaveProperty('familyContext');
-    expect(parsed.navigationHints).toEqual([
+    expect(parsed.nextActions).toEqual([
       expect.objectContaining({
-        type: 'open_first',
-        filePath: 'components/common/error-state.tsx',
+        tool: 'explore_component',
+        query: expect.objectContaining({
+          name: 'components/common/error-state.tsx',
+        }),
+      }),
+      expect.objectContaining({
+        tool: 'collect_refactor_context',
       }),
     ]);
     expect(parsed.summary).toEqual(
       expect.objectContaining({
-        precedentCount: 1,
-        targetGrounding: 'weak',
+        resultCount: 1,
+        primaryCount: 1,
       }),
     );
+    expect(parsed.target.grounding).toBe('weak');
   });
 
   it('keeps strong multi-result responses on the regular shaped path', async () => {
@@ -662,12 +744,13 @@ describe('find_precedents tool', () => {
     const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
 
     expect(parsed.results.secondary).toHaveLength(1);
-    expect(parsed.sharedContext).toBeDefined();
+    expect(Object.keys(parsed.expansions).length).toBeGreaterThan(0);
     expect(parsed.summary).toEqual(
       expect.objectContaining({
         resultCount: 3,
-        strongMatches: 3,
-        targetGrounding: 'strong',
+        primaryCount: 2,
+        secondaryCount: 1,
+        strongMatchCount: 3,
       }),
     );
   });

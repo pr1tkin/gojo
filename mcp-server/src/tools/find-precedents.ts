@@ -13,12 +13,16 @@ import {
 import {
   SharedContextBuilder,
   dedupeNavigationHints,
-  finalizeShapedResponse,
   splitPrimarySecondary,
   toScoreBucket,
   type ResponseShapingOptions,
 } from './response-shaping.js';
 import { buildPatternTrustMetadata, type ToolTrustMetadata } from './trust-metadata.js';
+import {
+  normalizeFindPrecedentsResponse,
+  type FindPrecedentsRelationship,
+  type RawFindPrecedentsResponse,
+} from '../tool-response/normalize-find-precedents.js';
 
 const DEFAULT_PRECEDENT_LIMIT = 3;
 
@@ -232,12 +236,13 @@ export async function runFindPrecedentsTool(
             confidence: explanation?.confidence ?? 'low',
             matchStrength: toScoreBucket(candidate.precedentScore),
             grounding: toGroundingStrength(candidate.structuralAlignment),
-            relationship:
+            relationship: (
               explanation?.explanationSignals?.familyMatch === true
                 ? 'peer_family'
                 : candidate.structuralAlignment.graphAnchored
                   ? 'structural_neighbor'
-                  : 'heuristic_neighbor',
+                  : 'heuristic_neighbor'
+            ) as FindPrecedentsRelationship,
             selectionReason: explanation?.selectionReason ?? 'ranked precedent',
             ...(explanation?.familyRef ? { familyRef: explanation.familyRef } : {}),
             ...(explanation?.clusterRef ? { clusterRef: explanation.clusterRef } : {}),
@@ -321,7 +326,7 @@ export async function runFindPrecedentsTool(
         }
       : precedents;
 
-  const shapedOutput = finalizeShapedResponse({
+  const shapedOutput: RawFindPrecedentsResponse = {
     requestedName: input.name,
     requestedRepo: input.repo,
     requestedMode: mode,
@@ -361,13 +366,23 @@ export async function runFindPrecedentsTool(
           },
         }
       : {}),
+    internal: {
+      scopedCandidateCount: compactPrecedents.length,
+      totalCandidateCount: scopedCandidates.length,
+      appliedLimit: limit,
+      navigationHintLimit: microShaperEnabled && target.grounding === 'weak' ? 1 : 3,
+    },
+  };
+  const normalizedOutput = normalizeFindPrecedentsResponse({
+    rawResponse: shapedOutput,
+    mode: detail,
   });
 
   return {
     content: [
       {
         type: 'text',
-        text: JSON.stringify(shapedOutput, null, 2),
+        text: JSON.stringify(normalizedOutput, null, 2),
       },
     ],
   };
