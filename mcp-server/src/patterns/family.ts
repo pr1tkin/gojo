@@ -2,6 +2,11 @@ import path from 'node:path';
 
 import type { PatternCandidate, PatternFingerprint, PatternPrecedentFamily } from './types.js';
 
+interface InferredPatternFamilyDetails {
+  family: PatternPrecedentFamily;
+  reason: string;
+}
+
 function dedupe(values: string[]): string[] {
   return Array.from(new Set(values));
 }
@@ -66,8 +71,17 @@ export function arePatternFamiliesCompatible(
 }
 
 export function inferPatternPrecedentFamily(pattern: Pick<PatternCandidate, 'fileId' | 'name' | 'kind' | 'fingerprint'>): PatternPrecedentFamily {
+  return inferPatternPrecedentFamilyDetails(pattern).family;
+}
+
+export function inferPatternPrecedentFamilyDetails(
+  pattern: Pick<PatternCandidate, 'fileId' | 'name' | 'kind' | 'fingerprint'>,
+): InferredPatternFamilyDetails {
   if (pattern.fingerprint.precedentFamily) {
-    return pattern.fingerprint.precedentFamily;
+    return {
+      family: pattern.fingerprint.precedentFamily,
+      reason: pattern.fingerprint.precedentFamilyReason ?? 'pre-classified family',
+    };
   }
 
   const relativeFilePath = getRelativeFilePath(pattern.fileId).toLowerCase();
@@ -79,42 +93,91 @@ export function inferPatternPrecedentFamily(pattern: Pick<PatternCandidate, 'fil
     ...nameTokens,
     ...responsibilityTokens.flatMap((entry) => tokenizeName(entry)),
   ]);
+  const structuralSignals = new Set(pattern.fingerprint.structuralSignals);
   const hasStateTokens = hasAnyToken(runtimeTokens, ['context', 'provider', 'store', 'state', 'reducer', 'slice']);
   const hasWrapperTokens = hasAnyToken(runtimeTokens, ['wrapper', 'shell', 'layout', 'container', 'boundary', 'frame']);
-  const isRoutedPage =
+  const hasComponentDirectoryCue =
+    relativeFilePath.includes('/_components/') ||
+    relativeFilePath.includes('/components/') ||
+    relativeFilePath.includes('/ui/');
+  const hasCanonicalPageName =
+    baseName === 'page.tsx' ||
+    baseName === 'page.jsx' ||
+    baseName === 'screen.tsx' ||
+    baseName === 'screen.jsx';
+  const hasRouteLikePathCue =
     pattern.kind === 'component' &&
     (
       relativeFilePath.includes('/app/') ||
       relativeFilePath.includes('/pages/') ||
       relativeFilePath.includes('/screen') ||
-      baseName === 'page.tsx' ||
-      baseName === 'page.jsx' ||
-      baseName === 'screen.tsx' ||
-      baseName === 'screen.jsx'
+      /\[[^\]]+\]/.test(relativeFilePath)
     );
+  const hasPageNameCue =
+    hasCanonicalPageName ||
+    nameTokens.includes('page') ||
+    nameTokens.includes('screen') ||
+    responsibilityTokens.some((entry) => /page|screen|route/i.test(entry));
+  const hasComponentSemanticCue =
+    pattern.kind === 'component' &&
+    (
+      hasComponentDirectoryCue ||
+      pattern.fingerprint.symbolRole === 'component' ||
+      structuralSignals.has('react-function-component') ||
+      structuralSignals.has('jsx-return')
+    );
+  const hasStrongPageCue = hasPageNameCue && (hasRouteLikePathCue || hasCanonicalPageName);
 
   if (pattern.kind === 'test-suite' || pattern.kind === 'storybook-story') {
-    return 'support_runtime';
+    return { family: 'support_runtime', reason: 'support artifact semantics' };
   }
 
   if (pattern.kind === 'api-handler') {
-    return 'api_or_handler';
+    return { family: 'api_or_handler', reason: 'API handler kind' };
   }
 
   if (pattern.kind === 'hook') {
-    return hasStateTokens ? 'state_or_store' : 'hook_or_context';
-  }
-
-  if (pattern.kind === 'component' && isRoutedPage) {
-    return 'routed_page_or_screen';
+    return hasStateTokens
+      ? { family: 'state_or_store', reason: 'store/context semantics outranked hook defaults' }
+      : { family: 'hook_or_context', reason: 'hook semantics' };
   }
 
   if (hasStateTokens) {
-    return pattern.kind === 'component' ? 'state_or_store' : 'hook_or_context';
+    return pattern.kind === 'component'
+      ? { family: 'state_or_store', reason: 'store/context semantics outranked generic component cues' }
+      : { family: 'hook_or_context', reason: 'context semantics' };
   }
 
   if (pattern.kind === 'component') {
-    return hasWrapperTokens ? 'ui_wrapper_or_shell' : 'ui_component';
+    // Precedence is explicit here: strong component semantics outrank route-like path cues,
+    // but canonical page/screen files still keep routed-page classification.
+    if (hasStrongPageCue && !hasComponentDirectoryCue) {
+      return { family: 'routed_page_or_screen', reason: 'canonical page/screen cues outranked generic component cues' };
+    }
+
+    if (hasComponentSemanticCue) {
+      return hasWrapperTokens
+        ? {
+            family: 'ui_wrapper_or_shell',
+            reason: hasRouteLikePathCue
+              ? 'component semantics outranked route-path cues, then wrapper cues applied'
+              : 'wrapper component semantics',
+          }
+        : {
+            family: 'ui_component',
+            reason: hasRouteLikePathCue
+              ? 'component semantics outranked route-path cues'
+              : 'component semantics',
+          };
+    }
+
+    if (hasStrongPageCue) {
+      return { family: 'routed_page_or_screen', reason: 'page/screen semantics' };
+    }
+
+    return hasWrapperTokens
+      ? { family: 'ui_wrapper_or_shell', reason: 'wrapper component semantics' }
+      : { family: 'ui_component', reason: 'default component semantics' };
   }
 
   if (
@@ -122,11 +185,11 @@ export function inferPatternPrecedentFamily(pattern: Pick<PatternCandidate, 'fil
     relativeFilePath.includes('/server/') ||
     relativeFilePath.includes('/actions/')
   ) {
-    return 'api_or_handler';
+    return { family: 'api_or_handler', reason: 'server/API path cues' };
   }
 
   if (hasWrapperTokens) {
-    return 'ui_wrapper_or_shell';
+    return { family: 'ui_wrapper_or_shell', reason: 'wrapper/path cues' };
   }
 
   if (
@@ -137,16 +200,16 @@ export function inferPatternPrecedentFamily(pattern: Pick<PatternCandidate, 'fil
     pattern.kind === 'service-layer' ||
     pattern.kind === 'data-access'
   ) {
-    return 'module_or_integration';
+    return { family: 'module_or_integration', reason: 'integration/service cues' };
   }
 
   if (pattern.kind === 'utility-export') {
     return relativeFilePath.includes('/utils/') || relativeFilePath.includes('/helpers/')
-      ? 'util_or_helper'
-      : 'module_or_integration';
+      ? { family: 'util_or_helper', reason: 'utility/helper path cues' }
+      : { family: 'module_or_integration', reason: 'utility export without helper path cues' };
   }
 
-  return 'module_or_integration';
+  return { family: 'module_or_integration', reason: 'default module/integration fallback' };
 }
 
 export function withInferredPatternFamily(fingerprint: PatternFingerprint, candidate: Pick<PatternCandidate, 'fileId' | 'name' | 'kind' | 'fingerprint'>): PatternFingerprint {
@@ -154,8 +217,11 @@ export function withInferredPatternFamily(fingerprint: PatternFingerprint, candi
     return fingerprint;
   }
 
+  const inferred = inferPatternPrecedentFamilyDetails(candidate);
+
   return {
     ...fingerprint,
-    precedentFamily: inferPatternPrecedentFamily(candidate),
+    precedentFamily: inferred.family,
+    precedentFamilyReason: inferred.reason,
   };
 }

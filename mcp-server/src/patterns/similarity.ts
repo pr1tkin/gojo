@@ -13,6 +13,7 @@ import type {
   PatternIndex,
   PatternKind,
   PatternPrecedentFamily,
+  PatternSubcluster,
   SimilarPatternMatch,
 } from './types.js';
 
@@ -36,6 +37,11 @@ const MIN_CORE_DEPENDENCY_OVERLAP = 0.2;
 const MIN_CORE_IMPORT_OVERLAP = 0.4;
 const MIN_CORE_RESPONSIBILITY_OVERLAP = 0.5;
 const MIN_RELATED_CLUSTER_SCORE = 0.58;
+const MIN_COMPONENT_SUBCLUSTER_SIZE = 4;
+const MIN_COMPONENT_PARENT_SUBCLUSTER_SIZE = 40;
+const MAX_COMPONENT_PARENT_COHESION_FOR_SUBCLUSTERS = 0.78;
+const MIN_COMPONENT_SUBCLUSTER_EDGE = 0.28;
+const IGNORED_COMPONENT_NEIGHBORHOOD_TOKENS = new Set(['ui', 'component', 'components', 'shared', 'common']);
 
 interface WeightedDimension {
   score: number;
@@ -58,6 +64,11 @@ interface ClusterEdgeMetrics {
 
 interface BuiltCluster {
   cluster: PatternCluster;
+  representative: PatternCandidate;
+}
+
+interface BuiltSubcluster {
+  subcluster: PatternSubcluster;
   representative: PatternCandidate;
 }
 
@@ -661,6 +672,258 @@ function buildClusterCohesion(
   };
 }
 
+function buildComponentSubclusterReason(patterns: PatternCandidate[]): string {
+  const dependencyTokenCounts = new Map<string, number>();
+
+  for (const pattern of patterns) {
+    for (const token of pattern.structuralAnchor?.localDependencyFamilyTokens ?? []) {
+      dependencyTokenCounts.set(token, (dependencyTokenCounts.get(token) ?? 0) + 1);
+    }
+  }
+
+  const topTokens = [...dependencyTokenCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 2)
+    .map(([token]) => token);
+
+  if (topTokens.length > 0) {
+    return `shared ${topTokens.join(' ')} component dependencies`;
+  }
+
+  return 'sub-clustered from broad ui_component family';
+}
+
+function buildComponentNeighborhoodTokenCounts(patterns: PatternCandidate[]): Map<string, number> {
+  const counts = new Map<string, number>();
+
+  for (const pattern of patterns) {
+    for (const token of pattern.structuralAnchor?.localDependencyFamilyTokens ?? []) {
+      if (IGNORED_COMPONENT_NEIGHBORHOOD_TOKENS.has(token)) {
+        continue;
+      }
+
+      counts.set(token, (counts.get(token) ?? 0) + 1);
+    }
+  }
+
+  return counts;
+}
+
+function getDominantDependencyNeighborhoodToken(
+  pattern: PatternCandidate,
+  tokenCounts: Map<string, number>,
+  clusterSize: number,
+): string | null {
+  const meaningfulTokens = (pattern.structuralAnchor?.localDependencyFamilyTokens ?? []).filter(
+    (token) => !IGNORED_COMPONENT_NEIGHBORHOOD_TOKENS.has(token),
+  );
+  const maxBroadTokenCount = Math.max(MIN_COMPONENT_SUBCLUSTER_SIZE, Math.floor(clusterSize * 0.25));
+
+  if (meaningfulTokens.length === 0) {
+    return pattern.structuralAnchor?.localDependencyFamilyTokens[0] ?? null;
+  }
+
+  const neighborhoodTokens = meaningfulTokens.filter((token) => (tokenCounts.get(token) ?? 0) < maxBroadTokenCount);
+  const rankedTokens = neighborhoodTokens.length > 0 ? neighborhoodTokens : meaningfulTokens;
+
+  return rankedTokens.sort((left, right) => {
+    const leftCount = tokenCounts.get(left) ?? Number.MAX_SAFE_INTEGER;
+    const rightCount = tokenCounts.get(right) ?? Number.MAX_SAFE_INTEGER;
+    return leftCount - rightCount || left.localeCompare(right);
+  })[0];
+}
+
+function buildTokenSubclusters(
+  cluster: PatternCluster,
+  orderedPatterns: PatternCandidate[],
+  similarityMatrix: Map<string, Map<string, number>>,
+  tokenCounts: Map<string, number>,
+): PatternSubcluster[] {
+  const groupedByToken = new Map<string, PatternCandidate[]>();
+  for (const pattern of orderedPatterns) {
+    const token = getDominantDependencyNeighborhoodToken(pattern, tokenCounts, orderedPatterns.length);
+    if (!token) {
+      continue;
+    }
+
+    const existing = groupedByToken.get(token) ?? [];
+    existing.push(pattern);
+    groupedByToken.set(token, existing);
+  }
+
+  const tokenSubclusters = [...groupedByToken.entries()]
+    .filter(([, memberPatterns]) => memberPatterns.length >= MIN_COMPONENT_SUBCLUSTER_SIZE)
+    .map(([token, memberPatterns]) => {
+      const subclusterRepresentative = pickRepresentativePattern(memberPatterns, similarityMatrix);
+      return {
+        subclusterId: `${cluster.clusterId}:sub:${token}`,
+        parentClusterId: cluster.clusterId,
+        representativePatternId: subclusterRepresentative.patternId,
+        memberPatternIds: memberPatterns.map((entry) => entry.patternId).sort((left, right) => left.localeCompare(right)),
+        reason: `shared ${token} component dependencies`,
+      } satisfies PatternSubcluster;
+    });
+
+  if (tokenSubclusters.length < 2) {
+    return [];
+  }
+
+  return tokenSubclusters
+    .sort((left, right) =>
+      right.memberPatternIds.length - left.memberPatternIds.length ||
+      left.subclusterId.localeCompare(right.subclusterId),
+    )
+    .map((entry) => entry);
+}
+
+function selectPreferredComponentSubclusters(
+  graphSubclusters: PatternSubcluster[],
+  tokenSubclusters: PatternSubcluster[],
+): PatternSubcluster[] {
+  if (graphSubclusters.length < 2) {
+    return tokenSubclusters;
+  }
+
+  if (tokenSubclusters.length < 2) {
+    return graphSubclusters;
+  }
+
+  const largestGraph = graphSubclusters.reduce(
+    (max, subcluster) => Math.max(max, subcluster.memberPatternIds.length),
+    0,
+  );
+  const largestToken = tokenSubclusters.reduce(
+    (max, subcluster) => Math.max(max, subcluster.memberPatternIds.length),
+    0,
+  );
+
+  if (largestToken <= Math.floor(largestGraph * 0.85) || tokenSubclusters.length > graphSubclusters.length) {
+    return tokenSubclusters;
+  }
+
+  return graphSubclusters;
+}
+
+function shouldBuildComponentSubclusters(cluster: PatternCluster, patterns: PatternCandidate[]): boolean {
+  if (cluster.precedentFamily !== 'ui_component' || cluster.size < MIN_COMPONENT_PARENT_SUBCLUSTER_SIZE) {
+    return false;
+  }
+
+  if (cluster.cohesion.averageDependencyOverlap <= MAX_COMPONENT_PARENT_COHESION_FOR_SUBCLUSTERS) {
+    return true;
+  }
+
+  const neighborhoodCounts = new Map<string, number>();
+  const tokenCounts = buildComponentNeighborhoodTokenCounts(patterns);
+  for (const pattern of patterns) {
+    const token = getDominantDependencyNeighborhoodToken(pattern, tokenCounts, patterns.length);
+    if (!token) {
+      continue;
+    }
+
+    neighborhoodCounts.set(token, (neighborhoodCounts.get(token) ?? 0) + 1);
+  }
+
+  const meaningfulNeighborhoods = [...neighborhoodCounts.values()].filter(
+    (count) => count >= MIN_COMPONENT_SUBCLUSTER_SIZE,
+  ).length;
+
+  return meaningfulNeighborhoods >= 2;
+}
+
+function buildComponentSubclusters(
+  cluster: PatternCluster,
+  representative: PatternCandidate,
+  patterns: PatternCandidate[],
+  similarityMatrix: Map<string, Map<string, number>>,
+): PatternSubcluster[] {
+  if (!shouldBuildComponentSubclusters(cluster, patterns)) {
+    return [];
+  }
+
+  const orderedPatterns = [...patterns].sort((left, right) => left.patternId.localeCompare(right.patternId));
+  const tokenCounts = buildComponentNeighborhoodTokenCounts(orderedPatterns);
+  const visited = new Set<string>();
+  const built: BuiltSubcluster[] = [];
+
+  for (const pattern of orderedPatterns) {
+    if (visited.has(pattern.patternId)) {
+      continue;
+    }
+
+    const queue = [pattern.patternId];
+    const memberIds: string[] = [];
+
+    while (queue.length > 0) {
+      const currentId = queue.shift() as string;
+
+      if (visited.has(currentId)) {
+        continue;
+      }
+
+      visited.add(currentId);
+      memberIds.push(currentId);
+      const currentPattern = orderedPatterns.find((entry) => entry.patternId === currentId) as PatternCandidate;
+
+      for (const candidate of orderedPatterns) {
+        if (visited.has(candidate.patternId) || candidate.patternId === currentId) {
+          continue;
+        }
+
+        const edgeMetrics = computeClusterEdgeMetrics(currentPattern, candidate);
+        const similarityScore = similarityMatrix.get(currentId)?.get(candidate.patternId) ?? 0;
+
+        if (
+          edgeMetrics.dependencyOverlap >= MIN_COMPONENT_SUBCLUSTER_EDGE ||
+          (
+            edgeMetrics.dependencyFamilyOverlap >= MIN_COMPONENT_SUBCLUSTER_EDGE &&
+            similarityScore >= DEFAULT_CLUSTER_THRESHOLD
+          ) ||
+          (
+            edgeMetrics.importOverlap >= 0.5 &&
+            edgeMetrics.responsibilityOverlap >= 0.5
+          )
+        ) {
+          queue.push(candidate.patternId);
+        }
+      }
+    }
+
+    if (memberIds.length < MIN_COMPONENT_SUBCLUSTER_SIZE) {
+      continue;
+    }
+
+    const memberPatterns = memberIds
+      .map((memberId) => orderedPatterns.find((entry) => entry.patternId === memberId) as PatternCandidate)
+      .sort((left, right) => left.patternId.localeCompare(right.patternId));
+    const subclusterRepresentative = pickRepresentativePattern(memberPatterns, similarityMatrix);
+
+    built.push({
+      representative: subclusterRepresentative,
+      subcluster: {
+        subclusterId: `${cluster.clusterId}:sub:${subclusterRepresentative.patternId}`,
+        parentClusterId: cluster.clusterId,
+        representativePatternId: subclusterRepresentative.patternId,
+        memberPatternIds: memberPatterns.map((entry) => entry.patternId),
+        reason: buildComponentSubclusterReason(memberPatterns),
+      },
+    });
+  }
+
+  const graphSubclusters =
+    built.length >= 2
+      ? built
+          .sort((left, right) =>
+            right.subcluster.memberPatternIds.length - left.subcluster.memberPatternIds.length ||
+            left.subcluster.subclusterId.localeCompare(right.subcluster.subclusterId),
+          )
+          .map((entry) => entry.subcluster)
+      : [];
+  const tokenSubclusters = buildTokenSubclusters(cluster, orderedPatterns, similarityMatrix, tokenCounts);
+
+  return selectPreferredComponentSubclusters(graphSubclusters, tokenSubclusters);
+}
+
 function pickRepresentativePattern(
   patterns: PatternCandidate[],
   similarityMatrix: Map<string, Map<string, number>>,
@@ -777,23 +1040,30 @@ function clusterPatternsOfKind(patterns: PatternCandidate[], threshold: number):
     const representative = pickRepresentativePattern(memberPatterns, similarityMatrix);
     const precedentFamily = determineClusterFamily(memberPatterns);
     const memberClassification = classifyClusterMembers(precedentFamily, representative, memberPatterns, similarityMatrix);
+    const cohesion = buildClusterCohesion(precedentFamily, representative, memberPatterns);
+    const clusterId = createPatternClusterId(pattern.kind, representative.patternId);
+    const cluster: PatternCluster = {
+      clusterId,
+      patternKind: pattern.kind,
+      precedentFamily,
+      memberPatternIds: memberPatterns.map((entry) => entry.patternId),
+      coreMemberPatternIds: memberClassification.coreMemberPatternIds,
+      peripheralMemberPatternIds: memberClassification.peripheralMemberPatternIds,
+      representativePatternId: representative.patternId,
+      size: memberPatterns.length,
+      dominantSignals: collectDominantSignals(memberPatterns),
+      relatedClusterIds: [],
+      reason: buildClusterReason(precedentFamily, memberPatterns),
+      cohesion,
+    };
+    const subclusters = buildComponentSubclusters(cluster, representative, memberPatterns, similarityMatrix);
+    if (subclusters.length > 0) {
+      cluster.subclusters = subclusters;
+    }
 
     clusters.push({
       representative,
-      cluster: {
-        clusterId: createPatternClusterId(pattern.kind, representative.patternId),
-        patternKind: pattern.kind,
-        precedentFamily,
-        memberPatternIds: memberPatterns.map((entry) => entry.patternId),
-        coreMemberPatternIds: memberClassification.coreMemberPatternIds,
-        peripheralMemberPatternIds: memberClassification.peripheralMemberPatternIds,
-        representativePatternId: representative.patternId,
-        size: memberPatterns.length,
-        dominantSignals: collectDominantSignals(memberPatterns),
-        relatedClusterIds: [],
-        reason: buildClusterReason(precedentFamily, memberPatterns),
-        cohesion: buildClusterCohesion(precedentFamily, representative, memberPatterns),
-      },
+      cluster,
     });
   }
 
@@ -902,6 +1172,9 @@ export class PatternSimilarityService {
       `reason: ${cluster.reason}`,
       `signals: ${cluster.dominantSignals.join(', ')}`,
       `core: ${cluster.coreMemberPatternIds.length} peripheral: ${cluster.peripheralMemberPatternIds.length}`,
+      ...(cluster.subclusters && cluster.subclusters.length > 0
+        ? [`subclusters: ${cluster.subclusters.length}`]
+        : []),
       '',
       'Members:',
       members,

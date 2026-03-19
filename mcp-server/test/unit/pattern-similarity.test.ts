@@ -17,6 +17,7 @@ import {
   type PatternCandidate,
   type PatternFingerprint,
 } from '../../src/patterns/index.js';
+import { inferPatternPrecedentFamilyDetails } from '../../src/patterns/family.js';
 
 async function createTempDirectory(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'reporadar-pattern-similarity-test-'));
@@ -755,7 +756,63 @@ describe('pattern similarity', () => {
       primaryButton.patternId,
     ]);
     expect(componentCluster?.representativePatternId).toBe(button.patternId);
+    expect(componentCluster?.subclusters).toBeUndefined();
     expect(utilityClusterCount).toBe(2);
+  });
+
+  it('classifies route-like _components files as ui components when component evidence is strong', () => {
+    const iconComponent = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/app/_components/icon/Icon.tsx',
+      symbolId: 'icon-symbol',
+      name: 'Icon',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 20,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['react'],
+        exportShape: 'named',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+      },
+    });
+
+    const result = inferPatternPrecedentFamilyDetails(iconComponent);
+
+    expect(result).toEqual({
+      family: 'ui_component',
+      reason: 'component semantics outranked route-path cues',
+    });
+  });
+
+  it('keeps canonical routed pages classified as routed pages', () => {
+    const routedPage = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/app/contracts/[contractId]/page.tsx',
+      symbolId: 'contract-page-symbol',
+      name: 'ContractPage',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 30,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component'],
+        importSet: ['react', 'next/navigation'],
+        exportShape: 'default',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+        responsibilitySignals: ['page-component'],
+      },
+    });
+
+    const result = inferPatternPrecedentFamilyDetails(routedPage);
+
+    expect(result.family).toBe('routed_page_or_screen');
+    expect(result.reason).toContain('page/screen');
   });
 
   it('splits mixed runtime families into separate but related clusters', () => {
@@ -1013,6 +1070,172 @@ describe('pattern similarity', () => {
     expect(cluster.coreMemberPatternIds).toEqual([useBillingQuery.patternId, useOrdersQuery.patternId]);
     expect(cluster.peripheralMemberPatternIds).toEqual([useLegacyQuery.patternId]);
     expect(cluster.reason).toBe('shared hook/context dependencies');
+  });
+
+  it('adds light sub-clusters to large broad ui component clusters only', () => {
+    const marketingCard = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/marketing/MarketingCard.tsx',
+      symbolId: 'marketing-card-symbol',
+      name: 'MarketingCard',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 24,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component', 'uses-hooks'],
+        importSet: ['react', '@/ui/Card', '@/marketing/content'],
+        exportShape: 'named',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+        responsibilitySignals: ['ui-card'],
+      },
+      structuralAnchor: {
+        structurallyIndexed: true,
+        resolvedLocalDependencyFileIds: ['a1', 'a2', 'a3', 'a4'],
+        localDependencyFamilyTokens: ['marketing', 'card', 'content'],
+      },
+    });
+    const marketingHero = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/marketing/MarketingHero.tsx',
+      symbolId: 'marketing-hero-symbol',
+      name: 'MarketingHero',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 24,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component', 'uses-hooks'],
+        importSet: ['react', '@/ui/Card', '@/marketing/content'],
+        exportShape: 'named',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+        responsibilitySignals: ['ui-card'],
+      },
+      structuralAnchor: {
+        structurallyIndexed: true,
+        resolvedLocalDependencyFileIds: ['a1', 'a2', 'a3', 'a4'],
+        localDependencyFamilyTokens: ['marketing', 'card', 'content'],
+      },
+    });
+    const profileCard = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/profile/ProfileCard.tsx',
+      symbolId: 'profile-card-symbol',
+      name: 'ProfileCard',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 24,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component', 'uses-hooks'],
+        importSet: ['react', '@/ui/Card', '@/profile/model'],
+        exportShape: 'named',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+        responsibilitySignals: ['ui-card'],
+      },
+      structuralAnchor: {
+        structurallyIndexed: true,
+        resolvedLocalDependencyFileIds: ['b1', 'b2', 'b3', 'b4'],
+        localDependencyFamilyTokens: ['profile', 'card', 'identity'],
+      },
+    });
+    const profileAvatar = makePattern({
+      kind: 'component',
+      repoId: 'repo-a',
+      fileId: 'repo-a:src/components/profile/ProfileAvatar.tsx',
+      symbolId: 'profile-avatar-symbol',
+      name: 'ProfileAvatar',
+      language: 'tsx',
+      startLine: 1,
+      endLine: 24,
+      fingerprint: {
+        patternKind: 'component',
+        structuralSignals: ['jsx-return', 'react-function-component', 'uses-hooks'],
+        importSet: ['react', '@/ui/Card', '@/profile/model'],
+        exportShape: 'named',
+        symbolRole: 'component',
+        uiSignals: ['jsx-return'],
+        responsibilitySignals: ['ui-card'],
+      },
+      structuralAnchor: {
+        structurallyIndexed: true,
+        resolvedLocalDependencyFileIds: ['b1', 'b2', 'b3', 'b4'],
+        localDependencyFamilyTokens: ['profile', 'card', 'identity'],
+      },
+    });
+    const patterns = Array.from({ length: 20 }, (_, index) =>
+      index % 2 === 0
+        ? makePattern({
+            ...marketingCard,
+            fileId: `repo-a:src/components/marketing/MarketingCard${index}.tsx`,
+            symbolId: `marketing-card-symbol-${index}`,
+            name: `MarketingCard${index}`,
+          })
+        : makePattern({
+            ...marketingHero,
+            fileId: `repo-a:src/components/marketing/MarketingHero${index}.tsx`,
+            symbolId: `marketing-hero-symbol-${index}`,
+            name: `MarketingHero${index}`,
+          }),
+    ).concat(
+      Array.from({ length: 20 }, (_, index) =>
+        index % 2 === 0
+          ? makePattern({
+              ...profileCard,
+              fileId: `repo-a:src/components/profile/ProfileCard${index}.tsx`,
+              symbolId: `profile-card-symbol-${index}`,
+              name: `ProfileCard${index}`,
+            })
+          : makePattern({
+              ...profileAvatar,
+              fileId: `repo-a:src/components/profile/ProfileAvatar${index}.tsx`,
+              symbolId: `profile-avatar-symbol-${index}`,
+              name: `ProfileAvatar${index}`,
+            }),
+      ),
+    ).concat(
+      Array.from({ length: 40 }, (_, index) =>
+        makePattern({
+          kind: 'component',
+          repoId: 'repo-a',
+          fileId: `repo-a:src/components/shared/SharedItem${index}.tsx`,
+          symbolId: `shared-item-symbol-${index}`,
+          name: `SharedItem${index}`,
+          language: 'tsx',
+          startLine: 1,
+          endLine: 24,
+          fingerprint: {
+            patternKind: 'component',
+            structuralSignals: ['jsx-return', 'react-function-component', 'uses-hooks'],
+            importSet: ['react', '@/ui/Card', '@/shared/runtime'],
+            exportShape: 'named',
+            symbolRole: 'component',
+            uiSignals: ['jsx-return'],
+            responsibilitySignals: ['ui-card'],
+          },
+          structuralAnchor: {
+            structurallyIndexed: true,
+            resolvedLocalDependencyFileIds: ['shared-a', 'shared-b', `shared-${index}`],
+            localDependencyFamilyTokens: ['shared', index % 2 === 0 ? 'marketing' : 'profile', 'card'],
+          },
+        }),
+      ),
+    );
+
+    const service = createPatternSimilarityService(buildIndex(patterns));
+    const cluster = service.buildClusters().find((entry) => (entry.subclusters?.length ?? 0) >= 2);
+
+    expect(cluster).toBeDefined();
+    expect(cluster?.precedentFamily).toBe('ui_component');
+    expect(cluster?.subclusters?.length).toBeGreaterThanOrEqual(2);
+    expect(cluster?.subclusters?.every((entry) => entry.memberPatternIds.length >= 4)).toBe(true);
+    expect(cluster?.subclusters?.some((entry) => entry.reason.includes('component dependencies'))).toBe(true);
   });
 
   it('formats cluster debug output with deterministic members and dominant signals', () => {

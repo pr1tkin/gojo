@@ -27,7 +27,9 @@ export type {
   PatternFingerprint,
   PatternIndex,
   PatternKind,
+  PatternPrecedentFamily,
   PatternSignal,
   PatternSignalType,
+  PatternSubcluster,
   SimilarPatternMatch,
 } from './types.js';

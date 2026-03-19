@@ -48,6 +48,7 @@ export interface PatternFingerprint {
   asyncSignals?: string[];
   responsibilitySignals?: string[];
   precedentFamily?: PatternPrecedentFamily;
+  precedentFamilyReason?: string;
 }
 
 export type PatternPrecedentFamily =
@@ -118,4 +119,13 @@ export interface PatternCluster {
     averageDependencyOverlap: number;
     averageStructuralAlignment: number;
   };
+  subclusters?: PatternSubcluster[];
+}
+
+export interface PatternSubcluster {
+  subclusterId: string;
+  parentClusterId: string;
+  representativePatternId: string;
+  memberPatternIds: string[];
+  reason: string;
 }
