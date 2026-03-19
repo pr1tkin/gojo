@@ -386,4 +386,81 @@ describe('buildIndexedSymbols', () => {
       namedSymbols.find((symbol) => symbol.name === createSyntheticDefaultExportName('src/Named.tsx')),
     ).toBeUndefined();
   });
+
+  it('records resolved local import targets for relative, alias, and baseUrl imports', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'resolved-imports-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'components'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'lib'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.base.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@/*': ['./src/*'],
+          },
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        extends: './tsconfig.base.json',
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'components', 'Button.tsx'),
+      'export const Button = () => null;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'lib', 'utils.ts'),
+      'export const util = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { Button } from '@/components/Button';",
+        "import { util } from 'src/lib/utils';",
+        "import { Button as RelativeButton } from './components/Button';",
+        "import React from 'react';",
+        'export const consumer = [Button, util, RelativeButton, React];',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const consumerRelation = index.byFile[createFileId('resolved-imports-repo', 'src/consumer.ts')];
+
+    expect(consumerRelation.imports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: '@/components/Button',
+          resolvedKind: 'local-file',
+          resolvedTargetFileId: createFileId('resolved-imports-repo', 'src/components/Button.tsx'),
+        }),
+        expect.objectContaining({
+          source: 'src/lib/utils',
+          resolvedKind: 'local-file',
+          resolvedTargetFileId: createFileId('resolved-imports-repo', 'src/lib/utils.ts'),
+        }),
+        expect.objectContaining({
+          source: './components/Button',
+          resolvedKind: 'local-file',
+          resolvedTargetFileId: createFileId('resolved-imports-repo', 'src/components/Button.tsx'),
+        }),
+        expect.objectContaining({
+          source: 'react',
+          resolvedKind: 'package',
+        }),
+      ]),
+    );
+  });
 });

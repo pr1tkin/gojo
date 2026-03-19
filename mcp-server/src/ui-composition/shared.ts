@@ -1,11 +1,7 @@
 import type Parser from 'tree-sitter';
 
 import { resolveLocalFileTarget, type LocalResolutionResult } from '../graph/local-resolution.js';
-import {
-  getNearestRepoConfigEntry,
-  type RepoResolutionConfig,
-  type SimplePathMapping,
-} from '../graph/repo-config.js';
+import type { RepoResolutionConfig } from '../graph/repo-config.js';
 import type { IndexedSymbol, ImportBinding, ImportRecord, SymbolIndex } from '../symbol-index/types.js';
 import type {
   UiComponentResolution,
@@ -238,33 +234,6 @@ function resolveTargetFile(
   };
 }
 
-function matchesConfiguredAlias(mapping: SimplePathMapping, source: string): boolean {
-  if (!mapping.wildcard) {
-    return source === mapping.aliasPattern;
-  }
-
-  return source.startsWith(mapping.aliasPrefix) && source.endsWith(mapping.aliasSuffix);
-}
-
-function isAliasLikeImportSource(
-  relation: SymbolIndex['byFile'][string],
-  source: string,
-  repoConfigById: Record<string, RepoResolutionConfig>,
-): boolean {
-  if (source.startsWith('@/') || source.startsWith('~/') || source.startsWith('#/')) {
-    return true;
-  }
-
-  const repoConfig = repoConfigById[relation.repo];
-  const configEntry = getNearestRepoConfigEntry(repoConfig, relation.filePath);
-
-  if (!configEntry) {
-    return false;
-  }
-
-  return configEntry.pathMappings.some((mapping) => matchesConfiguredAlias(mapping, source));
-}
-
 function createSameFileResolution(
   sameFileSymbol: IndexedSymbol,
   candidate: UiComponentCandidate,
@@ -280,18 +249,15 @@ function createSameFileResolution(
 }
 
 function createUnresolvedImportResolution(
-  relation: SymbolIndex['byFile'][string],
   importRecord: ImportRecord,
   resolution: LocalResolutionResult,
   candidate: UiComponentCandidate,
-  repoConfigById: Record<string, RepoResolutionConfig>,
 ): ResolvedChildComponent {
-  const aliasLikeSource = isAliasLikeImportSource(relation, importRecord.source, repoConfigById);
   const memberExpression = candidate.memberExpression
     ? createMemberExpressionMetadata(candidate, 'unresolved_member')
     : undefined;
 
-  if (aliasLikeSource) {
+  if (resolution.matchedAlias) {
     return {
       resolution: 'alias_not_resolved',
       confidence: 'medium',
@@ -482,11 +448,9 @@ function resolveMemberExpressionCandidate(
 
   if (!target.relation) {
     const unresolvedImport = createUnresolvedImportResolution(
-      relation,
       importedBase.importRecord,
       target.resolution,
       candidate,
-      repoConfigById,
     );
 
     if (
@@ -570,11 +534,9 @@ export function resolveChildComponent(
 
     if (!target.relation) {
       return createUnresolvedImportResolution(
-        relation,
         importRecord,
         target.resolution,
         candidate,
-        repoConfigById,
       );
     }
 

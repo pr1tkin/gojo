@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { resolveLocalFileTarget } from '../graph/local-resolution.js';
+import { loadRepoResolutionConfigs } from '../graph/repo-config.js';
 import { listRepositories } from '../repositories.js';
 import { extractSymbolsFromSource } from '../symbols.js';
 import { isSupportedSymbolFile } from '../tree-sitter.js';
@@ -178,9 +180,47 @@ function createFileRelation(
   return extractFileMetadata(fileId, repo, filePath, classification, source, symbols);
 }
 
+function enrichResolvedImports(
+  index: SymbolIndex,
+  repoResolutionConfigsById: Awaited<ReturnType<typeof loadRepoResolutionConfigs>>,
+): void {
+  for (const relation of Object.values(index.byFile)) {
+    for (const importRecord of relation.imports) {
+      const resolution = resolveLocalFileTarget(
+        relation,
+        importRecord.source,
+        index.byFile,
+        repoResolutionConfigsById[relation.repo],
+      );
+
+      if (resolution.status === 'resolved' && resolution.targetFileId) {
+        importRecord.resolvedKind = 'local-file';
+        importRecord.resolvedTargetFileId = resolution.targetFileId;
+        continue;
+      }
+
+      delete importRecord.resolvedTargetFileId;
+
+      if (
+        resolution.attemptedKind === 'relative' ||
+        resolution.attemptedKind === 'baseUrl' ||
+        resolution.matchedAlias
+      ) {
+        importRecord.resolvedKind = 'local-file';
+        continue;
+      }
+
+      importRecord.resolvedKind = resolution.status === 'non_local' ? 'package' : 'unknown';
+    }
+  }
+}
+
 export async function buildIndexedSymbols(reposRoot: string): Promise<SymbolIndex> {
   const repositories = await listRepositories(reposRoot);
   const index = createEmptySymbolIndex();
+  const repoResolutionConfigsById = await loadRepoResolutionConfigs(
+    Object.fromEntries(repositories.map((repository) => [repository.id, repository.rootPath])),
+  );
 
   for (const repository of repositories) {
     const files = await collectRepositorySourceFiles(repository.rootPath, repository.id);
@@ -211,6 +251,8 @@ export async function buildIndexedSymbols(reposRoot: string): Promise<SymbolInde
       );
     }
   }
+
+  enrichResolvedImports(index, repoResolutionConfigsById);
 
   return index;
 }

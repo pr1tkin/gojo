@@ -896,20 +896,21 @@ describe('buildCodeGraphFromSymbolIndex', () => {
     );
   });
 
-  it('does not guess through unsupported complex alias config', async () => {
+  it('resolves configured aliases across multiple wildcard target paths when one target is deterministic', async () => {
     const reposRoot = await createTempDirectory();
     tempDirectories.push(reposRoot);
 
     const repositoryRoot = path.join(reposRoot, 'complex-alias-repo');
     await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
     await fs.mkdir(path.join(repositoryRoot, 'src', 'shared'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'alt', 'shared'), { recursive: true });
     await fs.writeFile(
       path.join(repositoryRoot, 'tsconfig.json'),
       JSON.stringify({
         compilerOptions: {
           baseUrl: '.',
           paths: {
-            '@/*': ['./src/*', './generated/*'],
+            '@/*': ['./src/*', './alt/*'],
           },
         },
       }),
@@ -934,8 +935,120 @@ describe('buildCodeGraphFromSymbolIndex', () => {
     const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
     const consumerFileId = createFileId('complex-alias-repo', 'src/consumer.ts');
 
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: consumerFileId,
+          toId: createFileId('complex-alias-repo', 'src/shared/button.ts'),
+          metadata: { source: '@/shared/button' },
+        }),
+      ]),
+    );
+  });
+
+  it('does not resolve multi-target aliases when multiple configured targets exist', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'ambiguous-multi-target-alias-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'shared'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'alt', 'shared'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@/*': ['./src/*', './alt/*'],
+          },
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'shared', 'button.ts'),
+      'export const button = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'alt', 'shared', 'button.ts'),
+      'export const generatedButton = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { button } from '@/shared/button';",
+        'export const consumer = button;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'ambiguous-multi-target-alias-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+    const consumerFileId = createFileId('ambiguous-multi-target-alias-repo', 'src/consumer.ts');
+
     expect(graph.edges.filter((edge) => edge.type === 'file_imports_file' && edge.fromId === consumerFileId)).toEqual(
       [],
+    );
+  });
+
+  it('resolves aliases inherited from tsconfig.base.json', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'tsconfig-base-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'components'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.base.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@/*': ['./src/*'],
+          },
+        },
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        extends: './tsconfig.base.json',
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'components', 'Button.tsx'),
+      'export const Button = () => null;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { Button } from '@/components/Button';",
+        'export const consumer = Button;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const repoResolutionConfigsById = await loadGraphRepoConfigs(reposRoot, 'tsconfig-base-repo');
+    const graph = buildCodeGraphFromSymbolIndex(index, { repoResolutionConfigsById });
+
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: createFileId('tsconfig-base-repo', 'src/consumer.ts'),
+          toId: createFileId('tsconfig-base-repo', 'src/components/Button.tsx'),
+          metadata: { source: '@/components/Button' },
+        }),
+      ]),
     );
   });
 });

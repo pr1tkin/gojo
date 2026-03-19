@@ -15,11 +15,15 @@ const IGNORED_DIRECTORIES = new Set([
 export interface SimplePathMapping {
   aliasPattern: string;
   targetPattern: string;
+  targetPatterns: string[];
   wildcard: boolean;
   aliasPrefix: string;
   aliasSuffix: string;
-  targetPrefix: string;
-  targetSuffix: string;
+  targetEntries: Array<{
+    targetPattern: string;
+    targetPrefix: string;
+    targetSuffix: string;
+  }>;
 }
 
 export interface RepoConfigEntry {
@@ -66,57 +70,93 @@ function compareConfigEntries(left: RepoConfigEntry, right: RepoConfigEntry): nu
     return rightDepth - leftDepth;
   }
 
-  if (left.configPath.endsWith('tsconfig.json') !== right.configPath.endsWith('tsconfig.json')) {
-    return left.configPath.endsWith('tsconfig.json') ? -1 : 1;
+  const leftPriority = getConfigPriority(left.configPath);
+  const rightPriority = getConfigPriority(right.configPath);
+
+  if (leftPriority !== rightPriority) {
+    return leftPriority - rightPriority;
   }
 
   return left.configPath.localeCompare(right.configPath);
+}
+
+function getConfigPriority(configPath: string): number {
+  const fileName = path.basename(configPath).toLowerCase();
+
+  if (fileName === 'tsconfig.json') {
+    return 0;
+  }
+
+  if (fileName === 'jsconfig.json') {
+    return 1;
+  }
+
+  if (fileName === 'tsconfig.base.json') {
+    return 2;
+  }
+
+  return 3;
 }
 
 function createSimplePathMapping(
   repoRootPath: string,
   targetBasePath: string,
   aliasPattern: string,
-  targetPattern: string,
+  targetPatterns: string[],
 ): SimplePathMapping | null {
   const aliasWildcardCount = countWildcards(aliasPattern);
-  const targetWildcardCount = countWildcards(targetPattern);
-
-  if (aliasWildcardCount > 1 || targetWildcardCount > 1 || aliasWildcardCount !== targetWildcardCount) {
+  if (aliasWildcardCount > 1) {
     return null;
   }
 
   const wildcard = aliasWildcardCount === 1;
-  const resolvedTargetPattern = path.resolve(targetBasePath, targetPattern);
-  const repoRelativeTargetPattern = toRepoRelativePath(repoRootPath, resolvedTargetPattern);
+  const targetEntries: SimplePathMapping['targetEntries'] = [];
 
-  if (repoRelativeTargetPattern === null) {
+  for (const targetPattern of targetPatterns) {
+    const targetWildcardCount = countWildcards(targetPattern);
+
+    if (targetWildcardCount > 1 || aliasWildcardCount !== targetWildcardCount) {
+      continue;
+    }
+
+    const resolvedTargetPattern = path.resolve(targetBasePath, targetPattern);
+    const repoRelativeTargetPattern = toRepoRelativePath(repoRootPath, resolvedTargetPattern);
+
+    if (repoRelativeTargetPattern === null) {
+      continue;
+    }
+
+    if (!wildcard) {
+      targetEntries.push({
+        targetPattern: repoRelativeTargetPattern,
+        targetPrefix: repoRelativeTargetPattern,
+        targetSuffix: '',
+      });
+      continue;
+    }
+
+    const [targetPrefix, targetSuffix] = repoRelativeTargetPattern.split('*');
+    targetEntries.push({
+      targetPattern: repoRelativeTargetPattern,
+      targetPrefix,
+      targetSuffix,
+    });
+  }
+
+  if (targetEntries.length === 0) {
     return null;
   }
 
-  if (!wildcard) {
-    return {
-      aliasPattern,
-      targetPattern: repoRelativeTargetPattern,
-      wildcard: false,
-      aliasPrefix: aliasPattern,
-      aliasSuffix: '',
-      targetPrefix: repoRelativeTargetPattern,
-      targetSuffix: '',
-    };
-  }
-
-  const [aliasPrefix, aliasSuffix] = aliasPattern.split('*');
-  const [targetPrefix, targetSuffix] = repoRelativeTargetPattern.split('*');
+  const [aliasPrefix, aliasSuffix] = wildcard ? aliasPattern.split('*') : [aliasPattern, ''];
 
   return {
     aliasPattern,
-    targetPattern: repoRelativeTargetPattern,
-    wildcard: true,
+    targetPattern: targetEntries[0]?.targetPattern ?? '',
+    targetPatterns: targetEntries.map((entry) => entry.targetPattern),
+    wildcard,
     aliasPrefix,
     aliasSuffix,
-    targetPrefix,
-    targetSuffix,
+    targetEntries,
   };
 }
 
@@ -132,6 +172,8 @@ function readConfigFile(configPath: string): ts.ParsedCommandLine | null {
     return null;
   }
 }
+
+const repoResolutionConfigCache = new Map<string, Promise<RepoResolutionConfig>>();
 
 function parseConfigEntry(repoRootPath: string, configPath: string): RepoConfigEntry | null {
   const parsed = readConfigFile(configPath);
@@ -158,11 +200,17 @@ function parseConfigEntry(repoRootPath: string, configPath: string): RepoConfigE
   const pathsBasePath = baseUrlAbsolutePath ?? configDirectory;
 
   for (const [aliasPattern, targetPatterns] of Object.entries(parsed.options.paths ?? {})) {
-    if (!Array.isArray(targetPatterns) || targetPatterns.length !== 1 || typeof targetPatterns[0] !== 'string') {
+    if (!Array.isArray(targetPatterns)) {
       continue;
     }
 
-    const mapping = createSimplePathMapping(repoRootPath, pathsBasePath, aliasPattern, targetPatterns[0]);
+    const normalizedTargets = targetPatterns.filter((value): value is string => typeof value === 'string');
+
+    if (normalizedTargets.length === 0) {
+      continue;
+    }
+
+    const mapping = createSimplePathMapping(repoRootPath, pathsBasePath, aliasPattern, normalizedTargets);
 
     if (mapping) {
       pathMappings.push(mapping);
@@ -206,7 +254,7 @@ async function collectRepoConfigPaths(
       continue;
     }
 
-    if (entry.name === 'tsconfig.json' || entry.name === 'jsconfig.json') {
+    if (entry.name === 'tsconfig.json' || entry.name === 'tsconfig.base.json' || entry.name === 'jsconfig.json') {
       results.push(entryPath);
     }
   }
@@ -217,19 +265,31 @@ export async function loadRepoResolutionConfig(
   repoRootPath: string,
 ): Promise<RepoResolutionConfig> {
   const absoluteRepoRootPath = path.resolve(repoRootPath);
-  const configPaths: string[] = [];
-  await collectRepoConfigPaths(absoluteRepoRootPath, absoluteRepoRootPath, configPaths);
+  const cacheKey = `${repoId}:${absoluteRepoRootPath}`;
+  const cached = repoResolutionConfigCache.get(cacheKey);
 
-  const entries = configPaths
-    .map((configPath) => parseConfigEntry(absoluteRepoRootPath, configPath))
-    .filter((entry): entry is RepoConfigEntry => entry !== null)
-    .sort(compareConfigEntries);
+  if (cached) {
+    return cached;
+  }
 
-  return {
-    repoId,
-    repoRootPath: absoluteRepoRootPath,
-    entries,
-  };
+  const pending = (async (): Promise<RepoResolutionConfig> => {
+    const configPaths: string[] = [];
+    await collectRepoConfigPaths(absoluteRepoRootPath, absoluteRepoRootPath, configPaths);
+
+    const entries = configPaths
+      .map((configPath) => parseConfigEntry(absoluteRepoRootPath, configPath))
+      .filter((entry): entry is RepoConfigEntry => entry !== null)
+      .sort(compareConfigEntries);
+
+    return {
+      repoId,
+      repoRootPath: absoluteRepoRootPath,
+      entries,
+    };
+  })();
+
+  repoResolutionConfigCache.set(cacheKey, pending);
+  return pending;
 }
 
 export async function loadRepoResolutionConfigs(
