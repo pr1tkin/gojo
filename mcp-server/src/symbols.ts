@@ -3,6 +3,7 @@ import type Parser from 'tree-sitter';
 
 import { readRepositoryFile } from './files.js';
 import { getRepositoryById } from './repositories.js';
+import { createSyntheticDefaultExportName } from './symbol-index/ids.js';
 import { isSupportedSymbolFile, parseTypeScriptSource } from './tree-sitter.js';
 import type {
   FileSymbol,
@@ -154,11 +155,106 @@ function collectSymbolsFromNode(
   }
 }
 
-export function extractSymbolsFromSource(source: string, filePath: string): FileSymbol[] {
+function hasNamedSymbol(symbols: FileSymbol[], name: string): boolean {
+  return symbols.some((symbol) => symbol.name === name);
+}
+
+function getDefaultExportedNode(
+  node: Parser.SyntaxNode,
+  source: string,
+): Parser.SyntaxNode | null {
+  if (node.type !== 'export_statement') {
+    return null;
+  }
+
+  if (!getNodeText(node, source).trimStart().startsWith('export default')) {
+    return null;
+  }
+
+  return node.namedChildren[0] ?? null;
+}
+
+function classifyAnonymousDefaultExport(node: Parser.SyntaxNode | null): SymbolKind {
+  if (!node) {
+    return 'default_export';
+  }
+
+  if (node.type === 'arrow_function' || node.type === 'function_expression') {
+    return 'function';
+  }
+
+  if (node.type === 'class') {
+    return 'class';
+  }
+
+  return 'default_export';
+}
+
+function createSyntheticDefaultExportSymbol(
+  exportStatement: Parser.SyntaxNode,
+  exportedNode: Parser.SyntaxNode | null,
+  filePath: string,
+  symbolIdentityFilePath: string,
+): FileSymbol {
+  const targetNode = exportedNode ?? exportStatement;
+
+  return {
+    name: createSyntheticDefaultExportName(symbolIdentityFilePath),
+    kind: classifyAnonymousDefaultExport(exportedNode),
+    filePath,
+    startLine: targetNode.startPosition.row + 1,
+    endLine: targetNode.endPosition.row + 1,
+    identityDiscriminator: 'default',
+  };
+}
+
+function maybeCollectSyntheticDefaultExportSymbol(
+  tree: Parser.Tree,
+  source: string,
+  symbols: FileSymbol[],
+  filePath: string,
+  symbolIdentityFilePath: string,
+): void {
+  for (const child of tree.rootNode.namedChildren) {
+    const exportedNode = getDefaultExportedNode(child, source);
+
+    if (!exportedNode) {
+      continue;
+    }
+
+    if (exportedNode.type === 'function_declaration' || exportedNode.type === 'class_declaration') {
+      const exportedName = getNamedChildText(exportedNode, source);
+
+      if (exportedName && hasNamedSymbol(symbols, exportedName)) {
+        return;
+      }
+    }
+
+    if (exportedNode.type === 'identifier') {
+      const exportedName = getNodeText(exportedNode, source);
+
+      if (exportedName && hasNamedSymbol(symbols, exportedName)) {
+        return;
+      }
+    }
+
+    symbols.push(
+      createSyntheticDefaultExportSymbol(child, exportedNode, filePath, symbolIdentityFilePath),
+    );
+    return;
+  }
+}
+
+export function extractSymbolsFromSource(
+  source: string,
+  filePath: string,
+  symbolIdentityFilePath: string = filePath,
+): FileSymbol[] {
   const tree = parseTypeScriptSource(filePath, source);
   const symbols: FileSymbol[] = [];
 
   collectSymbolsFromNode(tree.rootNode, source, filePath, symbols);
+  maybeCollectSyntheticDefaultExportSymbol(tree, source, symbols, filePath, symbolIdentityFilePath);
 
   return symbols;
 }
@@ -197,7 +293,7 @@ export async function listSymbolsForFile(
   }
 
   const file = await readRepositoryFile(repository, repositoryFilePath);
-  const symbols = extractSymbolsFromSource(file.content, normalizedFilePath);
+  const symbols = extractSymbolsFromSource(file.content, normalizedFilePath, repositoryFilePath);
 
   return {
     filePath: normalizedFilePath,

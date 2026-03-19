@@ -1,5 +1,6 @@
 import type Parser from 'tree-sitter';
 
+import { createSyntheticDefaultExportName } from './ids.js';
 import { parseTypeScriptSource } from '../tree-sitter.js';
 import type { IndexedSymbol } from './types.js';
 import type {
@@ -180,9 +181,40 @@ function resolveSymbolId(
   return matches.length === 1 ? matches[0].symbolId : undefined;
 }
 
+function resolveDefaultExportSymbolId(
+  symbolsByName: Map<string, IndexedSymbol[]>,
+  filePath: string,
+  localName?: string,
+): { localName?: string; symbolId?: string } {
+  const namedSymbolId = resolveSymbolId(symbolsByName, localName);
+
+  if (namedSymbolId) {
+    return {
+      localName,
+      symbolId: namedSymbolId,
+    };
+  }
+
+  const syntheticName = createSyntheticDefaultExportName(filePath);
+  const syntheticSymbolId = resolveSymbolId(symbolsByName, syntheticName);
+
+  if (!syntheticSymbolId) {
+    return {
+      localName,
+      symbolId: undefined,
+    };
+  }
+
+  return {
+    localName: localName ?? syntheticName,
+    symbolId: syntheticSymbolId,
+  };
+}
+
 function parseExportRecord(
   statementText: string,
   fileId: string,
+  filePath: string,
   symbolsByName: Map<string, IndexedSymbol[]>,
 ): ExportRecord[] {
   const normalized = normalizeStatementText(statementText);
@@ -226,17 +258,23 @@ function parseExportRecord(
   }
 
   const defaultFunctionOrClassMatch = normalized.match(
-    /^export\s+default\s+(function|class)\s+([A-Za-z_$][\w$]*)/,
+    /^export\s+default\s+(async\s+)?(function|class)\s+([A-Za-z_$][\w$]*)/,
   );
 
-  if (defaultFunctionOrClassMatch?.[2]) {
+  if (defaultFunctionOrClassMatch?.[3]) {
+    const resolvedDefault = resolveDefaultExportSymbolId(
+      symbolsByName,
+      filePath,
+      defaultFunctionOrClassMatch[3],
+    );
+
     return [
       {
         fileId,
         kind: 'default',
         exportedName: 'default',
-        localName: defaultFunctionOrClassMatch[2],
-        symbolId: resolveSymbolId(symbolsByName, defaultFunctionOrClassMatch[2]),
+        localName: resolvedDefault.localName,
+        symbolId: resolvedDefault.symbolId,
       },
     ];
   }
@@ -244,13 +282,33 @@ function parseExportRecord(
   const defaultIdentifierMatch = normalized.match(/^export\s+default\s+([A-Za-z_$][\w$]*)\s*;?$/);
 
   if (defaultIdentifierMatch?.[1]) {
+    const resolvedDefault = resolveDefaultExportSymbolId(
+      symbolsByName,
+      filePath,
+      defaultIdentifierMatch[1],
+    );
+
     return [
       {
         fileId,
         kind: 'default',
         exportedName: 'default',
-        localName: defaultIdentifierMatch[1],
-        symbolId: resolveSymbolId(symbolsByName, defaultIdentifierMatch[1]),
+        localName: resolvedDefault.localName,
+        symbolId: resolvedDefault.symbolId,
+      },
+    ];
+  }
+
+  if (/^export\s+default\b/.test(normalized)) {
+    const resolvedDefault = resolveDefaultExportSymbolId(symbolsByName, filePath);
+
+    return [
+      {
+        fileId,
+        kind: 'default',
+        exportedName: 'default',
+        localName: resolvedDefault.localName,
+        symbolId: resolvedDefault.symbolId,
       },
     ];
   }
@@ -336,7 +394,7 @@ export function extractFileMetadata(
     }
 
     if (statementText.trimStart().startsWith('export ')) {
-      exports.push(...parseExportRecord(statementText, fileId, symbolsByName));
+      exports.push(...parseExportRecord(statementText, fileId, filePath, symbolsByName));
     }
   }
 

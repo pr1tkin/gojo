@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { extractFileMetadata } from '../../src/symbol-index/file-metadata.js';
-import { createFileId, createSymbolId } from '../../src/symbol-index/ids.js';
+import {
+  createFileId,
+  createSymbolId,
+  createSyntheticDefaultExportName,
+  createSyntheticDefaultExportSymbolId,
+} from '../../src/symbol-index/ids.js';
 import type { IndexedSymbol } from '../../src/symbol-index/types.js';
 
 function createSymbol(
@@ -246,6 +251,118 @@ describe('extractFileMetadata', () => {
         exportedName: 'default',
         localName: 'DefaultComponent',
         symbolId: createSymbolId(fileId, 'function', 'DefaultComponent', 1),
+      },
+    ]);
+  });
+
+  it('extracts export default async function metadata', () => {
+    const fileId = createFileId('meta-repo', 'src/default-async-export.ts');
+    const symbols: IndexedSymbol[] = [
+      {
+        symbolId: createSymbolId(fileId, 'function', 'Page', 1),
+        fileId,
+        name: 'Page',
+        kind: 'function',
+        repo: 'meta-repo',
+        filePath: 'src/default-async-export.ts',
+        startLine: 1,
+        endLine: 3,
+        exported: true,
+        declarationFingerprint: 'function:Page:1',
+      },
+    ];
+    const relation = extractFileMetadata(
+      fileId,
+      'meta-repo',
+      'src/default-async-export.ts',
+      'source',
+      'export default async function Page(): Promise<null> { return null; }',
+      symbols,
+    );
+
+    expect(relation.exports).toEqual([
+      {
+        fileId,
+        kind: 'default',
+        exportedName: 'default',
+        localName: 'Page',
+        symbolId: createSymbolId(fileId, 'function', 'Page', 1),
+      },
+    ]);
+  });
+
+  it('maps anonymous default exports to synthetic symbol identities', () => {
+    const fileId = createFileId('meta-repo', 'src/anonymous-default.jsx');
+    const syntheticName = createSyntheticDefaultExportName('src/anonymous-default.jsx');
+    const symbols: IndexedSymbol[] = [
+      {
+        symbolId: createSyntheticDefaultExportSymbolId(fileId),
+        fileId,
+        name: syntheticName,
+        kind: 'function',
+        repo: 'meta-repo',
+        filePath: 'src/anonymous-default.jsx',
+        startLine: 1,
+        endLine: 1,
+        exported: true,
+        declarationFingerprint: `default:${syntheticName}`,
+      },
+    ];
+
+    const relation = extractFileMetadata(
+      fileId,
+      'meta-repo',
+      'src/anonymous-default.jsx',
+      'source',
+      'export default () => <div />;',
+      symbols,
+    );
+
+    expect(relation.exports).toEqual([
+      {
+        fileId,
+        kind: 'default',
+        exportedName: 'default',
+        localName: syntheticName,
+        symbolId: createSyntheticDefaultExportSymbolId(fileId),
+      },
+    ]);
+  });
+
+  it('uses a synthetic default symbol when export default targets an unresolved identifier', () => {
+    const fileId = createFileId('meta-repo', 'src/unresolved-default.ts');
+    const syntheticName = createSyntheticDefaultExportName('src/unresolved-default.ts');
+    const symbols: IndexedSymbol[] = [
+      {
+        symbolId: createSyntheticDefaultExportSymbolId(fileId),
+        fileId,
+        name: syntheticName,
+        kind: 'default_export',
+        repo: 'meta-repo',
+        filePath: 'src/unresolved-default.ts',
+        startLine: 1,
+        endLine: 1,
+        exported: true,
+        declarationFingerprint: `default:${syntheticName}`,
+      },
+    ];
+
+    const relation = extractFileMetadata(
+      fileId,
+      'meta-repo',
+      'src/unresolved-default.ts',
+      'source',
+      'export default externalValue;',
+      symbols,
+    );
+
+    expect(relation.exports).toEqual([
+      {
+        fileId,
+        kind: 'default',
+        exportedName: 'default',
+        localName: 'externalValue',
+        symbolId: createSyntheticDefaultExportSymbolId(fileId),
       },
     ]);
   });

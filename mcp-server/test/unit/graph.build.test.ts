@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildCodeGraphFromSymbolIndex } from '../../src/graph/build-graph.js';
 import { loadRepoResolutionConfigs } from '../../src/graph/repo-config.js';
-import { createFileId, createSymbolId } from '../../src/symbol-index/ids.js';
+import { createFileId, createSymbolId, createSyntheticDefaultExportSymbolId } from '../../src/symbol-index/ids.js';
 import { buildIndexedSymbols } from '../../src/symbol-index/build-index.js';
 
 async function createTempDirectory(): Promise<string> {
@@ -159,6 +159,52 @@ describe('buildCodeGraphFromSymbolIndex', () => {
     );
 
     expect(importEdges).toEqual([]);
+  });
+
+  it('creates file export edges for anonymous default exports through their synthetic symbol identity', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'default-export-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'widget.jsx'),
+      'export default () => <div />;',
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const graph = buildCodeGraphFromSymbolIndex(index);
+    const fileId = createFileId('default-export-repo', 'src/widget.jsx');
+    const symbolId = createSyntheticDefaultExportSymbolId(fileId);
+
+    expect(graph.nodes.symbols[symbolId]).toEqual(
+      expect.objectContaining({
+        nodeType: 'symbol',
+        symbolId,
+        fileId,
+        exported: true,
+      }),
+    );
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'file_defines_symbol',
+          fromId: fileId,
+          toId: symbolId,
+        }),
+        expect.objectContaining({
+          type: 'file_exports_symbol',
+          fromId: fileId,
+          toId: symbolId,
+          metadata: expect.objectContaining({
+            symbolId,
+            exportedName: 'default',
+          }),
+        }),
+      ]),
+    );
   });
 
   it('creates deterministic local reexport edges only when the target is resolvable', async () => {

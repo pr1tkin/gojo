@@ -99,7 +99,8 @@ export type SymbolKind =
   | 'interface'
   | 'typeAlias'
   | 'variable'
-  | 'method';
+  | 'method'
+  | 'default_export';
 
 export interface ListSymbolsInput {
   filePath: string;
@@ -111,6 +112,7 @@ export interface FileSymbol {
   filePath: string;
   startLine: number;
   endLine: number;
+  identityDiscriminator?: 'default';
 }
 
 export interface ListSymbolsResult {

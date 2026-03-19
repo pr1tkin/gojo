@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { listSymbolsForFile } from '../../src/symbols.js';
+import { createSyntheticDefaultExportName } from '../../src/symbol-index/ids.js';
 
 async function createTempDirectory(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'reporadar-symbols-test-'));
@@ -87,6 +88,78 @@ describe('listSymbolsForFile', () => {
 
     expect(result.symbols.find((symbol) => symbol.name === 'button')).toBeUndefined();
     expect(result.symbols.find((symbol) => symbol.name === 'span')).toBeUndefined();
+  });
+
+  it('creates a stable synthetic symbol for anonymous default function exports', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'default-js-repo');
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'factory.js'),
+      'export default () => "ok";',
+      'utf8',
+    );
+
+    const result = await listSymbolsForFile(reposRoot, 'default-js-repo/src/factory.js');
+
+    expect(result.symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: createSyntheticDefaultExportName('src/factory.js'),
+          kind: 'function',
+          filePath: 'default-js-repo/src/factory.js',
+          identityDiscriminator: 'default',
+        }),
+      ]),
+    );
+  });
+
+  it('creates a stable synthetic symbol for anonymous default class exports in JSX-capable files', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'default-jsx-repo');
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'Widget.jsx'),
+      'export default class { render() { return <div />; } }',
+      'utf8',
+    );
+
+    const result = await listSymbolsForFile(reposRoot, 'default-jsx-repo/src/Widget.jsx');
+
+    expect(result.symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: createSyntheticDefaultExportName('src/Widget.jsx'),
+          kind: 'class',
+          filePath: 'default-jsx-repo/src/Widget.jsx',
+          identityDiscriminator: 'default',
+        }),
+      ]),
+    );
+  });
+
+  it('does not duplicate named default exports with a synthetic symbol', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'named-default-repo');
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'Button.tsx'),
+      'export default function Button(): null { return null; }',
+      'utf8',
+    );
+
+    const result = await listSymbolsForFile(reposRoot, 'named-default-repo/src/Button.tsx');
+
+    expect(result.symbols.filter((symbol) => symbol.name === 'Button')).toHaveLength(1);
+    expect(
+      result.symbols.find((symbol) => symbol.name === createSyntheticDefaultExportName('src/Button.tsx')),
+    ).toBeUndefined();
   });
 
   it('extracts expected symbols from a representative TypeScript file', async () => {

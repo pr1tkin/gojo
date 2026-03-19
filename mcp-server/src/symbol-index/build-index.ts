@@ -6,7 +6,13 @@ import { extractSymbolsFromSource } from '../symbols.js';
 import { isSupportedSymbolFile } from '../tree-sitter.js';
 import { classifyFile } from './file-classification.js';
 import { extractFileMetadata } from './file-metadata.js';
-import { createDeclarationFingerprint, createFileId, createSymbolId } from './ids.js';
+import {
+  createDeclarationFingerprint,
+  createFileId,
+  createSymbolId,
+  createSyntheticDefaultExportDeclarationFingerprint,
+  createSyntheticDefaultExportSymbolId,
+} from './ids.js';
 import type { FileRelation, IndexedSymbol, SymbolFrequencyStats, SymbolIndex } from './types.js';
 
 const IGNORED_DIRECTORIES = new Set([
@@ -74,9 +80,12 @@ function mapIndexedSymbols(
     const ordinalKey = `${symbol.kind}:${symbol.name}`;
     const ordinal = (symbolOrdinals.get(ordinalKey) ?? 0) + 1;
     symbolOrdinals.set(ordinalKey, ordinal);
+    const isSyntheticDefaultExport = symbol.identityDiscriminator === 'default';
 
     return {
-      symbolId: createSymbolId(fileId, symbol.kind, symbol.name, ordinal),
+      symbolId: isSyntheticDefaultExport
+        ? createSyntheticDefaultExportSymbolId(fileId)
+        : createSymbolId(fileId, symbol.kind, symbol.name, ordinal),
       fileId,
       name: symbol.name,
       kind: symbol.kind,
@@ -85,7 +94,9 @@ function mapIndexedSymbols(
       startLine: symbol.startLine,
       endLine: symbol.endLine,
       exported: /\bexport\b/.test(lines[symbol.startLine - 1] ?? ''),
-      declarationFingerprint: createDeclarationFingerprint(symbol.kind, symbol.name, ordinal),
+      declarationFingerprint: isSyntheticDefaultExport
+        ? createSyntheticDefaultExportDeclarationFingerprint(filePath)
+        : createDeclarationFingerprint(symbol.kind, symbol.name, ordinal),
     };
   });
 }
@@ -180,7 +191,7 @@ export async function buildIndexedSymbols(reposRoot: string): Promise<SymbolInde
       const fileId = createFileId(repository.id, filePath);
       const classification = classifyFile(repository.id, filePath);
       const repoScopedFilePath = `${repository.id}/${filePath}`;
-      const symbols = extractSymbolsFromSource(source, repoScopedFilePath);
+      const symbols = extractSymbolsFromSource(source, repoScopedFilePath, filePath);
       const indexedSymbols = mapIndexedSymbols(repository.id, filePath, source, symbols);
 
       for (const symbol of indexedSymbols) {

@@ -5,7 +5,12 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildIndexedSymbols } from '../../src/symbol-index/build-index.js';
-import { createFileId, createSymbolId } from '../../src/symbol-index/ids.js';
+import {
+  createFileId,
+  createSymbolId,
+  createSyntheticDefaultExportName,
+  createSyntheticDefaultExportSymbolId,
+} from '../../src/symbol-index/ids.js';
 
 async function createTempDirectory(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'reporadar-build-index-test-'));
@@ -324,5 +329,61 @@ describe('buildIndexedSymbols', () => {
     expect(firstIndex.stats.exportedByName).toEqual({ repeat: 3 });
     expect(firstIndex.stats.byKind.function).toEqual({ repeat: 2 });
     expect(firstIndex.stats.byKind.class).toEqual({ repeat: 1 });
+  });
+
+  it('creates deterministic synthetic identities for anonymous default exports without duplicating named defaults', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'default-identity-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'anonymous.js'),
+      'export default () => "ok";',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'Named.tsx'),
+      'export default function Named(): null { return null; }',
+      'utf8',
+    );
+
+    const firstIndex = await buildIndexedSymbols(reposRoot);
+    const secondIndex = await buildIndexedSymbols(reposRoot);
+    const anonymousFileId = createFileId('default-identity-repo', 'src/anonymous.js');
+    const syntheticName = createSyntheticDefaultExportName('src/anonymous.js');
+    const anonymousSymbols = firstIndex.symbols.filter((symbol) => symbol.fileId === anonymousFileId);
+    const namedSymbols = firstIndex.symbols.filter(
+      (symbol) => symbol.fileId === createFileId('default-identity-repo', 'src/Named.tsx'),
+    );
+
+    expect(anonymousSymbols).toEqual([
+      expect.objectContaining({
+        symbolId: createSyntheticDefaultExportSymbolId(anonymousFileId),
+        fileId: anonymousFileId,
+        name: syntheticName,
+        kind: 'function',
+        declarationFingerprint: `default:${syntheticName}`,
+      }),
+    ]);
+    expect(firstIndex.byFile[anonymousFileId]).toEqual(
+      expect.objectContaining({
+        symbolIds: [createSyntheticDefaultExportSymbolId(anonymousFileId)],
+        symbolNames: [syntheticName],
+        exports: [
+          expect.objectContaining({
+            kind: 'default',
+            localName: syntheticName,
+            symbolId: createSyntheticDefaultExportSymbolId(anonymousFileId),
+          }),
+        ],
+      }),
+    );
+    expect(secondIndex.symbols).toEqual(firstIndex.symbols);
+    expect(namedSymbols.filter((symbol) => symbol.name === 'Named')).toHaveLength(1);
+    expect(
+      namedSymbols.find((symbol) => symbol.name === createSyntheticDefaultExportName('src/Named.tsx')),
+    ).toBeUndefined();
   });
 });
