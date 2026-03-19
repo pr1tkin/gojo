@@ -63,6 +63,11 @@ describe('pattern repository', () => {
       },
       supportingImports: ['react', './Button.css'],
       relatedSymbolIds: ['repo-a:src/components/Button.tsx:typeAlias:ButtonProps:1'],
+      structuralAnchor: {
+        structurallyIndexed: true,
+        resolvedLocalDependencyFileIds: ['repo-a:src/components/Button.css.ts'],
+        localDependencyFamilyTokens: ['button', 'components', 'src'],
+      },
       confidence: 'medium',
       createdAt: '2026-01-01T00:00:00.000Z',
     });
@@ -519,6 +524,9 @@ describe('pattern repository', () => {
           kind: 'component',
           name: 'Button',
           language: 'jsx',
+          structuralAnchor: expect.objectContaining({
+            structurallyIndexed: true,
+          }),
         }),
         expect.objectContaining({
           kind: 'hook',
@@ -531,6 +539,49 @@ describe('pattern repository', () => {
           language: 'js',
         }),
       ]),
+    );
+  });
+
+  it('persists resolved local dependency anchors on extracted patterns', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'pattern-anchor-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'components'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'styles'), { recursive: true });
+
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'styles', 'buttonStyles.ts'),
+      'export const buttonStyles = {};',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'components', 'Button.tsx'),
+      [
+        "import { buttonStyles } from '../styles/buttonStyles';",
+        '',
+        'export function Button() {',
+        '  return <button className={String(buttonStyles)} />;',
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const symbolIndex = await buildIndexedSymbols(reposRoot);
+    const patternIndex = await runPatternExtractionStage(reposRoot, symbolIndex);
+    const buttonPattern = patternIndex.patterns.find(
+      (pattern) => pattern.kind === 'component' && pattern.name === 'Button',
+    );
+
+    expect(buttonPattern).toEqual(
+      expect.objectContaining({
+        structuralAnchor: {
+          structurallyIndexed: true,
+          resolvedLocalDependencyFileIds: ['pattern-anchor-repo:src/styles/buttonStyles.ts'],
+          localDependencyFamilyTokens: expect.arrayContaining(['src', 'styles']),
+        },
+      }),
     );
   });
 });

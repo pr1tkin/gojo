@@ -6,6 +6,7 @@ import type {
   PatternIndex,
   PatternKind,
   PatternSignal,
+  PatternStructuralAnchor,
 } from './types.js';
 
 function comparePatterns(left: PatternCandidate, right: PatternCandidate): number {
@@ -48,6 +49,15 @@ function normalizePatternCandidate(candidate: PatternCandidate): PatternCandidat
         ? { responsibilitySignals: dedupeStrings(candidate.fingerprint.responsibilitySignals) }
         : {}),
     },
+    ...(candidate.structuralAnchor
+      ? {
+          structuralAnchor: {
+            structurallyIndexed: candidate.structuralAnchor.structurallyIndexed,
+            resolvedLocalDependencyFileIds: dedupeStrings(candidate.structuralAnchor.resolvedLocalDependencyFileIds),
+            localDependencyFamilyTokens: dedupeStrings(candidate.structuralAnchor.localDependencyFamilyTokens),
+          },
+        }
+      : {}),
     signals: [...candidate.signals].sort((left, right) => left.type.localeCompare(right.type) || left.strength.localeCompare(right.strength)),
   };
 }
@@ -65,6 +75,7 @@ export interface RegisterPatternCandidateInput {
   fingerprint: PatternFingerprint;
   supportingImports?: string[];
   relatedSymbolIds?: string[];
+  structuralAnchor?: PatternStructuralAnchor;
   confidence: PatternCandidate['confidence'];
   createdAt?: string;
 }
@@ -92,6 +103,7 @@ export function createPatternCandidate(input: RegisterPatternCandidateInput): Pa
     fingerprint: input.fingerprint,
     supportingImports: input.supportingImports ?? [],
     relatedSymbolIds: input.relatedSymbolIds ?? [],
+    ...(input.structuralAnchor ? { structuralAnchor: input.structuralAnchor } : {}),
     confidence: input.confidence,
     createdAt: input.createdAt ?? new Date(0).toISOString(),
   });

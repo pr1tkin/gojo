@@ -260,6 +260,11 @@ describe('precedent discovery service', () => {
         symbolRole: 'component',
         uiSignals: ['jsx-return', 'uses-hooks'],
       },
+      structuralAnchor: {
+        structurallyIndexed: true,
+        resolvedLocalDependencyFileIds: ['repo-a:src/components/Button.styles.ts'],
+        localDependencyFamilyTokens: ['button', 'components', 'src'],
+      },
     });
     const buttonBasePattern = makePattern({
       kind: 'component',
@@ -278,6 +283,11 @@ describe('precedent discovery service', () => {
         symbolRole: 'component',
         uiSignals: ['jsx-return'],
       },
+      structuralAnchor: {
+        structurallyIndexed: true,
+        resolvedLocalDependencyFileIds: ['repo-a:src/components/Button.styles.ts'],
+        localDependencyFamilyTokens: ['button', 'components', 'src'],
+      },
     });
     const iconButtonPattern = makePattern({
       kind: 'component',
@@ -295,6 +305,11 @@ describe('precedent discovery service', () => {
         exportShape: 'default',
         symbolRole: 'component',
         uiSignals: ['jsx-return', 'uses-hooks'],
+      },
+      structuralAnchor: {
+        structurallyIndexed: true,
+        resolvedLocalDependencyFileIds: ['repo-a:src/components/Button.styles.ts'],
+        localDependencyFamilyTokens: ['button', 'components', 'src'],
       },
     });
     const primaryButtonPattern = makePattern({
@@ -354,6 +369,9 @@ describe('precedent discovery service', () => {
       expect.objectContaining({
         symbolId: iconButtonSymbol.symbolId,
         symbolName: 'IconButton',
+        structuralAlignment: expect.objectContaining({
+          graphAnchored: true,
+        }),
       }),
     );
     expect(result.candidates[0].reasonSignals).toEqual(
@@ -496,6 +514,9 @@ describe('precedent discovery service', () => {
       expect.objectContaining({
         symbolId: iconButtonSymbol.symbolId,
         symbolName: 'IconButton',
+        structuralAlignment: expect.objectContaining({
+          structurallyIndexed: true,
+        }),
       }),
     );
   });

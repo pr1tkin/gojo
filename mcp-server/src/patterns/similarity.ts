@@ -203,6 +203,8 @@ function getSignalSets(pattern: PatternCandidate): {
   uiSignals: Set<string>;
   asyncSignals: Set<string>;
   responsibilitySignals: Set<string>;
+  resolvedLocalDependencyFileIds: Set<string>;
+  localDependencyFamilyTokens: Set<string>;
 } {
   return {
     structuralSignals: toSet(pattern.fingerprint.structuralSignals),
@@ -210,6 +212,8 @@ function getSignalSets(pattern: PatternCandidate): {
     uiSignals: toSet(pattern.fingerprint.uiSignals),
     asyncSignals: toSet(pattern.fingerprint.asyncSignals),
     responsibilitySignals: toSet(pattern.fingerprint.responsibilitySignals),
+    resolvedLocalDependencyFileIds: toSet(pattern.structuralAnchor?.resolvedLocalDependencyFileIds),
+    localDependencyFamilyTokens: toSet(pattern.structuralAnchor?.localDependencyFamilyTokens),
   };
 }
 
@@ -320,6 +324,20 @@ function computeSimilarityScoreInternal(left: PatternCandidate, right: PatternCa
     });
   }
 
+  if (leftSets.resolvedLocalDependencyFileIds.size > 0 || rightSets.resolvedLocalDependencyFileIds.size > 0) {
+    dimensions.push({
+      score: jaccardSimilarity(leftSets.resolvedLocalDependencyFileIds, rightSets.resolvedLocalDependencyFileIds),
+      weight: 0.12,
+    });
+  }
+
+  if (leftSets.localDependencyFamilyTokens.size > 0 || rightSets.localDependencyFamilyTokens.size > 0) {
+    dimensions.push({
+      score: jaccardSimilarity(leftSets.localDependencyFamilyTokens, rightSets.localDependencyFamilyTokens),
+      weight: 0.08,
+    });
+  }
+
   const totalWeight = dimensions.reduce((sum, entry) => sum + entry.weight, 0);
   let score = dimensions.reduce((sum, entry) => sum + entry.score * entry.weight, 0) / totalWeight;
 
@@ -355,6 +373,14 @@ function passesClusteringGate(
     toSet(left.fingerprint.responsibilitySignals),
     toSet(right.fingerprint.responsibilitySignals),
   );
+  const resolvedDependencyOverlap = contextualOverlap(
+    toSet(left.structuralAnchor?.resolvedLocalDependencyFileIds),
+    toSet(right.structuralAnchor?.resolvedLocalDependencyFileIds),
+  );
+  const dependencyFamilyOverlap = contextualOverlap(
+    toSet(left.structuralAnchor?.localDependencyFamilyTokens),
+    toSet(right.structuralAnchor?.localDependencyFamilyTokens),
+  );
   const nameSimilarity = NAME_AWARE_PATTERN_KINDS.has(left.kind)
     ? computeSymbolNameSimilarity(left.name, right.name)
     : 0;
@@ -386,6 +412,8 @@ function passesClusteringGate(
 
   return (
     importOverlap >= 0.35 ||
+    resolvedDependencyOverlap > 0 ||
+    dependencyFamilyOverlap >= 0.34 ||
     uiOverlap > 0 ||
     asyncOverlap > 0 ||
     responsibilityOverlap > 0 ||

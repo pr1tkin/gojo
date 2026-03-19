@@ -80,6 +80,13 @@ describe('search_patterns tool', () => {
         symbol: null,
         definedSymbols: [{ name: 'Button', kind: 'function' }],
         exportedSymbols: [{ name: 'Button', kind: 'function' }],
+        structuralAlignment: {
+          structurallyIndexed: true,
+          graphAnchored: true,
+          structuralContextStrength: 'medium',
+          resolvedLocalDependencies: ['components/Button.styles.ts'],
+          relatedLocalFiles: [],
+        },
       },
       patternMatches: [
         {
@@ -90,6 +97,13 @@ describe('search_patterns tool', () => {
           definedSymbols: [{ name: 'IconButton', kind: 'function' }],
           exportedSymbols: [{ name: 'Button', kind: 'function' }],
           bundle: { familyStem: 'IconButton', siblingFiles: ['components/IconButton.tsx'] },
+          structuralAlignment: {
+            structurallyIndexed: true,
+            graphAnchored: true,
+            structuralContextStrength: 'medium',
+            resolvedLocalDependencies: ['components/Button.styles.ts'],
+            relatedLocalFiles: [],
+          },
         },
       ],
       resolution: {
@@ -103,6 +117,7 @@ describe('search_patterns tool', () => {
       summary: {
         matchCount: 1,
         strongMatchCount: 1,
+        graphAnchoredMatchCount: 1,
       },
     });
 
@@ -148,6 +163,7 @@ describe('search_patterns tool', () => {
         summary: {
           matchCount: 1,
           strongMatchCount: 1,
+          graphAnchoredMatchCount: 1,
         },
       }),
     );
@@ -163,6 +179,7 @@ describe('search_patterns tool', () => {
         symbol: null,
         definedSymbols: [],
         exportedSymbols: [],
+        structuralAlignment: null,
       },
       patternMatches: [],
       resolution: {
@@ -176,6 +193,7 @@ describe('search_patterns tool', () => {
       summary: {
         matchCount: 0,
         strongMatchCount: 0,
+        graphAnchoredMatchCount: 0,
       },
     });
 
@@ -201,6 +219,7 @@ describe('search_patterns tool', () => {
         symbol: null,
         definedSymbols: [],
         exportedSymbols: [],
+        structuralAlignment: null,
       },
       patternMatches: [],
       resolution: {
@@ -214,6 +233,7 @@ describe('search_patterns tool', () => {
       summary: {
         matchCount: 0,
         strongMatchCount: 0,
+        graphAnchoredMatchCount: 0,
       },
     });
 

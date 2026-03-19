@@ -1,5 +1,6 @@
 import { loadCodeGraph } from '../graph/store.js';
 import { loadPatternIndex, PatternSimilarityService } from '../patterns/index.js';
+import { mapPatternStructuralAlignment, type PatternStructuralAlignment } from '../patterns/structural-alignment.js';
 import type { PatternCandidate, PatternKind, SimilarPatternMatch } from '../patterns/types.js';
 import { loadRequiredSymbolIndex } from '../symbol-index/store.js';
 import type { IndexedSymbol, SymbolIndex } from '../symbol-index/types.js';
@@ -35,6 +36,7 @@ interface EnrichedPatternCandidate {
   usageFrequency: number;
   importerCount: number;
   reexporterCount: number;
+  structuralAlignment: PatternStructuralAlignment;
 }
 
 interface AggregateCandidate {
@@ -187,6 +189,7 @@ export class PrecedentDiscoveryService {
   private readonly importCountsByFileId: Map<string, number>;
   private readonly reexportCountsByFileId: Map<string, number>;
   private readonly similarityService: PatternSimilarityService;
+  private readonly relatedFileIdsByFileId: Map<string, string[]>;
 
   constructor(
     private readonly patternIndex: Awaited<ReturnType<typeof loadPatternIndex>>,
@@ -197,6 +200,7 @@ export class PrecedentDiscoveryService {
     this.symbolById = new Map(symbolIndex.symbols.map((symbol) => [symbol.symbolId, symbol]));
     this.importCountsByFileId = new Map();
     this.reexportCountsByFileId = new Map();
+    this.relatedFileIdsByFileId = new Map();
     this.similarityService = new PatternSimilarityService(patternIndex);
     this.buildGraphCounts();
   }
@@ -205,12 +209,29 @@ export class PrecedentDiscoveryService {
     for (const edge of this.graph.edges) {
       if (edge.type === 'file_imports_file') {
         this.importCountsByFileId.set(edge.toId, (this.importCountsByFileId.get(edge.toId) ?? 0) + 1);
+        this.recordRelatedFile(edge.fromId, edge.toId);
       }
 
       if (edge.type === 'file_reexports_file') {
         this.reexportCountsByFileId.set(edge.toId, (this.reexportCountsByFileId.get(edge.toId) ?? 0) + 1);
+        this.recordRelatedFile(edge.fromId, edge.toId);
       }
     }
+  }
+
+  private recordRelatedFile(fromId: string, toId: string): void {
+    const record = (fileId: string, relatedFileId: string) => {
+      const existing = this.relatedFileIdsByFileId.get(fileId) ?? [];
+
+      if (!existing.includes(relatedFileId)) {
+        existing.push(relatedFileId);
+        existing.sort((left, right) => left.localeCompare(right));
+        this.relatedFileIdsByFileId.set(fileId, existing);
+      }
+    };
+
+    record(fromId, toId);
+    record(toId, fromId);
   }
 
   private getPatternsForSymbol(symbolId: string): PatternCandidate[] {
@@ -234,6 +255,12 @@ export class PrecedentDiscoveryService {
       0;
     const importerCount = this.importCountsByFileId.get(pattern.fileId) ?? 0;
     const reexporterCount = this.reexportCountsByFileId.get(pattern.fileId) ?? 0;
+    const structuralAlignment = mapPatternStructuralAlignment({
+      structurallyIndexed: pattern.structuralAnchor?.structurallyIndexed ?? true,
+      resolvedLocalDependencyFileIds: pattern.structuralAnchor?.resolvedLocalDependencyFileIds ?? [],
+      relatedLocalFileIds: this.relatedFileIdsByFileId.get(pattern.fileId) ?? [],
+      filesById: this.symbolIndex.byFile,
+    });
 
     return {
       pattern,
@@ -242,6 +269,7 @@ export class PrecedentDiscoveryService {
       usageFrequency,
       importerCount,
       reexporterCount,
+      structuralAlignment,
     };
   }
 
@@ -259,6 +287,15 @@ export class PrecedentDiscoveryService {
 
     if (jaccard(target.fingerprint.importSet, candidate.pattern.fingerprint.importSet) > 0) {
       reasons.push('shared-imports');
+    }
+
+    if (
+      jaccard(
+        target.structuralAnchor?.resolvedLocalDependencyFileIds ?? [],
+        candidate.pattern.structuralAnchor?.resolvedLocalDependencyFileIds ?? [],
+      ) > 0
+    ) {
+      reasons.push('shared-local-dependencies');
     }
 
     if (computeResponsibilityOverlap(target, candidate.pattern) > 0) {
@@ -285,6 +322,10 @@ export class PrecedentDiscoveryService {
       reasons.push('frequent-usage');
     }
 
+    if (candidate.structuralAlignment.graphAnchored) {
+      reasons.push('graph-anchored');
+    }
+
     if (match.similarityScore >= 0.85) {
       reasons.push('high-structural-similarity');
     }
@@ -305,6 +346,10 @@ export class PrecedentDiscoveryService {
   ): number {
     const pathSimilarity = computePathSimilarity(target.fileId, candidate.pattern.fileId);
     const responsibilityOverlap = computeResponsibilityOverlap(target, candidate.pattern);
+    const localDependencyOverlap = jaccard(
+      target.structuralAnchor?.resolvedLocalDependencyFileIds ?? [],
+      candidate.pattern.structuralAnchor?.resolvedLocalDependencyFileIds ?? [],
+    );
     const graphReach = candidate.importerCount + candidate.reexporterCount;
     let score = match.similarityScore * 0.82;
 
@@ -323,6 +368,12 @@ export class PrecedentDiscoveryService {
     if (graphReach > 0) {
       score += Math.min(0.04, graphReach * 0.01);
     }
+
+    if (candidate.structuralAlignment.graphAnchored) {
+      score += candidate.structuralAlignment.structuralContextStrength === 'high' ? 0.04 : 0.02;
+    }
+
+    score += Math.min(0.05, localDependencyOverlap * 0.05);
 
     score += pathSimilarity * 0.04;
     score += Math.min(0.05, responsibilityOverlap * 0.05);
@@ -364,6 +415,7 @@ export class PrecedentDiscoveryService {
           similarityScore: match.similarityScore,
           precedentScore,
           reasonSignals,
+          structuralAlignment: enriched.structuralAlignment,
         },
       });
     }

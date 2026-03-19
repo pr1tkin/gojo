@@ -1,4 +1,5 @@
 import type { PatternKind } from '../patterns/types.js';
+import type { PatternStructuralAlignment } from '../patterns/structural-alignment.js';
 
 export interface FindPrecedentsInput {
   symbolId?: string;
@@ -28,6 +29,7 @@ export interface PrecedentCandidate {
   similarityScore: number;
   precedentScore: number;
   reasonSignals: string[];
+  structuralAlignment: PatternStructuralAlignment;
 }
 
 export interface PrecedentDiscoveryResult {

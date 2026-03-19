@@ -49,6 +49,12 @@ export interface PatternFingerprint {
   responsibilitySignals?: string[];
 }
 
+export interface PatternStructuralAnchor {
+  structurallyIndexed: boolean;
+  resolvedLocalDependencyFileIds: string[];
+  localDependencyFamilyTokens: string[];
+}
+
 export interface PatternCandidate {
   patternId: string;
   kind: PatternKind;
@@ -63,6 +69,7 @@ export interface PatternCandidate {
   fingerprint: PatternFingerprint;
   supportingImports: string[];
   relatedSymbolIds: string[];
+  structuralAnchor?: PatternStructuralAnchor;
   confidence: 'high' | 'medium' | 'low';
   createdAt: string;
 }

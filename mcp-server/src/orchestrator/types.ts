@@ -1,5 +1,6 @@
 import type { FileContextBundle, RankedFileContextItem, SymbolContextBundle } from '../context/index.js';
 import type { FileNode, SymbolNode } from '../graph/types.js';
+import type { PatternStructuralAlignment } from '../patterns/structural-alignment.js';
 import type { RankedSymbolCandidate } from '../ranking/index.js';
 import type { RankingReason } from '../ranking/index.js';
 import type { IndexedSymbol } from '../symbol-index/types.js';
@@ -61,6 +62,7 @@ export interface PatternMatchItem {
     familyStem: string;
     siblingFiles: string[];
   };
+  structuralAlignment: PatternStructuralAlignment;
 }
 
 export interface PatternTargetSummary {
@@ -68,6 +70,7 @@ export interface PatternTargetSummary {
   symbol: IndexedSymbol | null;
   definedSymbols: Array<{ name: string; kind: SymbolKind }>;
   exportedSymbols: Array<{ name: string; kind: SymbolKind }>;
+  structuralAlignment: PatternStructuralAlignment | null;
 }
 
 export interface PatternResolutionSummary {
@@ -111,6 +114,7 @@ export interface PatternMatchContext {
   summary: {
     matchCount: number;
     strongMatchCount: number;
+    graphAnchoredMatchCount: number;
   };
 }
 

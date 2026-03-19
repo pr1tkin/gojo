@@ -11,6 +11,7 @@ import {
   createPatternCandidate,
   registerPatternCandidateInIndex,
 } from './repository.js';
+import { buildPatternStructuralAnchor } from './structural-alignment.js';
 import type {
   PatternCandidate,
   PatternFingerprint,
@@ -1059,11 +1060,13 @@ function collectPatternsForFile(
   relation: FileRelation,
   source: string,
   symbols: IndexedSymbol[],
+  filesById: Record<string, FileRelation>,
 ): PatternCandidate[] {
   const tree = parseTypeScriptSource(relation.filePath, source);
   const matches = gatherSymbolNodeMatches(tree, source, symbols);
   const candidates: PatternCandidate[] = [];
   const seen = new Set<string>();
+  const structuralAnchor = buildPatternStructuralAnchor(relation, filesById);
 
   function pushCandidate(candidate: PatternCandidate | null): void {
     if (!candidate) {
@@ -1077,7 +1080,10 @@ function collectPatternsForFile(
     }
 
     seen.add(dedupeKey);
-    candidates.push(candidate);
+    candidates.push({
+      ...candidate,
+      structuralAnchor,
+    });
   }
 
   for (const match of matches) {
@@ -1121,7 +1127,7 @@ export async function buildPatternIndex(reposRoot: string, index: SymbolIndex): 
 
     const file = await readRepositoryFile(repository, relation.filePath);
     const symbols = index.symbols.filter((entry) => entry.fileId === relation.fileId);
-    const candidates = collectPatternsForFile(relation, file.content, symbols);
+    const candidates = collectPatternsForFile(relation, file.content, symbols, index.byFile);
 
     for (const candidate of candidates) {
       patternIndex = registerPatternCandidateInIndex(patternIndex, candidate);

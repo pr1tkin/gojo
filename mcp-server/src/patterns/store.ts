@@ -13,6 +13,7 @@ import {
   type PatternFingerprint,
   type PatternIndex,
   type PatternSignal,
+  type PatternStructuralAnchor,
 } from './types.js';
 
 export interface PatternIndexLoadResult {
@@ -81,6 +82,15 @@ function isPatternFingerprint(value: unknown): value is PatternFingerprint {
   );
 }
 
+function isPatternStructuralAnchor(value: unknown): value is PatternStructuralAnchor {
+  return (
+    isObject(value) &&
+    typeof value.structurallyIndexed === 'boolean' &&
+    isStringArray(value.resolvedLocalDependencyFileIds) &&
+    isStringArray(value.localDependencyFamilyTokens)
+  );
+}
+
 function isPatternCandidate(value: unknown): value is PatternCandidate {
   return (
     isObject(value) &&
@@ -104,6 +114,7 @@ function isPatternCandidate(value: unknown): value is PatternCandidate {
     isPatternFingerprint(value.fingerprint) &&
     isStringArray(value.supportingImports) &&
     isStringArray(value.relatedSymbolIds) &&
+    (value.structuralAnchor === undefined || isPatternStructuralAnchor(value.structuralAnchor)) &&
     (value.confidence === 'high' || value.confidence === 'medium' || value.confidence === 'low') &&
     typeof value.createdAt === 'string'
   );

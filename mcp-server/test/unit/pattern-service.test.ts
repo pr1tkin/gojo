@@ -100,6 +100,43 @@ const candidateStrong = {
     },
   ],
   importTokens: ['Button.styles', 'clsx'],
+  structuralAnchor: {
+    structurallyIndexed: true,
+    resolvedLocalDependencyFileIds: ['repo-a:src/components/Button.styles.ts'],
+    localDependencyFamilyTokens: ['components', 'button', 'styles', 'src'],
+  },
+};
+
+const candidatePeer = {
+  fileId: 'repo-a:src/components/ButtonShell.tsx',
+  repo: 'repo-a',
+  filePath: 'src/components/ButtonShell.tsx',
+  classification: 'source',
+  symbolIds: ['button-shell-symbol'],
+  symbolNames: ['ButtonShell', 'ButtonProps'],
+  imports: [
+    {
+      fileId: 'repo-a:src/components/ButtonShell.tsx',
+      source: './Button.styles',
+      bindings: [],
+      resolvedKind: 'local-file',
+    },
+  ],
+  exports: [
+    {
+      fileId: 'repo-a:src/components/ButtonShell.tsx',
+      kind: 'named',
+      exportedName: 'Button',
+      localName: 'ButtonShell',
+      symbolId: 'button-shell-symbol',
+    },
+  ],
+  importTokens: ['Button.styles', 'clsx'],
+  structuralAnchor: {
+    structurallyIndexed: true,
+    resolvedLocalDependencyFileIds: [],
+    localDependencyFamilyTokens: [],
+  },
 };
 
 const candidateWeak = {
@@ -120,6 +157,11 @@ const candidateWeak = {
     },
   ],
   importTokens: ['react'],
+  structuralAnchor: {
+    structurallyIndexed: true,
+    resolvedLocalDependencyFileIds: [],
+    localDependencyFamilyTokens: [],
+  },
 };
 
 const otherRepoCandidate = {
@@ -140,6 +182,11 @@ const otherRepoCandidate = {
     },
   ],
   importTokens: ['react'],
+  structuralAnchor: {
+    structurallyIndexed: true,
+    resolvedLocalDependencyFileIds: [],
+    localDependencyFamilyTokens: [],
+  },
 };
 
 function fileNode(fileId: string, repoId: string, filePath: string) {
@@ -171,12 +218,12 @@ describe('pattern orchestrator service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    listFileRelationsMock.mockResolvedValue([targetRelation, candidateStrong, candidateWeak, otherRepoCandidate]);
+    listFileRelationsMock.mockResolvedValue([targetRelation, candidateStrong, candidatePeer, candidateWeak, otherRepoCandidate]);
     getFileRelationByIdMock.mockImplementation(async (fileId: string) => {
-      return [targetRelation, candidateStrong, candidateWeak, otherRepoCandidate].find((entry) => entry.fileId === fileId) ?? null;
+      return [targetRelation, candidateStrong, candidatePeer, candidateWeak, otherRepoCandidate].find((entry) => entry.fileId === fileId) ?? null;
     });
     getFileRelationMock.mockImplementation(async (filePath: string, repo?: string) => {
-      const match = [targetRelation, candidateStrong, candidateWeak, otherRepoCandidate].find(
+      const match = [targetRelation, candidateStrong, candidatePeer, candidateWeak, otherRepoCandidate].find(
         (entry) => entry.filePath === filePath && (!repo || entry.repo === repo),
       );
 
@@ -187,7 +234,7 @@ describe('pattern orchestrator service', () => {
       return match;
     });
     getFileNodeMock.mockImplementation(async (fileId: string) => {
-      const match = [targetRelation, candidateStrong, candidateWeak, otherRepoCandidate].find((entry) => entry.fileId === fileId);
+      const match = [targetRelation, candidateStrong, candidatePeer, candidateWeak, otherRepoCandidate].find((entry) => entry.fileId === fileId);
       return match ? fileNode(match.fileId, match.repo, match.filePath) : null;
     });
     getDefinedSymbolsMock.mockImplementation(async (fileId: string) => {
@@ -197,6 +244,10 @@ describe('pattern orchestrator service', () => {
 
       if (fileId === candidateStrong.fileId) {
         return [symbolNode('icon-button-symbol', candidateStrong.fileId, 'repo-a', candidateStrong.filePath, 'IconButton')];
+      }
+
+      if (fileId === candidatePeer.fileId) {
+        return [symbolNode('button-shell-symbol', candidatePeer.fileId, 'repo-a', candidatePeer.filePath, 'ButtonShell')];
       }
 
       if (fileId === candidateWeak.fileId) {
@@ -212,6 +263,10 @@ describe('pattern orchestrator service', () => {
 
       if (fileId === candidateStrong.fileId) {
         return [symbolNode('icon-button-symbol', candidateStrong.fileId, 'repo-a', candidateStrong.filePath, 'Button')];
+      }
+
+      if (fileId === candidatePeer.fileId) {
+        return [symbolNode('button-shell-symbol', candidatePeer.fileId, 'repo-a', candidatePeer.filePath, 'Button')];
       }
 
       if (fileId === candidateWeak.fileId) {
@@ -235,6 +290,16 @@ describe('pattern orchestrator service', () => {
                 via: ['file_imports_file'],
               },
             ]
+          : fileId === candidateStrong.fileId
+            ? [
+                {
+                  file: fileNode('repo-a:src/components/Button.styles.ts', 'repo-a', 'src/components/Button.styles.ts'),
+                  score: 14,
+                  reason: 'direct import',
+                  reasons: [{ signal: 'graph_connection', value: 7 }],
+                  via: ['file_imports_file'],
+                },
+              ]
           : [],
       neighboringFiles: [],
       definedSymbols: [],
@@ -325,17 +390,38 @@ describe('pattern orchestrator service', () => {
     expect(result.patternMatches[0]).toEqual(
       expect.objectContaining({
         file: expect.objectContaining({ fileId: candidateStrong.fileId }),
-        reason: 'similar export surface',
+        reason: 'shared local dependency anchors',
+        structuralAlignment: expect.objectContaining({
+          graphAnchored: true,
+          structuralContextStrength: 'high',
+          resolvedLocalDependencies: ['src/components/Button.styles.ts'],
+        }),
       }),
     );
     expect(result.patternMatches[0].reasons).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ signal: 'same_repo' }),
         expect.objectContaining({ signal: 'path_closeness' }),
-        expect.objectContaining({ signal: 'shared_export_names' }),
+        expect.objectContaining({ signal: 'shared_local_dependencies' }),
       ]),
     );
     expect(result.patternMatches[0].score).toBeGreaterThan(result.patternMatches[1].score);
+    expect(result.patternMatches[1]).toEqual(
+      expect.objectContaining({
+        file: expect.objectContaining({ fileId: candidatePeer.fileId }),
+        structuralAlignment: expect.objectContaining({
+          graphAnchored: false,
+          structuralContextStrength: 'low',
+        }),
+      }),
+    );
+    expect(result.primaryTarget.structuralAlignment).toEqual(
+      expect.objectContaining({
+        graphAnchored: true,
+        structuralContextStrength: 'high',
+      }),
+    );
+    expect(result.summary.graphAnchoredMatchCount).toBe(1);
   });
 
   it('applies repo filtering to keep pattern matches in the requested repository', async () => {
@@ -359,6 +445,7 @@ describe('pattern orchestrator service', () => {
         symbol: null,
         definedSymbols: [],
         exportedSymbols: [],
+        structuralAlignment: null,
       },
       patternMatches: [],
       resolution: {
@@ -372,6 +459,7 @@ describe('pattern orchestrator service', () => {
       summary: {
         matchCount: 0,
         strongMatchCount: 0,
+        graphAnchoredMatchCount: 0,
       },
     });
   });

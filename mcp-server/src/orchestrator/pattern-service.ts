@@ -3,6 +3,12 @@ import path from 'node:path';
 import { computePathCloseness, countIntersection, createReason } from '../ranking/scoring.js';
 import type { RankingReason } from '../ranking/index.js';
 import { getDefinedSymbols, getExportedSymbols, getFileNode } from '../graph/query.js';
+import {
+  getLocalDependencyFamilyTokens,
+  mapPatternStructuralAlignment,
+  mapRelatedFileIds,
+  type PatternStructuralAlignment,
+} from '../patterns/structural-alignment.js';
 import { getFileRelation, getFileRelationById, listFileRelations } from '../symbol-index/query.js';
 import type { FileRelation } from '../symbol-index/types.js';
 import type { SearchPatternsMode, SymbolKind } from '../types.js';
@@ -29,6 +35,9 @@ interface FilePatternProfile {
   bundleStem: string;
   bundleSuffixes: string[];
   relatedFileIds: string[];
+  resolvedLocalDependencyFileIds: string[];
+  localDependencyFamilyTokens: string[];
+  structuralAlignment: PatternStructuralAlignment;
 }
 
 interface CandidateScore {
@@ -159,6 +168,17 @@ async function loadTargetProfile(fileId: string, allRelations: FileRelation[]): 
   if (!relation || !file) {
     return null;
   }
+  const filesById = Object.fromEntries(allRelations.map((entry) => [entry.fileId, entry]));
+  const resolvedLocalDependencyFileIds = relation.imports
+    .map((entry) => entry.resolvedTargetFileId)
+    .filter((value): value is string => Boolean(value));
+
+  const structuralAlignment = mapPatternStructuralAlignment({
+    structurallyIndexed: relation.classification === 'source',
+    resolvedLocalDependencyFileIds,
+    relatedLocalFileIds: mapRelatedFileIds(fileContext.relatedFiles),
+    filesById,
+  });
 
   return {
     relation,
@@ -173,10 +193,17 @@ async function loadTargetProfile(fileId: string, allRelations: FileRelation[]): 
     bundleStem: getBundleStem(relation.filePath),
     bundleSuffixes: collectBundleSuffixes(relation, allRelations),
     relatedFileIds: dedupe(fileContext.relatedFiles.map((entry) => entry.file.fileId)),
+    resolvedLocalDependencyFileIds,
+    localDependencyFamilyTokens: getLocalDependencyFamilyTokens(resolvedLocalDependencyFileIds, filesById),
+    structuralAlignment,
   };
 }
 
 function determineReason(reasons: RankingReason[]): string {
+  if (reasons.some((reason) => reason.signal === 'shared_local_dependencies')) {
+    return 'shared local dependency anchors';
+  }
+
   if (reasons.some((reason) => reason.signal === 'shared_export_names')) {
     return 'similar export surface';
   }
@@ -207,6 +234,7 @@ function determineReason(reasons: RankingReason[]): string {
 function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, allRelations: FileRelation[]): CandidateScore | null {
   const reasons: RankingReason[] = [];
   let score = 0;
+  const filesById = Object.fromEntries(allRelations.map((relation) => [relation.fileId, relation]));
   const candidateExportNames = dedupe(candidate.exports.map((entry) => entry.exportedName).filter((value): value is string => Boolean(value)));
   const targetExportNames = profile.exportedSymbols.map((symbol) => symbol.name);
   const sharedExportNames = countIntersection(targetExportNames, candidateExportNames);
@@ -221,6 +249,21 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
   const bundleOverlap = countIntersection(profile.bundleSuffixes, candidateBundleSuffixes);
   const candidateRelatedFileIds = dedupe(candidate.imports.map((entry) => entry.resolvedTargetFileId).filter((value): value is string => Boolean(value)));
   const sharedRelatedFiles = countIntersection(profile.relatedFileIds, candidateRelatedFileIds);
+  const candidateResolvedLocalDependencyFileIds = candidate.imports
+    .map((entry) => entry.resolvedTargetFileId)
+    .filter((value): value is string => Boolean(value));
+  const sharedLocalDependencies = countIntersection(
+    profile.resolvedLocalDependencyFileIds,
+    candidateResolvedLocalDependencyFileIds,
+  );
+  const candidateDependencyFamilyTokens = getLocalDependencyFamilyTokens(
+    candidateResolvedLocalDependencyFileIds,
+    filesById,
+  );
+  const sharedDependencyFamilies = countIntersection(
+    profile.localDependencyFamilyTokens,
+    candidateDependencyFamilyTokens,
+  );
   const sameRepo = candidate.repo === profile.relation.repo ? 1 : 0;
   const sameBundleStem = getBundleStem(candidate.filePath) === profile.bundleStem ? 1 : 0;
 
@@ -276,6 +319,18 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
     reasons.push(createReason('shared_related_files', value));
   }
 
+  if (sharedLocalDependencies > 0) {
+    const value = sharedLocalDependencies * 4;
+    score += value;
+    reasons.push(createReason('shared_local_dependencies', value));
+  }
+
+  if (sharedDependencyFamilies > 0) {
+    const value = Math.min(sharedDependencyFamilies * 2, 4);
+    score += value;
+    reasons.push(createReason('shared_dependency_families', value));
+  }
+
   if (score === 0) {
     return null;
   }
@@ -289,15 +344,18 @@ function scoreCandidate(profile: FilePatternProfile, candidate: FileRelation, al
 }
 
 async function hydratePatternMatch(entry: CandidateScore, allRelations: FileRelation[]): Promise<PatternMatchItem | null> {
-  const [file, definedSymbols, exportedSymbols] = await Promise.all([
+  const [file, definedSymbols, exportedSymbols, fileContext] = await Promise.all([
     getFileNode(entry.relation.fileId),
     getDefinedSymbols(entry.relation.fileId),
     getExportedSymbols(entry.relation.fileId),
+    getFileExplorationContext(entry.relation.fileId, { relatedLimit: 20 }),
   ]);
 
   if (!file) {
     return null;
   }
+
+  const filesById = Object.fromEntries(allRelations.map((relation) => [relation.fileId, relation]));
 
   return {
     file,
@@ -315,6 +373,14 @@ async function hydratePatternMatch(entry: CandidateScore, allRelations: FileRela
         .map((relation) => relation.filePath)
         .sort(),
     },
+    structuralAlignment: mapPatternStructuralAlignment({
+      structurallyIndexed: entry.relation.classification === 'source',
+      resolvedLocalDependencyFileIds: entry.relation.imports
+        .map((candidate) => candidate.resolvedTargetFileId)
+        .filter((value): value is string => Boolean(value)),
+      relatedLocalFileIds: mapRelatedFileIds(fileContext.relatedFiles),
+      filesById,
+    }),
   };
 }
 
@@ -335,12 +401,14 @@ async function buildPatternContextFromProfile(
         symbol: null,
         definedSymbols: [],
         exportedSymbols: [],
+        structuralAlignment: null,
       },
       patternMatches: [],
       resolution,
       summary: {
         matchCount: 0,
         strongMatchCount: 0,
+        graphAnchoredMatchCount: 0,
       },
     };
   }
@@ -378,12 +446,14 @@ async function buildPatternContextFromProfile(
         : null,
       definedSymbols: profile.definedSymbols,
       exportedSymbols: profile.exportedSymbols,
+      structuralAlignment: profile.structuralAlignment,
     },
     patternMatches,
     resolution,
     summary: {
       matchCount: patternMatches.length,
       strongMatchCount: patternMatches.filter((entry) => entry.score >= STRONG_MATCH_THRESHOLD).length,
+      graphAnchoredMatchCount: patternMatches.filter((entry) => entry.structuralAlignment.graphAnchored).length,
     },
   };
 }

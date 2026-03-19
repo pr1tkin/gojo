@@ -248,6 +248,7 @@ describe('trust metadata', () => {
         symbol: null,
         definedSymbols: [],
         exportedSymbols: [],
+        structuralAlignment: null,
       },
       patternMatches: [],
       resolution: {
@@ -261,6 +262,7 @@ describe('trust metadata', () => {
       summary: {
         matchCount: 0,
         strongMatchCount: 0,
+        graphAnchoredMatchCount: 0,
       },
     });
 
