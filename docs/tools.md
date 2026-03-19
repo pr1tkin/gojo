@@ -1,115 +1,85 @@
-# Tools
+# 🧰 Tools
 
-## Overview
+> The tool surface is intentionally **small**.
 
-Gojo now exposes two tool classes:
+---
 
-1. public core tools
-2. internal or advanced tools
+## 🎯 Core Tools (Public)
 
-The MCP server registers only the public core tools by default.
+### explore_component
+Understand structure, dependencies, role.
 
-Internal tools are available only when the server is started with:
+### find_precedents
+Find best implementation examples.
+
+### collect_refactor_context
+Understand impact.
+
+### plan_change
+Generate safe changes.
+
+---
+
+## 🧠 Why only these?
+
+They already combine:
+
+- search
+- graph
+- ranking
+- trust
+
+---
+
+## 🔒 Internal Tools
+
+Hidden behind:
 
 ```bash
 GOJO_INCLUDE_INTERNAL_TOOLS=true
 ```
 
-That separation is enforced at registration time, not just documented.
+Includes:
 
-## Public Core Tools
+- search_code
+- open_file
+- list_symbols
+- find_symbol
+- find_references
+- find_related_files
+- analyze_symbol
+- search_patterns
 
-These are the recommended agent entry points.
+---
 
-### `explore_component`
+## ⚙️ Response Design
 
-Purpose:
+- small outputs
+- shared context
+- trust signals
+- short reasoning
 
-- understand the structure and context of a component, file, or symbol
+---
 
-Use it for:
+## 🧭 Recommended Flow
 
-- first-pass understanding
-- UI context
-- related file discovery
+```text
+explore_component
+→ find_precedents
+→ collect_refactor_context
+→ plan_change
+```
 
-### `find_precedents`
+---
 
-Purpose:
+## 🧪 Debug Strategy
 
-- find the strongest reusable implementation precedents
+1. try debug mode
+2. inspect reasoning
+3. use internal tools only if needed
 
-Use it for:
+---
 
-- implementation lookup
-- family discovery
-- precedent-guided edits
+## 🎯 Principle
 
-### `collect_refactor_context`
-
-Purpose:
-
-- assemble bounded impact context before a change
-
-Use it for:
-
-- importer and dependency context
-- neighboring runtime files
-- refactor preparation
-
-### `plan_change`
-
-Purpose:
-
-- generate a conservative edit and review plan
-
-Use it for:
-
-- change scoping
-- risk-aware sequencing
-- edit and review order
-
-## Internal And Advanced Tools
-
-These tools remain supported, but they are not part of the default agent tool
-surface:
-
-- `search_code`
-- `open_file`
-- `list_symbols`
-- `find_symbol`
-- `find_references`
-- `find_related_files`
-- `analyze_symbol`
-- `search_patterns`
-
-When exposed through `GOJO_INCLUDE_INTERNAL_TOOLS=true`, their tool metadata is
-prefixed with:
-
-- `[INTERNAL] Not intended for direct agent use`
-
-They are intended for:
-
-- debugging
-- product evaluation
-- expert workflows
-- low-level inspection when the core tools are not enough
-
-## Recommended Workflow
-
-A normal workflow should stay inside the public surface:
-
-1. `explore_component`
-2. `find_precedents`
-3. `collect_refactor_context`
-4. `plan_change`
-
-This keeps the agent on top of Gojo's strongest abstractions instead of
-manually orchestrating low-level primitives.
-
-## Deprecation Guidance
-
-Low-level tools are still supported.
-
-They are not removed, but they are no longer the recommended interface for
-standard agent workflows.
+> Fewer tools → better agents.

@@ -1,51 +1,196 @@
-# Gojo
+# 👁️ Gojo
 
-Gojo is an agent-first code intelligence engine that helps you understand,
-navigate, and modify complex codebases.
+> Throughout heaven and earth, I alone see everything.
 
-It combines repository search, structural indexing, graph reasoning, pattern
-intelligence, and planning into a single local-first system designed for coding
-agents.
+![License](https://img.shields.io/badge/license-MIT-blue)
+![Local-first](https://img.shields.io/badge/local--first-yes-green)
+![Agent-first](https://img.shields.io/badge/agent--first-yes-purple)
+![MCP](https://img.shields.io/badge/MCP-ready-black)
 
-## What Is Gojo?
+Gojo is a **local-first, agent-first code intelligence engine** that gives developers and AI agents **real visibility into complex codebases**.
 
-Gojo is built around a small public tool surface.
+It doesn’t just show you code.
 
-Agents should start with high-level workflow tools that reflect Gojo's actual
-strengths:
+It shows you:
 
-- understand a component or file
-- find reusable implementation precedents
-- collect bounded refactor context
-- plan a safe change
+- what matters
+- how things connect
+- what will break if you change something
 
-Low-level search and symbol tools still exist, but they are now treated as
-internal or advanced tools rather than the default agent interface.
+> You’re not debugging anymore — you’re seeing.
 
-## Core Capabilities
+---
 
-- Understand components, files, and their surrounding structure
-- Find strong local precedents for implementation reuse
-- Analyze impact and nearby context before a refactor
-- Plan safe, ordered changes with explicit risk signals
+## ⚡ Above the Fold
 
-## Core Agent Tools
+**Gojo helps coding agents answer the questions that matter before they write code:**
 
-- `explore_component`
-  - Understand structure, UI context, and role
-- `find_precedents`
-  - See how similar components, pages, hooks, or stores are implemented
-- `collect_refactor_context`
-  - Understand impact and surrounding code before a change
-- `plan_change`
-  - Generate a conservative edit and review plan
+- **What is this thing?** → `explore_component`
+- **How has something like this already been built?** → `find_precedents`
+- **What else is affected if I touch it?** → `collect_refactor_context`
+- **What is the safest way to change it?** → `plan_change`
 
-These four tools are the public MCP surface by default.
+**Gojo is for understanding-first workflows:**
+search → structure → precedents → context → plan
 
-## Internal And Advanced Tools
+---
 
-The following tools remain supported, but they are hidden from the default tool
-surface and are not intended for standard agent workflows:
+## 🔥 Why Gojo?
+
+Most tools help you **search code**.
+
+Gojo helps you:
+
+- **understand it**
+- **navigate it**
+- **change it safely**
+
+Gojo is built for the moment **before** generation:
+when an agent or developer needs grounded context, not guesses.
+
+---
+
+## 🧠 What makes Gojo different?
+
+- **Structural understanding** — not just text search
+- **Graph-backed reasoning** — real relationships, not loose proximity
+- **Precedent discovery** — find reusable implementation neighbors
+- **Agent-first workflows** — compact outputs built for repeated tool use
+- **Local-first execution** — your repos, your machine, your control
+
+---
+
+## 🧰 Core Agent Tools
+
+These are the **recommended public entry points**:
+
+- `explore_component`  
+  Understand structure, dependencies, role, and UI context.
+
+- `find_precedents`  
+  Find the closest reusable implementation precedents.
+
+- `collect_refactor_context`  
+  Gather bounded context, impact, and nearby files before changing code.
+
+- `plan_change`  
+  Produce safe, ordered change plans on top of grounded context.
+
+---
+
+## 🧭 Example Workflow
+
+```text
+explore_component("ContractDetailPage")
+→ find_precedents(...)
+→ collect_refactor_context(...)
+→ plan_change(...)
+```
+
+This ensures:
+
+- context before action
+- precedents before implementation
+- safer, grounded changes
+
+---
+
+## 🧪 Example Output (`find_precedents`)
+
+```text
+Target: ContractDetailPage
+Grounding: strong
+
+Top precedents:
+1. CustomerDetailPage
+2. ContractEditPage
+3. CaseDetailPage
+
+Next step:
+→ open CustomerDetailPage first
+```
+
+Small. Focused. Actionable.
+
+---
+
+## 🆚 Why not Cody / traditional tools?
+
+Gojo is **not trying to be another chat wrapper over code search**.
+
+It is optimized for **deterministic code intelligence** and **agent grounding**.
+
+| Capability | Traditional code tools | Gojo |
+|---|---|---|
+| Full-text search | ✅ | ✅ |
+| Symbol awareness | ⚠️ Partial | ✅ |
+| Code graph grounding | ❌ | ✅ |
+| Precedent discovery | ❌ | ✅ |
+| Trust / grounding signals | ❌ | ✅ |
+| Agent-first response shaping | ❌ | ✅ |
+| Local-first operation | ⚠️ Sometimes | ✅ |
+
+**The difference in practice:**
+
+- Traditional tools often answer: **“Here are some files.”**
+- Gojo answers: **“Here is the best precedent, why it was selected, what family it belongs to, and what you should inspect next.”**
+
+---
+
+## ⚙️ Runtime Model
+
+Gojo runs locally across three cooperating services:
+
+- `zoekt` → full-text search
+- `zoekt-indexer` → search indexing
+- `mcp-server` → agent-facing tool surface
+
+Artifacts are generated under:
+
+```text
+/app/.data
+```
+
+---
+
+## 🚀 Quick Start
+
+```bash
+docker compose up -d --build
+```
+
+---
+
+## 🧠 Architecture
+
+Gojo is organized into three layers:
+
+**Layer 1 — Data & Index**  
+search, symbols, graph
+
+**Layer 2 — Intelligence**  
+patterns, clustering, ranking, trust, explainability
+
+**Layer 3 — Agent Tools**  
+explore, precedents, context, planning
+
+Agents should interact with **Layer 3**.
+
+---
+
+## 🔒 Internal / Advanced Tools
+
+Gojo also includes deeper internal tools for debugging and expert workflows.
+
+They are **hidden by default** and are **not part of the standard agent surface**.
+
+Enable them explicitly with:
+
+```bash
+GOJO_INCLUDE_INTERNAL_TOOLS=true
+```
+
+Examples include:
 
 - `search_code`
 - `open_file`
@@ -56,58 +201,38 @@ surface and are not intended for standard agent workflows:
 - `analyze_symbol`
 - `search_patterns`
 
-To expose internal tools explicitly, start the MCP server with:
+---
 
-```bash
-GOJO_INCLUDE_INTERNAL_TOOLS=true
-```
-
-Use that mode for debugging, product evaluation, or expert workflows only.
-
-## Recommended Agent Flow
-
-A normal agent workflow is:
-
-1. `explore_component`
-2. `find_precedents`
-3. `collect_refactor_context`
-4. `plan_change`
-
-This is the supported high-level surface.
-
-## Runtime Model
-
-Gojo runs as three coordinated services against the same `repos/` mount:
-
-- `zoekt`
-  - serves indexed search over HTTP on `:6070`
-- `zoekt-indexer`
-  - builds and refreshes Zoekt shards
-- `mcp-server`
-  - publishes the structured generation under `/app/.data`
-  - exposes the public agent tool surface over stdio
-
-## Quick Start
-
-```bash
-docker compose up -d --build
-```
-
-## Architecture
-
-Gojo is easiest to think about as three layers:
-
-1. low-level primitives
-2. intelligence
-3. agent tools
-
-Agents should interact with layer 3.
-
-## Documentation
+## 📚 Documentation
 
 - [Architecture](./docs/architecture.md)
-- [Pattern Intelligence](./docs/architecture/pattern-intelligence.md)
 - [Operations](./docs/operations.md)
 - [Testing](./docs/testing.md)
 - [Tools](./docs/tools.md)
-- [LICENSE.md](./LICENSE.md)
+
+---
+
+## 🧭 Philosophy
+
+> Before you change code, you should understand it.
+
+Understanding means:
+
+- structure
+- relationships
+- precedents
+- impact
+
+Not guesses. Not hallucinations.
+
+---
+
+## ⭐ If this helps you
+
+Give it a star — it helps more people discover Gojo.
+
+---
+
+## 📄 License
+
+See [LICENSE.md](./LICENSE.md)
