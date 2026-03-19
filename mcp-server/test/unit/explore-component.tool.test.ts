@@ -198,8 +198,49 @@ describe('explore_component tool', () => {
           filePath: 'components/ContractList.tsx',
           symbolId: 'repo-gamma:components/ContractList.tsx:function:ContractList:1',
           resolved: true,
+          resolution: 'resolved_local',
         },
       ],
+      renderTree: [
+        {
+          name: 'Icon',
+          filePath: 'components/ui/Icon.tsx',
+          symbolId: 'repo-gamma:components/ui/Icon.tsx:function:Icon:1',
+          resolved: true,
+          resolution: 'resolved_local',
+          children: [
+            {
+              name: 'Tooltip',
+              resolved: false,
+              resolution: 'external_dependency',
+              source: '@pkg/tooltip',
+              children: [],
+            },
+          ],
+        },
+      ],
+      renderTreeSummary: {
+        totalNodes: 2,
+        resolvedNodes: 1,
+        unresolvedNodes: 1,
+        completeness: 0.5,
+      },
+      renderedByTree: [
+        {
+          name: 'ContractList',
+          filePath: 'components/ContractList.tsx',
+          symbolId: 'repo-gamma:components/ContractList.tsx:function:ContractList:1',
+          resolved: true,
+          resolution: 'resolved_local',
+          children: [],
+        },
+      ],
+      renderedByTreeSummary: {
+        totalNodes: 1,
+        resolvedNodes: 1,
+        unresolvedNodes: 0,
+        completeness: 1,
+      },
       observedProps: [
         { propName: 'variant', count: 2 },
         { propName: 'disabled', count: 1 },
@@ -267,12 +308,38 @@ describe('explore_component tool', () => {
               filePath: 'components/ui/Icon.tsx',
             }),
           ],
+          renderTree: [
+            expect.objectContaining({
+              name: 'Icon',
+              filePath: 'components/ui/Icon.tsx',
+              resolution: 'resolved_local',
+            }),
+          ],
+          renderTreeSummary: {
+            totalNodes: 2,
+            resolvedNodes: 1,
+            unresolvedNodes: 1,
+            completeness: 0.5,
+          },
           renderedBy: [
             expect.objectContaining({
               componentName: 'ContractList',
               filePath: 'components/ContractList.tsx',
             }),
           ],
+          renderedByTree: [
+            expect.objectContaining({
+              name: 'ContractList',
+              filePath: 'components/ContractList.tsx',
+              resolution: 'resolved_local',
+            }),
+          ],
+          renderedByTreeSummary: {
+            totalNodes: 1,
+            resolvedNodes: 1,
+            unresolvedNodes: 0,
+            completeness: 1,
+          },
           observedProps: [
             { propName: 'variant', count: 2 },
             { propName: 'disabled', count: 1 },

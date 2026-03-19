@@ -1,8 +1,13 @@
 import type Parser from 'tree-sitter';
 
-import { resolveLocalFileTarget } from '../graph/local-resolution.js';
-import type { RepoResolutionConfig } from '../graph/repo-config.js';
+import { resolveLocalFileTarget, type LocalResolutionResult } from '../graph/local-resolution.js';
+import {
+  getNearestRepoConfigEntry,
+  type RepoResolutionConfig,
+  type SimplePathMapping,
+} from '../graph/repo-config.js';
 import type { IndexedSymbol, ImportBinding, ImportRecord, SymbolIndex } from '../symbol-index/types.js';
+import type { UiComponentResolution } from './types.js';
 
 export interface UiComponentCandidate {
   name: string;
@@ -17,12 +22,16 @@ export interface ResolvedParentSymbol {
 export interface ResolvedChildComponent {
   childFilePath?: string;
   childSymbolId?: string;
+  resolution: UiComponentResolution;
   confidence: 'high' | 'medium';
   note?: string;
+  hint?: string;
+  dependencySource?: string;
 }
 
-export function isTsxFile(filePath: string): boolean {
-  return filePath.toLowerCase().endsWith('.tsx');
+export function isJsxLikeFile(filePath: string): boolean {
+  const normalized = filePath.toLowerCase();
+  return normalized.endsWith('.tsx') || normalized.endsWith('.jsx');
 }
 
 export function getNodeText(node: Parser.SyntaxNode, source: string): string {
@@ -115,12 +124,15 @@ export function resolveSameFileChildSymbol(
   return matches.length === 1 ? matches[0] : null;
 }
 
-function resolveTargetFileId(
+function resolveTargetFile(
   relation: SymbolIndex['byFile'][string],
   importRecord: ImportRecord,
   filesById: SymbolIndex['byFile'],
   repoConfigById: Record<string, RepoResolutionConfig>,
-): string | null {
+): {
+  relation?: SymbolIndex['byFile'][string];
+  resolution: LocalResolutionResult;
+} {
   const resolution = resolveLocalFileTarget(
     relation,
     importRecord.source,
@@ -128,7 +140,93 @@ function resolveTargetFileId(
     repoConfigById[relation.repo],
   );
 
-  return resolution.status === 'resolved' ? resolution.targetFileId ?? null : null;
+  if (resolution.status !== 'resolved' || !resolution.targetFileId) {
+    return { resolution };
+  }
+
+  return {
+    relation: filesById[resolution.targetFileId],
+    resolution,
+  };
+}
+
+function matchesConfiguredAlias(mapping: SimplePathMapping, source: string): boolean {
+  if (!mapping.wildcard) {
+    return source === mapping.aliasPattern;
+  }
+
+  return source.startsWith(mapping.aliasPrefix) && source.endsWith(mapping.aliasSuffix);
+}
+
+function isAliasLikeImportSource(
+  relation: SymbolIndex['byFile'][string],
+  source: string,
+  repoConfigById: Record<string, RepoResolutionConfig>,
+): boolean {
+  if (source.startsWith('@/') || source.startsWith('~/') || source.startsWith('#/')) {
+    return true;
+  }
+
+  const repoConfig = repoConfigById[relation.repo];
+  const configEntry = getNearestRepoConfigEntry(repoConfig, relation.filePath);
+
+  if (!configEntry) {
+    return false;
+  }
+
+  return configEntry.pathMappings.some((mapping) => matchesConfiguredAlias(mapping, source));
+}
+
+function createSameFileResolution(
+  sameFileSymbol: IndexedSymbol,
+  candidateNote?: string,
+): ResolvedChildComponent {
+  return {
+    childFilePath: sameFileSymbol.filePath,
+    childSymbolId: sameFileSymbol.symbolId,
+    resolution: 'resolved_local',
+    confidence: candidateNote ? 'medium' : 'high',
+    note: candidateNote ?? 'resolved to same-file symbol',
+  };
+}
+
+function createUnresolvedImportResolution(
+  relation: SymbolIndex['byFile'][string],
+  importRecord: ImportRecord,
+  resolution: LocalResolutionResult,
+  candidateNote: string | undefined,
+  repoConfigById: Record<string, RepoResolutionConfig>,
+): ResolvedChildComponent {
+  const aliasLikeSource = isAliasLikeImportSource(relation, importRecord.source, repoConfigById);
+
+  if (aliasLikeSource) {
+    return {
+      resolution: 'alias_not_resolved',
+      confidence: 'medium',
+      note: candidateNote ?? `configured alias did not resolve for ${importRecord.source}`,
+      hint: importRecord.source,
+    };
+  }
+
+  if (resolution.status === 'non_local' || importRecord.resolvedKind === 'package') {
+    return {
+      resolution: 'external_dependency',
+      confidence: 'medium',
+      note: candidateNote ?? `component imported from external dependency ${importRecord.source}`,
+      dependencySource: importRecord.source,
+    };
+  }
+
+  return {
+    resolution: 'unresolved',
+    confidence: 'medium',
+    note:
+      candidateNote ??
+      (resolution.status === 'ambiguous'
+        ? `ambiguous local resolution for ${importRecord.source}`
+        : `unresolved local component import ${importRecord.source}`),
+    hint: importRecord.source,
+  };
 }
 
 function resolveImportedBinding(
@@ -181,15 +279,18 @@ export function resolveChildComponent(
   fileSymbols: IndexedSymbol[],
   repoConfigById: Record<string, RepoResolutionConfig>,
   candidateNote?: string,
-): ResolvedChildComponent | null {
+): ResolvedChildComponent {
   const sameFileSymbol = resolveSameFileChildSymbol(fileSymbols, childComponentName);
 
   if (sameFileSymbol) {
+    return createSameFileResolution(sameFileSymbol, candidateNote);
+  }
+
+  if (fileSymbols.filter((symbol) => symbol.name === childComponentName).length > 1) {
     return {
-      childFilePath: sameFileSymbol.filePath,
-      childSymbolId: sameFileSymbol.symbolId,
-      confidence: candidateNote ? 'medium' : 'high',
-      note: candidateNote ?? 'resolved to same-file symbol',
+      resolution: 'unresolved',
+      confidence: 'medium',
+      note: candidateNote ?? `ambiguous same-file symbol match for ${childComponentName}`,
     };
   }
 
@@ -202,29 +303,38 @@ export function resolveChildComponent(
       continue;
     }
 
-    const targetFileId = resolveTargetFileId(relation, importRecord, index.byFile, repoConfigById);
+    const target = resolveTargetFile(relation, importRecord, index.byFile, repoConfigById);
 
-    if (!targetFileId) {
-      continue;
+    if (!target.relation) {
+      return createUnresolvedImportResolution(
+        relation,
+        importRecord,
+        target.resolution,
+        candidateNote,
+        repoConfigById,
+      );
     }
 
-    const targetRelation = index.byFile[targetFileId];
-
-    if (!targetRelation) {
-      continue;
-    }
+    const targetRelation = target.relation;
 
     const resolved = resolveImportedBinding(targetRelation, binding);
 
     return {
       childFilePath: targetRelation.filePath,
       childSymbolId: resolved?.symbolId,
+      resolution: resolved?.symbolId ? 'resolved_local' : 'missing_symbol',
       confidence: candidateNote ? 'medium' : resolved?.symbolId ? 'high' : 'medium',
       note: candidateNote ?? resolved?.note ?? `resolved from import ${importRecord.source}`,
+      hint: resolved?.symbolId ? undefined : importRecord.source,
+      dependencySource: importRecord.resolvedKind === 'package' ? importRecord.source : undefined,
     };
   }
 
-  return null;
+  return {
+    resolution: 'unresolved',
+    confidence: 'medium',
+    note: candidateNote ?? 'unresolved JSX component candidate',
+  };
 }
 
 export function walkJsxNodes(

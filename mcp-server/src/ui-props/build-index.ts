@@ -12,7 +12,7 @@ import {
   extractChildComponentCandidate,
   getJsxOpeningNode,
   getNodeText,
-  isTsxFile,
+  isJsxLikeFile,
   resolveChildComponent,
   resolveParentSymbol,
   walkJsxNodes,
@@ -175,7 +175,7 @@ export async function buildUiPropSurfaceIndex(
   const propUsages: UiPropUsage[] = [];
 
   for (const repository of repositories) {
-    const files = (await collectRepositorySourceFiles(repository.rootPath, repository.id)).filter(isTsxFile);
+    const files = (await collectRepositorySourceFiles(repository.rootPath, repository.id)).filter(isJsxLikeFile);
 
     for (const filePath of files) {
       const relation = index.byFile[createFileId(repository.id, filePath)];

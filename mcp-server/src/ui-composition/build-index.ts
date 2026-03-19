@@ -15,7 +15,7 @@ import {
 } from './types.js';
 import {
   extractChildComponentCandidate,
-  isTsxFile,
+  isJsxLikeFile,
   resolveChildComponent,
   resolveParentSymbol,
   walkJsxNodes,
@@ -45,28 +45,19 @@ function createEdge(
     childCandidate.note,
   );
 
-  if (resolvedChild) {
-    return {
-      parentFilePath: relation.filePath,
-      parentSymbolId: parent.parentSymbolId,
-      parentSymbolName: parent.parentSymbolName,
-      childComponentName: childCandidate.name,
-      childFilePath: resolvedChild.childFilePath,
-      childSymbolId: resolvedChild.childSymbolId,
-      source: 'jsx',
-      confidence: resolvedChild.confidence,
-      note: resolvedChild.note,
-    };
-  }
-
   return {
     parentFilePath: relation.filePath,
     parentSymbolId: parent.parentSymbolId,
     parentSymbolName: parent.parentSymbolName,
     childComponentName: childCandidate.name,
+    childFilePath: resolvedChild.childFilePath,
+    childSymbolId: resolvedChild.childSymbolId,
+    resolution: resolvedChild.resolution,
     source: 'jsx',
-    confidence: 'medium',
-    note: childCandidate.note ?? 'unresolved JSX component candidate',
+    confidence: resolvedChild.confidence,
+    note: resolvedChild.note,
+    hint: resolvedChild.hint,
+    dependencySource: resolvedChild.dependencySource,
   };
 }
 
@@ -108,7 +99,7 @@ export async function buildUiCompositionIndex(
   const edges: UiCompositionEdge[] = [];
 
   for (const repository of repositories) {
-    const files = (await collectRepositorySourceFiles(repository.rootPath, repository.id)).filter(isTsxFile);
+    const files = (await collectRepositorySourceFiles(repository.rootPath, repository.id)).filter(isJsxLikeFile);
 
     for (const filePath of files) {
       const relation = index.byFile[createFileId(repository.id, filePath)];

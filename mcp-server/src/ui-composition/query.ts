@@ -1,7 +1,7 @@
 import { loadUiCompositionIndex } from './store.js';
 import type { UiCompositionComponentTarget, UiCompositionEdge } from './types.js';
 
-function matchesComponentTarget(
+export function matchesComponentTarget(
   edge: UiCompositionEdge,
   target: UiCompositionComponentTarget,
   direction: 'parent' | 'child',
@@ -45,16 +45,30 @@ function matchesComponentTarget(
   return false;
 }
 
+export function filterChildrenForComponent(
+  edges: UiCompositionEdge[],
+  target: UiCompositionComponentTarget,
+): UiCompositionEdge[] {
+  return edges.filter((edge) => matchesComponentTarget(edge, target, 'parent'));
+}
+
+export function filterParentsForComponent(
+  edges: UiCompositionEdge[],
+  target: UiCompositionComponentTarget,
+): UiCompositionEdge[] {
+  return edges.filter((edge) => matchesComponentTarget(edge, target, 'child'));
+}
+
 export async function getChildrenForComponent(
   target: UiCompositionComponentTarget,
 ): Promise<UiCompositionEdge[]> {
   const index = await loadUiCompositionIndex();
-  return index.edges.filter((edge) => matchesComponentTarget(edge, target, 'parent'));
+  return filterChildrenForComponent(index.edges, target);
 }
 
 export async function getParentsForComponent(
   target: UiCompositionComponentTarget,
 ): Promise<UiCompositionEdge[]> {
   const index = await loadUiCompositionIndex();
-  return index.edges.filter((edge) => matchesComponentTarget(edge, target, 'child'));
+  return filterParentsForComponent(index.edges, target);
 }

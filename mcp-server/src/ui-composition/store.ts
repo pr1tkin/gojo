@@ -8,6 +8,7 @@ import {
 } from '../indexing/generation-store.js';
 import {
   UI_COMPOSITION_SCHEMA_VERSION,
+  type UiComponentResolution,
   type UiCompositionEdge,
   type UiCompositionIndex,
 } from './types.js';
@@ -28,6 +29,16 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function isUiResolution(value: unknown): value is UiComponentResolution {
+  return (
+    value === 'resolved_local' ||
+    value === 'external_dependency' ||
+    value === 'alias_not_resolved' ||
+    value === 'missing_symbol' ||
+    value === 'unresolved'
+  );
+}
+
 function isUiCompositionEdge(value: unknown): value is UiCompositionEdge {
   return (
     isObject(value) &&
@@ -37,9 +48,12 @@ function isUiCompositionEdge(value: unknown): value is UiCompositionEdge {
     typeof value.childComponentName === 'string' &&
     (value.childFilePath === undefined || typeof value.childFilePath === 'string') &&
     (value.childSymbolId === undefined || typeof value.childSymbolId === 'string') &&
+    isUiResolution(value.resolution) &&
     value.source === 'jsx' &&
     (value.confidence === 'high' || value.confidence === 'medium') &&
-    (value.note === undefined || typeof value.note === 'string')
+    (value.note === undefined || typeof value.note === 'string') &&
+    (value.hint === undefined || typeof value.hint === 'string') &&
+    (value.dependencySource === undefined || typeof value.dependencySource === 'string')
   );
 }
 
@@ -69,7 +83,41 @@ function normalizeLoadedIndex(value: unknown): UiCompositionIndex {
         : 0,
     generatedAt: typeof value.generatedAt === 'string' ? value.generatedAt : '',
     edges: Array.isArray(value.edges)
-      ? value.edges.filter((entry): entry is UiCompositionEdge => isUiCompositionEdge(entry))
+      ? value.edges
+          .filter((entry): entry is Record<string, unknown> => isObject(entry))
+          .map((entry): UiCompositionEdge | null => {
+            if (isUiCompositionEdge(entry)) {
+              return entry;
+            }
+
+            if (
+              typeof entry.parentFilePath === 'string' &&
+              typeof entry.childComponentName === 'string' &&
+              entry.source === 'jsx' &&
+              (entry.confidence === 'high' || entry.confidence === 'medium')
+            ) {
+              return {
+                parentFilePath: entry.parentFilePath,
+                parentSymbolId: typeof entry.parentSymbolId === 'string' ? entry.parentSymbolId : undefined,
+                parentSymbolName: typeof entry.parentSymbolName === 'string' ? entry.parentSymbolName : undefined,
+                childComponentName: entry.childComponentName,
+                childFilePath: typeof entry.childFilePath === 'string' ? entry.childFilePath : undefined,
+                childSymbolId: typeof entry.childSymbolId === 'string' ? entry.childSymbolId : undefined,
+                resolution:
+                  typeof entry.childFilePath === 'string' || typeof entry.childSymbolId === 'string'
+                    ? 'resolved_local'
+                    : 'unresolved',
+                source: 'jsx',
+                confidence: entry.confidence,
+                note: typeof entry.note === 'string' ? entry.note : undefined,
+                hint: undefined,
+                dependencySource: undefined,
+              };
+            }
+
+            return null;
+          })
+          .filter((entry): entry is UiCompositionEdge => entry !== null)
       : [],
   };
 }

@@ -1,8 +1,31 @@
+import type { UiComponentResolution } from '../ui-composition/types.js';
+
 export interface UiHierarchyComponentRef {
   componentName: string;
   filePath?: string;
   symbolId?: string;
   resolved: boolean;
+  resolution: UiComponentResolution;
+  hint?: string;
+  source?: string;
+}
+
+export interface UiHierarchyTreeNode {
+  name: string;
+  filePath?: string;
+  symbolId?: string;
+  resolved: boolean;
+  resolution: UiComponentResolution;
+  hint?: string;
+  source?: string;
+  children: UiHierarchyTreeNode[];
+}
+
+export interface UiHierarchyTreeSummary {
+  totalNodes: number;
+  resolvedNodes: number;
+  unresolvedNodes: number;
+  completeness: number;
 }
 
 export interface UiHierarchyObservedProp {
@@ -18,6 +41,10 @@ export interface UiHierarchySummary {
   };
   renders: UiHierarchyComponentRef[];
   renderedBy: UiHierarchyComponentRef[];
+  renderTree: UiHierarchyTreeNode[];
+  renderTreeSummary: UiHierarchyTreeSummary;
+  renderedByTree: UiHierarchyTreeNode[];
+  renderedByTreeSummary: UiHierarchyTreeSummary;
   observedProps: UiHierarchyObservedProp[];
 }
 

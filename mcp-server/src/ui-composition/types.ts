@@ -1,4 +1,11 @@
-export const UI_COMPOSITION_SCHEMA_VERSION = 1;
+export const UI_COMPOSITION_SCHEMA_VERSION = 2;
+
+export type UiComponentResolution =
+  | 'resolved_local'
+  | 'external_dependency'
+  | 'alias_not_resolved'
+  | 'missing_symbol'
+  | 'unresolved';
 
 export interface UiCompositionEdge {
   parentFilePath: string;
@@ -7,9 +14,12 @@ export interface UiCompositionEdge {
   childComponentName: string;
   childFilePath?: string;
   childSymbolId?: string;
+  resolution: UiComponentResolution;
   source: 'jsx';
   confidence: 'high' | 'medium';
   note?: string;
+  hint?: string;
+  dependencySource?: string;
 }
 
 export interface UiCompositionIndex {

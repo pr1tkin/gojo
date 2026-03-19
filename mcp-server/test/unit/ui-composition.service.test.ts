@@ -44,6 +44,18 @@ describe('ui composition indexing', () => {
     await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
     await fs.mkdir(path.join(repositoryRoot, 'src', 'app'), { recursive: true });
     await fs.mkdir(path.join(repositoryRoot, 'src', 'components'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'jsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          baseUrl: '.',
+          paths: {
+            '@/*': ['./src/*'],
+          },
+        },
+      }),
+      'utf8',
+    );
 
     await fs.writeFile(
       path.join(repositoryRoot, 'src', 'app', 'page.tsx'),
@@ -52,6 +64,8 @@ describe('ui composition indexing', () => {
         "import AudioHero from '../components/AudioHero';",
         "import { MetadataFooter } from '../components/MetadataFooter';",
         "import { MissingThing } from '@pkg/ui';",
+        "import { AliasWidget } from '@/components/AliasWidget';",
+        "import { BrokenCard } from '../components/BrokenCard';",
         '',
         'export function Page() {',
         '  return (',
@@ -61,6 +75,9 @@ describe('ui composition indexing', () => {
         '      <section>',
         '        <MetadataFooter />',
         '        <MissingThing />',
+        '        <AliasWidget />',
+        '        <BrokenCard />',
+        '        <LooseWidget />',
         '        <div><span /></div>',
         '      </section>',
         '    </main>',
@@ -85,11 +102,26 @@ describe('ui composition indexing', () => {
       'utf8',
     );
     await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'components', 'BrokenCard.tsx'),
+      'export default function BrokenCard() { return <article />; }',
+      'utf8',
+    );
+    await fs.writeFile(
       path.join(repositoryRoot, 'src', 'components', 'ButtonGroup.tsx'),
       [
         'function Button() { return <button />; }',
         'export function ButtonGroup() {',
         '  return <div><Button /></div>;',
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'components', 'LegacyPanel.jsx'),
+      [
+        "import { Header } from './Header';",
+        'export function LegacyPanel() {',
+        '  return <Header />;',
         '}',
       ].join('\n'),
       'utf8',
@@ -114,7 +146,7 @@ describe('ui composition indexing', () => {
     });
 
     expect(getUiCompositionFilePath()).toBe(path.join(tempRoot, '.data', 'ui-composition.json'));
-    expect(loadedIndex.schemaVersion).toBe(1);
+    expect(loadedIndex.schemaVersion).toBe(2);
     expect(loadedIndex.sourceSymbolIndexSchemaVersion).toBe(symbolIndex.schemaVersion);
     expect(loadedIndex.edges).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -128,6 +160,7 @@ describe('ui composition indexing', () => {
           'Header',
           1,
         ),
+        resolution: 'resolved_local',
         source: 'jsx',
         confidence: 'high',
       }),
@@ -142,6 +175,7 @@ describe('ui composition indexing', () => {
           'AudioHero',
           1,
         ),
+        resolution: 'resolved_local',
         source: 'jsx',
         confidence: 'high',
       }),
@@ -156,6 +190,7 @@ describe('ui composition indexing', () => {
           'MetadataFooter',
           1,
         ),
+        resolution: 'resolved_local',
         source: 'jsx',
         confidence: 'high',
       }),
@@ -163,6 +198,35 @@ describe('ui composition indexing', () => {
         parentFilePath: 'src/app/page.tsx',
         parentSymbolName: 'Page',
         childComponentName: 'MissingThing',
+        resolution: 'external_dependency',
+        dependencySource: '@pkg/ui',
+        source: 'jsx',
+        confidence: 'medium',
+      }),
+      expect.objectContaining({
+        parentFilePath: 'src/app/page.tsx',
+        parentSymbolName: 'Page',
+        childComponentName: 'AliasWidget',
+        resolution: 'alias_not_resolved',
+        hint: '@/components/AliasWidget',
+        source: 'jsx',
+        confidence: 'medium',
+      }),
+      expect.objectContaining({
+        parentFilePath: 'src/app/page.tsx',
+        parentSymbolName: 'Page',
+        childComponentName: 'BrokenCard',
+        childFilePath: 'src/components/BrokenCard.tsx',
+        resolution: 'missing_symbol',
+        hint: '../components/BrokenCard',
+        source: 'jsx',
+        confidence: 'medium',
+      }),
+      expect.objectContaining({
+        parentFilePath: 'src/app/page.tsx',
+        parentSymbolName: 'Page',
+        childComponentName: 'LooseWidget',
+        resolution: 'unresolved',
         source: 'jsx',
         confidence: 'medium',
       }),
@@ -177,6 +241,16 @@ describe('ui composition indexing', () => {
           'Button',
           1,
         ),
+        resolution: 'resolved_local',
+        source: 'jsx',
+        confidence: 'high',
+      }),
+      expect.objectContaining({
+        parentFilePath: 'src/components/LegacyPanel.jsx',
+        parentSymbolName: 'LegacyPanel',
+        childComponentName: 'Header',
+        childFilePath: 'src/components/Header.tsx',
+        resolution: 'resolved_local',
         source: 'jsx',
         confidence: 'high',
       }),
@@ -188,8 +262,11 @@ describe('ui composition indexing', () => {
       expect.objectContaining({ childComponentName: 'span' }),
     ]));
     expect(pageChildren.map((edge) => edge.childComponentName)).toEqual([
+      'AliasWidget',
       'AudioHero',
+      'BrokenCard',
       'Header',
+      'LooseWidget',
       'MetadataFooter',
       'MissingThing',
     ]);
@@ -197,6 +274,11 @@ describe('ui composition indexing', () => {
       expect.objectContaining({
         parentFilePath: 'src/app/page.tsx',
         parentSymbolName: 'Page',
+        childComponentName: 'Header',
+      }),
+      expect.objectContaining({
+        parentFilePath: 'src/components/LegacyPanel.jsx',
+        parentSymbolName: 'LegacyPanel',
         childComponentName: 'Header',
       }),
     ]);
