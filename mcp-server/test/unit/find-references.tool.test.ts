@@ -27,9 +27,20 @@ describe('find_references tool', () => {
         filesAnalyzed: 84,
         filesTotal: 100,
         ratio: 0.84,
+        scope: 'relevant_source',
+        raw: {
+          filesAnalyzed: 84,
+          filesTotal: 500,
+          ratio: 0.168,
+        },
+        relevant: {
+          filesAnalyzed: 84,
+          filesTotal: 100,
+          ratio: 0.84,
+        },
       },
       confidence: 'medium',
-      warnings: ['Large portion of repository not structurally analyzed (84% coverage)'],
+      warnings: ['Large portion of relevant source scope not structurally analyzed (84% coverage)'],
     });
   });
 
@@ -89,9 +100,20 @@ describe('find_references tool', () => {
           filesAnalyzed: 84,
           filesTotal: 100,
           ratio: 0.84,
+          scope: 'relevant_source',
+          raw: {
+            filesAnalyzed: 84,
+            filesTotal: 500,
+            ratio: 0.168,
+          },
+          relevant: {
+            filesAnalyzed: 84,
+            filesTotal: 100,
+            ratio: 0.84,
+          },
         },
         confidence: 'medium',
-        warnings: ['Large portion of repository not structurally analyzed (84% coverage)'],
+        warnings: ['Large portion of relevant source scope not structurally analyzed (84% coverage)'],
       },
     });
   });

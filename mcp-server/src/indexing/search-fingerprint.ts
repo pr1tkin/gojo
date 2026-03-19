@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { listRepositories } from '../repositories.js';
+import { createCoverageScopeSummary } from './coverage-scope.js';
 import type {
   SearchFingerprintComparison,
   SearchFingerprintComparisonIssue,
@@ -79,12 +80,12 @@ async function hashFileContent(absolutePath: string): Promise<string> {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
-async function collectSearchFingerprintEntries(
+export async function collectSearchVisibleFilePaths(
   repositoryRoot: string,
   currentDirectory: string = repositoryRoot,
-): Promise<Array<{ filePath: string; contentHash: string }>> {
+): Promise<string[]> {
   const entries = await fs.readdir(currentDirectory, { withFileTypes: true });
-  const files: Array<{ filePath: string; contentHash: string }> = [];
+  const files: string[] = [];
 
   for (const entry of entries) {
     const entryPath = path.join(currentDirectory, entry.name);
@@ -95,7 +96,7 @@ async function collectSearchFingerprintEntries(
     }
 
     if (entry.isDirectory()) {
-      files.push(...(await collectSearchFingerprintEntries(repositoryRoot, entryPath)));
+      files.push(...(await collectSearchVisibleFilePaths(repositoryRoot, entryPath)));
       continue;
     }
 
@@ -103,9 +104,22 @@ async function collectSearchFingerprintEntries(
       continue;
     }
 
+    files.push(relativePath);
+  }
+
+  return files;
+}
+
+async function collectSearchFingerprintEntries(
+  repositoryRoot: string,
+): Promise<Array<{ filePath: string; contentHash: string }>> {
+  const visibleFilePaths = await collectSearchVisibleFilePaths(repositoryRoot);
+  const files: Array<{ filePath: string; contentHash: string }> = [];
+
+  for (const relativePath of visibleFilePaths) {
     files.push({
       filePath: relativePath,
-      contentHash: await hashFileContent(entryPath),
+      contentHash: await hashFileContent(path.join(repositoryRoot, relativePath)),
     });
   }
 
@@ -143,6 +157,7 @@ export async function buildSearchRepoFingerprints(reposRoot: string): Promise<{
       repoId: repository.id,
       fingerprint,
       fileCount: fileEntries.length,
+      scope: createCoverageScopeSummary(fileEntries.map((entry) => entry.filePath)),
     });
   }
 

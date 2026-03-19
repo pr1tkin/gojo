@@ -1,12 +1,19 @@
 import { loadCurrentGenerationState } from '../indexing/generation-store.js';
+import type { SearchRepoFingerprint } from '../indexing/types.js';
 import { loadPatternIndexResult } from '../patterns/store.js';
 import type { PatternMatchContext } from '../orchestrator/types.js';
 import type { UiHierarchyTreeNode } from '../orchestrator/ui-hierarchy-types.js';
 
-export interface ToolCoverageMetadata {
+export interface ToolCoverageScopeSnapshot {
   filesAnalyzed: number;
   filesTotal: number;
   ratio: number;
+}
+
+export interface ToolCoverageMetadata extends ToolCoverageScopeSnapshot {
+  scope: 'relevant_source' | 'raw_search_visible';
+  raw: ToolCoverageScopeSnapshot;
+  relevant?: ToolCoverageScopeSnapshot;
 }
 
 export interface ToolTrustMetadata {
@@ -14,6 +21,7 @@ export interface ToolTrustMetadata {
   completeness?: number;
   confidence: 'high' | 'medium' | 'low';
   warnings?: string[];
+  patternCoverage?: ToolCoverageScopeSnapshot;
 }
 
 interface StructuralCoverageSnapshot {
@@ -24,6 +32,7 @@ interface StructuralCoverageSnapshot {
 
 interface PatternCoverageSnapshot {
   coverage: ToolCoverageMetadata;
+  patternCoverage: ToolCoverageScopeSnapshot;
   warnings: string[];
 }
 
@@ -32,6 +41,7 @@ interface BuildTrustMetadataOptions {
   completeness?: number;
   warnings?: string[];
   criticalUnresolvedSignals?: boolean;
+  patternCoverage?: ToolCoverageScopeSnapshot;
 }
 
 interface UiTreeResolutionSummary {
@@ -43,7 +53,7 @@ function roundRatio(value: number): number {
   return Number(value.toFixed(3));
 }
 
-function createCoverage(filesAnalyzed: number, filesTotal: number): ToolCoverageMetadata {
+function createCoverage(filesAnalyzed: number, filesTotal: number): ToolCoverageScopeSnapshot {
   const safeFilesAnalyzed = Math.max(0, filesAnalyzed);
   const safeFilesTotal = Math.max(safeFilesAnalyzed, filesTotal);
 
@@ -54,23 +64,45 @@ function createCoverage(filesAnalyzed: number, filesTotal: number): ToolCoverage
   };
 }
 
+function createScopedCoverage(input: {
+  raw: ToolCoverageScopeSnapshot;
+  relevant?: ToolCoverageScopeSnapshot;
+}): ToolCoverageMetadata {
+  const preferred = input.relevant ?? input.raw;
+
+  return {
+    ...preferred,
+    scope: input.relevant ? 'relevant_source' : 'raw_search_visible',
+    raw: input.raw,
+    ...(input.relevant ? { relevant: input.relevant } : {}),
+  };
+}
+
+function getPrimaryCoverageScope(coverage: ToolCoverageMetadata): ToolCoverageScopeSnapshot {
+  return coverage.relevant ?? coverage.raw;
+}
+
 function classifyTrustConfidence(options: {
-  coverageRatio: number;
+  coverage: ToolCoverageMetadata;
   completeness?: number;
   criticalUnresolvedSignals?: boolean;
 }): ToolTrustMetadata['confidence'] {
-  const { coverageRatio, completeness, criticalUnresolvedSignals } = options;
+  const { coverage, completeness, criticalUnresolvedSignals } = options;
+  const primaryCoverage = getPrimaryCoverageScope(coverage);
 
   if (
-    coverageRatio < 0.6 ||
+    primaryCoverage.ratio < 0.6 ||
     (completeness !== undefined && completeness < 0.4) ||
     Boolean(criticalUnresolvedSignals)
   ) {
     return 'low';
   }
 
-  if (coverageRatio > 0.9 && (completeness === undefined || completeness > 0.8)) {
-    return 'high';
+  if (
+    primaryCoverage.ratio > 0.9 &&
+    (completeness === undefined || completeness > 0.8)
+  ) {
+    return coverage.scope === 'relevant_source' ? 'high' : 'medium';
   }
 
   return 'medium';
@@ -84,29 +116,76 @@ function dedupeWarnings(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+function sumRawSearchVisibleFiles(repoFingerprints: SearchRepoFingerprint[]): number {
+  return repoFingerprints.reduce((total, fingerprint) => total + fingerprint.fileCount, 0);
+}
+
+function getRelevantSourceFileTotal(
+  repoFingerprints: SearchRepoFingerprint[],
+): { total: number | null; reason?: string } {
+  if (repoFingerprints.length === 0) {
+    return { total: 0 };
+  }
+
+  let total = 0;
+
+  for (const fingerprint of repoFingerprints) {
+    const relevantSourceCount = fingerprint.scope?.relevantSourceCount;
+
+    if (typeof relevantSourceCount !== 'number' || Number.isNaN(relevantSourceCount)) {
+      return {
+        total: null,
+        reason: 'Relevant source coverage scope is unavailable; falling back to raw searchable coverage',
+      };
+    }
+
+    total += relevantSourceCount;
+  }
+
+  return { total };
+}
+
 async function loadStructuralCoverageSnapshot(): Promise<StructuralCoverageSnapshot> {
   const state = await loadCurrentGenerationState();
 
   if (!state) {
     return {
-      coverage: createCoverage(0, 0),
+      coverage: createScopedCoverage({
+        raw: createCoverage(0, 0),
+      }),
       searchReady: false,
       warnings: ['Published generation metadata is unavailable'],
     };
   }
 
   const filesAnalyzed = state.counts.files;
-  const searchIndexedFiles = state.search.repoFingerprints.reduce(
-    (total, fingerprint) => total + fingerprint.fileCount,
-    0,
-  );
+  const rawSearchVisibleFiles = sumRawSearchVisibleFiles(state.search.repoFingerprints);
+  const rawCoverage = createCoverage(filesAnalyzed, rawSearchVisibleFiles || filesAnalyzed);
+  const relevantScope = getRelevantSourceFileTotal(state.search.repoFingerprints);
+  const warnings: string[] = state.search.status === 'ready'
+    ? []
+    : [`Search index freshness is ${state.search.status}`];
+  let relevantCoverage: ToolCoverageScopeSnapshot | undefined;
+
+  if (relevantScope.total === null) {
+    if (relevantScope.reason) {
+      warnings.push(relevantScope.reason);
+    }
+  } else if (relevantScope.total < filesAnalyzed) {
+    warnings.push(
+      'Relevant source coverage scope undercounts analyzed files; falling back to raw searchable coverage',
+    );
+  } else {
+    relevantCoverage = createCoverage(filesAnalyzed, relevantScope.total || filesAnalyzed);
+  }
 
   return {
-    coverage: createCoverage(filesAnalyzed, searchIndexedFiles || filesAnalyzed),
+    coverage: createScopedCoverage({
+      raw: rawCoverage,
+      relevant: relevantCoverage,
+    }),
     searchReady: state.search.status === 'ready',
-    warnings: state.search.status === 'ready'
-      ? []
-      : [`Search index freshness is ${state.search.status}`],
+    warnings,
   };
 }
 
@@ -115,19 +194,53 @@ async function loadPatternCoverageSnapshot(): Promise<PatternCoverageSnapshot> {
     loadCurrentGenerationState(),
     loadPatternIndexResult(),
   ]);
+  const warnings: string[] = [];
+  let structuralCoverage = createScopedCoverage({
+    raw: createCoverage(0, 0),
+  });
+
+  if (state) {
+    const filesAnalyzed = state.counts.files;
+    const rawSearchVisibleFiles = sumRawSearchVisibleFiles(state.search.repoFingerprints);
+    const rawCoverage = createCoverage(filesAnalyzed, rawSearchVisibleFiles || filesAnalyzed);
+    const relevantScope = getRelevantSourceFileTotal(state.search.repoFingerprints);
+
+    if (relevantScope.total === null) {
+      if (relevantScope.reason) {
+        warnings.push(relevantScope.reason);
+      }
+    } else if (relevantScope.total < filesAnalyzed) {
+      warnings.push(
+        'Relevant source coverage scope undercounts analyzed files; falling back to raw searchable coverage',
+      );
+    } else {
+      structuralCoverage = createScopedCoverage({
+        raw: rawCoverage,
+        relevant: createCoverage(filesAnalyzed, relevantScope.total || filesAnalyzed),
+      });
+    }
+
+    if (structuralCoverage.scope !== 'relevant_source') {
+      structuralCoverage = createScopedCoverage({
+        raw: rawCoverage,
+      });
+    }
+  } else {
+    warnings.push('Published generation metadata is unavailable');
+  }
 
   const filesTotal = state?.counts.files ?? 0;
   const patternBearingFiles = new Set(
     patternIndexResult.value.patterns.map((pattern) => pattern.fileId),
   ).size;
-  const warnings: string[] = [];
 
   if (patternIndexResult.status !== 'ok') {
     warnings.push(`Pattern artifact is ${patternIndexResult.status}: ${patternIndexResult.reason}`);
   }
 
   return {
-    coverage: createCoverage(patternBearingFiles, filesTotal || patternBearingFiles),
+    coverage: structuralCoverage,
+    patternCoverage: createCoverage(patternBearingFiles, filesTotal || patternBearingFiles),
     warnings,
   };
 }
@@ -155,7 +268,7 @@ export function summarizeUiTreeResolution(nodes: UiHierarchyTreeNode[]): UiTreeR
 export function buildTrustMetadata(options: BuildTrustMetadataOptions): ToolTrustMetadata {
   const warnings = dedupeWarnings(options.warnings ?? []);
   const confidence = classifyTrustConfidence({
-    coverageRatio: options.coverage.ratio,
+    coverage: options.coverage,
     completeness: options.completeness,
     criticalUnresolvedSignals: options.criticalUnresolvedSignals,
   });
@@ -165,6 +278,7 @@ export function buildTrustMetadata(options: BuildTrustMetadataOptions): ToolTrus
     ...(options.completeness !== undefined ? { completeness: roundRatio(options.completeness) } : {}),
     confidence,
     ...(warnings.length > 0 ? { warnings } : {}),
+    ...(options.patternCoverage ? { patternCoverage: options.patternCoverage } : {}),
   };
 }
 
@@ -175,10 +289,22 @@ export async function buildStructuralTrustMetadata(options: {
 } = {}): Promise<ToolTrustMetadata> {
   const snapshot = await loadStructuralCoverageSnapshot();
   const warnings = [...snapshot.warnings, ...(options.warnings ?? [])];
+  const primaryCoverage = getPrimaryCoverageScope(snapshot.coverage);
 
-  if (snapshot.coverage.ratio < 0.9) {
+  if (
+    snapshot.coverage.relevant &&
+    snapshot.coverage.raw.ratio + 0.15 < snapshot.coverage.relevant.ratio
+  ) {
     warnings.push(
-      `Large portion of repository not structurally analyzed (${formatPercent(snapshot.coverage.ratio)} coverage)`,
+      `Raw searchable coverage is low (${formatPercent(snapshot.coverage.raw.ratio)}), but relevant source coverage is substantially higher (${formatPercent(snapshot.coverage.relevant.ratio)}) after excluding non-structural files.`,
+    );
+  }
+
+  if (primaryCoverage.ratio < 0.9) {
+    warnings.push(
+      snapshot.coverage.scope === 'relevant_source'
+        ? `Large portion of relevant source scope not structurally analyzed (${formatPercent(primaryCoverage.ratio)} coverage)`
+        : `Large portion of searchable repository not structurally analyzed (${formatPercent(primaryCoverage.ratio)} coverage)`,
     );
   }
 
@@ -228,9 +354,15 @@ export async function buildPatternTrustMetadata(result: PatternMatchContext): Pr
     result.resolution.status === 'missing' ||
     (result.summary.matchCount > 0 && strongMatchRatio < 0.4);
 
-  if (snapshot.coverage.ratio < 0.9) {
+  if (snapshot.coverage.relevant && snapshot.coverage.raw.ratio + 0.15 < snapshot.coverage.relevant.ratio) {
     warnings.push(
-      `Pattern coverage is partial (${formatPercent(snapshot.coverage.ratio)} of structurally analyzed files)`,
+      `Raw searchable coverage is low (${formatPercent(snapshot.coverage.raw.ratio)}), but relevant source coverage is substantially higher (${formatPercent(snapshot.coverage.relevant.ratio)}) after excluding non-structural files.`,
+    );
+  }
+
+  if (snapshot.patternCoverage.ratio < 0.9) {
+    warnings.push(
+      `Pattern coverage is partial (${formatPercent(snapshot.patternCoverage.ratio)} of structurally analyzed files)`,
     );
   }
 
@@ -247,5 +379,6 @@ export async function buildPatternTrustMetadata(result: PatternMatchContext): Pr
     completeness: result.summary.matchCount === 0 ? 0 : strongMatchRatio,
     warnings,
     criticalUnresolvedSignals,
+    patternCoverage: snapshot.patternCoverage,
   });
 }

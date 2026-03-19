@@ -184,6 +184,22 @@ export interface SearchRepoFingerprint {
   repoId: string;
   fingerprint: string;
   fileCount: number;
+  scope?: SearchRepoCoverageScopeSummary;
+}
+
+export type SearchVisibleCoverageExclusionCategory =
+  | 'fixture_or_snapshot'
+  | 'style_or_asset'
+  | 'data_or_config'
+  | 'documentation'
+  | 'template_or_markup'
+  | 'other_non_source';
+
+export interface SearchRepoCoverageScopeSummary {
+  rawSearchVisibleCount: number;
+  relevantSourceCount: number;
+  excludedVisibleCount: number;
+  excludedByCategory: Partial<Record<SearchVisibleCoverageExclusionCategory, number>>;
 }
 
 export interface SearchFingerprintRepoMismatch {

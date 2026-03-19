@@ -28,7 +28,16 @@ describe('trust metadata', () => {
       counts: { files: 95 },
       search: {
         status: 'ready',
-        repoFingerprints: [{ repoId: 'repo-a', fileCount: 100 }],
+        repoFingerprints: [{
+          repoId: 'repo-a',
+          fileCount: 100,
+          scope: {
+            rawSearchVisibleCount: 100,
+            relevantSourceCount: 100,
+            excludedVisibleCount: 0,
+            excludedByCategory: {},
+          },
+        }],
       },
     });
 
@@ -51,23 +60,47 @@ describe('trust metadata', () => {
         filesAnalyzed: 95,
         filesTotal: 100,
         ratio: 0.95,
+        scope: 'relevant_source',
+        raw: {
+          filesAnalyzed: 95,
+          filesTotal: 100,
+          ratio: 0.95,
+        },
+        relevant: {
+          filesAnalyzed: 95,
+          filesTotal: 100,
+          ratio: 0.95,
+        },
       },
       completeness: 0.92,
       confidence: 'high',
     });
   });
 
-  it('classifies medium-confidence structural metadata for partial but acceptable coverage', async () => {
+  it('uses relevant-source coverage for confidence while preserving raw searchable coverage', async () => {
     loadCurrentGenerationStateMock.mockResolvedValue({
       counts: { files: 75 },
       search: {
         status: 'ready',
-        repoFingerprints: [{ repoId: 'repo-a', fileCount: 100 }],
+        repoFingerprints: [{
+          repoId: 'repo-a',
+          fileCount: 500,
+          scope: {
+            rawSearchVisibleCount: 500,
+            relevantSourceCount: 100,
+            excludedVisibleCount: 400,
+            excludedByCategory: {
+              data_or_config: 250,
+              style_or_asset: 100,
+              documentation: 50,
+            },
+          },
+        }],
       },
     });
 
     const metadata = await buildStructuralTrustMetadata({
-      completeness: 0.6,
+      completeness: 0.85,
     });
 
     expect(metadata).toEqual({
@@ -75,10 +108,24 @@ describe('trust metadata', () => {
         filesAnalyzed: 75,
         filesTotal: 100,
         ratio: 0.75,
+        scope: 'relevant_source',
+        raw: {
+          filesAnalyzed: 75,
+          filesTotal: 500,
+          ratio: 0.15,
+        },
+        relevant: {
+          filesAnalyzed: 75,
+          filesTotal: 100,
+          ratio: 0.75,
+        },
       },
-      completeness: 0.6,
+      completeness: 0.85,
       confidence: 'medium',
-      warnings: ['Large portion of repository not structurally analyzed (75% coverage)'],
+      warnings: [
+        'Raw searchable coverage is low (15%), but relevant source coverage is substantially higher (75%) after excluding non-structural files.',
+        'Large portion of relevant source scope not structurally analyzed (75% coverage)',
+      ],
     });
   });
 
@@ -87,7 +134,16 @@ describe('trust metadata', () => {
       counts: { files: 98 },
       search: {
         status: 'ready',
-        repoFingerprints: [{ repoId: 'repo-a', fileCount: 100 }],
+        repoFingerprints: [{
+          repoId: 'repo-a',
+          fileCount: 100,
+          scope: {
+            rawSearchVisibleCount: 100,
+            relevantSourceCount: 100,
+            excludedVisibleCount: 0,
+            excludedByCategory: {},
+          },
+        }],
       },
     });
 
@@ -109,10 +165,52 @@ describe('trust metadata', () => {
         filesAnalyzed: 98,
         filesTotal: 100,
         ratio: 0.98,
+        scope: 'relevant_source',
+        raw: {
+          filesAnalyzed: 98,
+          filesTotal: 100,
+          ratio: 0.98,
+        },
+        relevant: {
+          filesAnalyzed: 98,
+          filesTotal: 100,
+          ratio: 0.98,
+        },
       },
       completeness: 0.23,
       confidence: 'low',
       warnings: ['UI tree is only partially resolved (23% completeness)'],
+    });
+  });
+
+  it('falls back to raw searchable coverage when relevant-source scope is unavailable', async () => {
+    loadCurrentGenerationStateMock.mockResolvedValue({
+      counts: { files: 84 },
+      search: {
+        status: 'ready',
+        repoFingerprints: [{ repoId: 'repo-a', fileCount: 100 }],
+      },
+    });
+
+    const metadata = await buildStructuralTrustMetadata();
+
+    expect(metadata).toEqual({
+      coverage: {
+        filesAnalyzed: 84,
+        filesTotal: 100,
+        ratio: 0.84,
+        scope: 'raw_search_visible',
+        raw: {
+          filesAnalyzed: 84,
+          filesTotal: 100,
+          ratio: 0.84,
+        },
+      },
+      confidence: 'medium',
+      warnings: [
+        'Relevant source coverage scope is unavailable; falling back to raw searchable coverage',
+        'Large portion of searchable repository not structurally analyzed (84% coverage)',
+      ],
     });
   });
 
@@ -121,7 +219,16 @@ describe('trust metadata', () => {
       counts: { files: 100 },
       search: {
         status: 'ready',
-        repoFingerprints: [{ repoId: 'repo-a', fileCount: 100 }],
+        repoFingerprints: [{
+          repoId: 'repo-a',
+          fileCount: 100,
+          scope: {
+            rawSearchVisibleCount: 100,
+            relevantSourceCount: 100,
+            excludedVisibleCount: 0,
+            excludedByCategory: {},
+          },
+        }],
       },
     });
     loadPatternIndexResultMock.mockResolvedValue({
@@ -159,12 +266,28 @@ describe('trust metadata', () => {
 
     expect(metadata).toEqual({
       coverage: {
+        filesTotal: 100,
+        filesAnalyzed: 100,
+        ratio: 1,
+        scope: 'relevant_source',
+        raw: {
+          filesAnalyzed: 100,
+          filesTotal: 100,
+          ratio: 1,
+        },
+        relevant: {
+          filesAnalyzed: 100,
+          filesTotal: 100,
+          ratio: 1,
+        },
+      },
+      completeness: 0,
+      confidence: 'low',
+      patternCoverage: {
         filesAnalyzed: 1,
         filesTotal: 100,
         ratio: 0.01,
       },
-      completeness: 0,
-      confidence: 'low',
       warnings: [
         'Pattern coverage is partial (1% of structurally analyzed files)',
         'No structurally matched pattern target was resolved',

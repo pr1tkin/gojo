@@ -128,6 +128,37 @@ describe('search fingerprint contract', () => {
     expect(next).toEqual(baseline);
   });
 
+  it('records relevant-source scope counts alongside raw search-visible counts', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/App.tsx', 'export function App() { return null; }\n');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/styles.css', '.app { color: red; }\n');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'README.md', '# app\n');
+    await writeRepositoryFile(reposRoot, 'app-repo', '__fixtures__/payload.json', '{"ok":true}\n');
+
+    const result = await buildSearchRepoFingerprints(reposRoot);
+
+    expect(result.repoFingerprints).toEqual([
+      expect.objectContaining({
+        repoId: 'app-repo',
+        fileCount: 4,
+        scope: {
+          rawSearchVisibleCount: 4,
+          relevantSourceCount: 1,
+          excludedVisibleCount: 3,
+          excludedByCategory: {
+            style_or_asset: 1,
+            documentation: 1,
+            fixture_or_snapshot: 1,
+          },
+        },
+      }),
+    ]);
+  });
+
   it('treats ignored directories case-insensitively under the canonical contract', async () => {
     const tempRoot = await createTempDirectory();
     const reposRoot = path.join(tempRoot, 'repos');

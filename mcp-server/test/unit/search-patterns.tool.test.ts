@@ -30,11 +30,27 @@ describe('search_patterns tool', () => {
     vi.clearAllMocks();
     buildPatternTrustMetadataMock.mockResolvedValue({
       coverage: {
-        filesAnalyzed: 60,
+        filesAnalyzed: 80,
         filesTotal: 100,
-        ratio: 0.6,
+        ratio: 0.8,
+        scope: 'relevant_source',
+        raw: {
+          filesAnalyzed: 80,
+          filesTotal: 400,
+          ratio: 0.2,
+        },
+        relevant: {
+          filesAnalyzed: 80,
+          filesTotal: 100,
+          ratio: 0.8,
+        },
       },
       confidence: 'medium',
+      patternCoverage: {
+        filesAnalyzed: 60,
+        filesTotal: 80,
+        ratio: 0.75,
+      },
     });
   });
 
@@ -107,11 +123,27 @@ describe('search_patterns tool', () => {
         requestedMode: 'component',
         metadata: {
           coverage: {
-            filesAnalyzed: 60,
+            filesAnalyzed: 80,
             filesTotal: 100,
-            ratio: 0.6,
+            ratio: 0.8,
+            scope: 'relevant_source',
+            raw: {
+              filesAnalyzed: 80,
+              filesTotal: 400,
+              ratio: 0.2,
+            },
+            relevant: {
+              filesAnalyzed: 80,
+              filesTotal: 100,
+              ratio: 0.8,
+            },
           },
           confidence: 'medium',
+          patternCoverage: {
+            filesAnalyzed: 60,
+            filesTotal: 80,
+            ratio: 0.75,
+          },
         },
         summary: {
           matchCount: 1,
@@ -206,11 +238,27 @@ describe('search_patterns tool', () => {
     });
     expect(parsed.metadata).toEqual({
       coverage: {
-        filesAnalyzed: 60,
+        filesAnalyzed: 80,
         filesTotal: 100,
-        ratio: 0.6,
+        ratio: 0.8,
+        scope: 'relevant_source',
+        raw: {
+          filesAnalyzed: 80,
+          filesTotal: 400,
+          ratio: 0.2,
+        },
+        relevant: {
+          filesAnalyzed: 80,
+          filesTotal: 100,
+          ratio: 0.8,
+        },
       },
       confidence: 'medium',
+      patternCoverage: {
+        filesAnalyzed: 60,
+        filesTotal: 80,
+        ratio: 0.75,
+      },
     });
   });
 });

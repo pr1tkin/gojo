@@ -32,6 +32,17 @@ describe('find_symbol compiler-aware integration', () => {
         filesAnalyzed: 90,
         filesTotal: 100,
         ratio: 0.9,
+        scope: 'relevant_source',
+        raw: {
+          filesAnalyzed: 90,
+          filesTotal: 300,
+          ratio: 0.3,
+        },
+        relevant: {
+          filesAnalyzed: 90,
+          filesTotal: 100,
+          ratio: 0.9,
+        },
       },
       confidence: 'medium',
     });
@@ -104,6 +115,17 @@ describe('find_symbol compiler-aware integration', () => {
           filesAnalyzed: 90,
           filesTotal: 100,
           ratio: 0.9,
+          scope: 'relevant_source',
+          raw: {
+            filesAnalyzed: 90,
+            filesTotal: 300,
+            ratio: 0.3,
+          },
+          relevant: {
+            filesAnalyzed: 90,
+            filesTotal: 100,
+            ratio: 0.9,
+          },
         },
         confidence: 'medium',
       },
@@ -163,6 +185,17 @@ describe('find_symbol compiler-aware integration', () => {
           filesAnalyzed: 90,
           filesTotal: 100,
           ratio: 0.9,
+          scope: 'relevant_source',
+          raw: {
+            filesAnalyzed: 90,
+            filesTotal: 300,
+            ratio: 0.3,
+          },
+          relevant: {
+            filesAnalyzed: 90,
+            filesTotal: 100,
+            ratio: 0.9,
+          },
         },
         confidence: 'medium',
       },
