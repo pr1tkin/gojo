@@ -32,8 +32,12 @@ const SEARCH_IGNORED_FILE_NAMES = new Set([
 
 const SEARCH_IGNORED_FILE_SUFFIXES = [
   '.d.ts',
+  '.generated.js',
+  '.generated.jsx',
   '.generated.ts',
   '.generated.tsx',
+  '.min.js',
+  '.min.jsx',
   '.tmp',
   '.temp',
   '.swp',

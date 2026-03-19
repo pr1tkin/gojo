@@ -195,6 +195,9 @@ test_repo_fingerprint_is_order_independent_and_ignores_noise() {
   mkdir -p "${repo_root_a}/dist" "${repo_root_a}/generated" "${repo_root_a}/types"
   printf 'compiled' > "${repo_root_a}/dist/bundle.js"
   printf 'generated' > "${repo_root_a}/generated/api.generated.ts"
+  printf 'generated-js' > "${repo_root_a}/src/runtime.generated.js"
+  printf 'generated-jsx' > "${repo_root_a}/src/Widget.generated.jsx"
+  printf 'minified' > "${repo_root_a}/src/vendor.min.js"
   printf 'declare const x: string;\n' > "${repo_root_a}/types/index.d.ts"
   printf 'scratch' > "${repo_root_a}/src/a.ts.tmp"
 

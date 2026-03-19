@@ -3,10 +3,32 @@ import { describe, expect, it } from 'vitest';
 import { isSupportedSymbolFile, parseTypeScriptSource } from '../../src/tree-sitter.js';
 
 describe('tree-sitter parser setup', () => {
-  it('reports .ts and .tsx files as supported', () => {
+  it('reports JS and TS source files as supported', () => {
+    expect(isSupportedSymbolFile('src/hello.js')).toBe(true);
+    expect(isSupportedSymbolFile('src/component.jsx')).toBe(true);
     expect(isSupportedSymbolFile('src/hello.ts')).toBe(true);
     expect(isSupportedSymbolFile('src/component.tsx')).toBe(true);
     expect(isSupportedSymbolFile('README.md')).toBe(false);
+  });
+
+  it('parses JavaScript source without failing', () => {
+    const tree = parseTypeScriptSource(
+      'src/hello.js',
+      'export function greet() { return "hello"; }',
+    );
+
+    expect(tree.rootNode.type).toBe('program');
+    expect(tree.rootNode.hasError).toBe(false);
+  });
+
+  it('parses JSX source without failing', () => {
+    const tree = parseTypeScriptSource(
+      'src/component.jsx',
+      'export const Button = () => <button>ok</button>;',
+    );
+
+    expect(tree.rootNode.type).toBe('program');
+    expect(tree.rootNode.hasError).toBe(false);
   });
 
   it('parses TypeScript source without failing', () => {

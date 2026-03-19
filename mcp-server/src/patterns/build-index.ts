@@ -469,7 +469,9 @@ function isLikelyComponentSymbol(
   match: SymbolNodeMatch,
   source: string,
 ): boolean {
-  if (getLanguage(relation.filePath) !== 'tsx') {
+  const language = getLanguage(relation.filePath);
+
+  if (language !== 'tsx' && language !== 'jsx') {
     return false;
   }
 
@@ -889,7 +891,13 @@ function detectUtilityExport(
   relation: FileRelation,
   match: SymbolNodeMatch,
 ): PatternCandidate | null {
-  if (getLanguage(relation.filePath) !== 'ts' || !isUtilityPath(relation.filePath) || !isExportedSymbol(match.symbol, relation)) {
+  const language = getLanguage(relation.filePath);
+
+  if (
+    (language !== 'ts' && language !== 'js') ||
+    !isUtilityPath(relation.filePath) ||
+    !isExportedSymbol(match.symbol, relation)
+  ) {
     return null;
   }
 
@@ -1101,7 +1109,7 @@ export async function buildPatternIndex(reposRoot: string, index: SymbolIndex): 
 
     const language = getLanguage(relation.filePath);
 
-    if (language !== 'ts' && language !== 'tsx') {
+    if (language !== 'js' && language !== 'jsx' && language !== 'ts' && language !== 'tsx') {
       continue;
     }
 

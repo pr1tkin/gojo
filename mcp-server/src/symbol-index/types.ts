@@ -7,7 +7,7 @@ export interface IndexedFileMetadata {
   repo: string;
   filePath: string;
   classification: FileClassification;
-  language: 'ts' | 'tsx';
+  language: 'ts' | 'tsx' | 'js' | 'jsx' | 'unknown';
 }
 
 export interface IndexedSymbol {

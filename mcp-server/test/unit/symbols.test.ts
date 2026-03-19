@@ -29,6 +29,66 @@ afterEach(async () => {
 });
 
 describe('listSymbolsForFile', () => {
+  it('supports JS files and extracts declaration symbols', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'js-repo');
+    await copyFixture('hello.js', path.join(repositoryRoot, 'src', 'hello.js'));
+
+    const result = await listSymbolsForFile(reposRoot, 'js-repo/src/hello.js');
+
+    expect(result.filePath).toBe('js-repo/src/hello.js');
+    expect(result.symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'UserService',
+          kind: 'class',
+          filePath: 'js-repo/src/hello.js',
+        }),
+        expect.objectContaining({
+          name: 'getUser',
+          kind: 'method',
+          filePath: 'js-repo/src/hello.js',
+        }),
+        expect.objectContaining({
+          name: 'greet',
+          kind: 'function',
+          filePath: 'js-repo/src/hello.js',
+        }),
+      ]),
+    );
+  });
+
+  it('supports JSX files and keeps JSX-bearing component declarations in the symbol layer', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'jsx-repo');
+    await copyFixture('component.jsx', path.join(repositoryRoot, 'src', 'component.jsx'));
+
+    const result = await listSymbolsForFile(reposRoot, 'jsx-repo/src/component.jsx');
+
+    expect(result.filePath).toBe('jsx-repo/src/component.jsx');
+    expect(result.symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Button',
+          kind: 'variable',
+          filePath: 'jsx-repo/src/component.jsx',
+        }),
+        expect.objectContaining({
+          name: 'renderLabel',
+          kind: 'function',
+          filePath: 'jsx-repo/src/component.jsx',
+        }),
+      ]),
+    );
+
+    expect(result.symbols.find((symbol) => symbol.name === 'button')).toBeUndefined();
+    expect(result.symbols.find((symbol) => symbol.name === 'span')).toBeUndefined();
+  });
+
   it('extracts expected symbols from a representative TypeScript file', async () => {
     const reposRoot = await createTempDirectory();
     tempDirectories.push(reposRoot);

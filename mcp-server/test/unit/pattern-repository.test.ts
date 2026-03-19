@@ -455,4 +455,82 @@ describe('pattern repository', () => {
     expect(patternIndex.patterns).toHaveLength(11);
     expect(patternsByKind.size).toBe(patternIndex.patterns.length);
   });
+
+  it('extracts deterministic patterns for js and jsx files', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'pattern-js-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'components'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'hooks'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src', 'utils'), { recursive: true });
+
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'components', 'Button.jsx'),
+      [
+        "import { useMemo } from 'react';",
+        '',
+        'export const Button = ({ items, showExtra }) => {',
+        '  const values = useMemo(() => items, [items]);',
+        '  return (',
+        '    <section>',
+        '      {showExtra && <span>Extra</span>}',
+        '      {values.map((item) => <span key={item}>{item}</span>)}',
+        '    </section>',
+        '  );',
+        '};',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'hooks', 'useAudio.js'),
+      [
+        "import { useEffect, useState } from 'react';",
+        '',
+        'export function useAudio() {',
+        "  const [status, setStatus] = useState('idle');",
+        '  useEffect(() => {',
+        "    setStatus('ready');",
+        '  }, []);',
+        '  return status;',
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'utils', 'slugify.js'),
+      [
+        'export function slugify(value) {',
+        "  return value.toLowerCase().replace(/\\s+/g, '-');",
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const symbolIndex = await buildIndexedSymbols(reposRoot);
+    const patternIndex = await runPatternExtractionStage(reposRoot, symbolIndex);
+
+    expect(patternIndex.patterns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'component',
+          name: 'Button',
+          language: 'jsx',
+        }),
+        expect.objectContaining({
+          kind: 'hook',
+          name: 'useAudio',
+          language: 'js',
+        }),
+        expect.objectContaining({
+          kind: 'utility-export',
+          name: 'slugify',
+          language: 'js',
+        }),
+      ]),
+    );
+  });
 });

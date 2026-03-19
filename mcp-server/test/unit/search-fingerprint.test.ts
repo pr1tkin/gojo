@@ -116,6 +116,9 @@ describe('search fingerprint contract', () => {
     const baseline = await buildSearchRepoFingerprints(reposRoot);
 
     await writeRepositoryFile(reposRoot, 'app-repo', 'dist/bundle.js', 'compiled output');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/runtime.generated.js', 'export const generated = true;\n');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/Widget.generated.jsx', 'export const Generated = () => null;\n');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/vendor.min.js', 'window.app=function(){};');
     await writeRepositoryFile(reposRoot, 'app-repo', 'generated/api.generated.ts', 'export const generated = true;\n');
     await writeRepositoryFile(reposRoot, 'app-repo', 'types/index.d.ts', 'export declare const x: string;\n');
     await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts.tmp', 'scratch');

@@ -249,6 +249,55 @@ describe('buildCodeGraphFromSymbolIndex', () => {
     );
   });
 
+  it('resolves extensionless local imports to js and jsx files when exactly one target exists', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'js-extensionless-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'foo.js'),
+      'export const foo = 1;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'Bar.jsx'),
+      'export const Bar = () => <div />;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.js'),
+      [
+        "import { foo } from './foo';",
+        "import { Bar } from './Bar';",
+        'export const consumer = [foo, Bar];',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    const graph = buildCodeGraphFromSymbolIndex(index);
+    const consumerFileId = createFileId('js-extensionless-repo', 'src/consumer.js');
+
+    expect(graph.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: consumerFileId,
+          toId: createFileId('js-extensionless-repo', 'src/foo.js'),
+          metadata: { source: './foo' },
+        }),
+        expect.objectContaining({
+          type: 'file_imports_file',
+          fromId: consumerFileId,
+          toId: createFileId('js-extensionless-repo', 'src/Bar.jsx'),
+          metadata: { source: './Bar' },
+        }),
+      ]),
+    );
+  });
+
   it('resolves index-file conventions when they produce a single local target', async () => {
     const reposRoot = await createTempDirectory();
     tempDirectories.push(reposRoot);

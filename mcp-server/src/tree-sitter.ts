@@ -1,9 +1,12 @@
 import path from 'node:path';
 
 import Parser from 'tree-sitter';
+import JavaScriptGrammar from 'tree-sitter-javascript';
 import TypeScriptGrammar from 'tree-sitter-typescript';
 
 const PARSERS = {
+  '.js': createParser(JavaScriptGrammar),
+  '.jsx': createParser(JavaScriptGrammar),
   '.ts': createParser(TypeScriptGrammar.typescript),
   '.tsx': createParser(TypeScriptGrammar.tsx),
 } as const;
@@ -16,7 +19,7 @@ function createParser(language: unknown): Parser {
 
 export function isSupportedSymbolFile(filePath: string): boolean {
   const extension = path.extname(filePath).toLowerCase();
-  return extension === '.ts' || extension === '.tsx';
+  return extension === '.js' || extension === '.jsx' || extension === '.ts' || extension === '.tsx';
 }
 
 export function parseTypeScriptSource(filePath: string, source: string): Parser.Tree {

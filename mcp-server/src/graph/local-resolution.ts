@@ -18,15 +18,23 @@ function normalizePath(value: string): string {
 
 function buildCandidatePathsFromBasePath(basePath: string): string[] {
   const normalizedBasePath = normalizePath(basePath).replace(/^\/+/, '');
-  const hasExplicitExtension = normalizedBasePath.endsWith('.ts') || normalizedBasePath.endsWith('.tsx');
+  const hasExplicitExtension =
+    normalizedBasePath.endsWith('.js') ||
+    normalizedBasePath.endsWith('.jsx') ||
+    normalizedBasePath.endsWith('.ts') ||
+    normalizedBasePath.endsWith('.tsx');
 
   if (hasExplicitExtension) {
     return [normalizedBasePath];
   }
 
   return [
+    `${normalizedBasePath}.js`,
+    `${normalizedBasePath}.jsx`,
     `${normalizedBasePath}.ts`,
     `${normalizedBasePath}.tsx`,
+    path.posix.join(normalizedBasePath, 'index.js'),
+    path.posix.join(normalizedBasePath, 'index.jsx'),
     path.posix.join(normalizedBasePath, 'index.ts'),
     path.posix.join(normalizedBasePath, 'index.tsx'),
   ];

@@ -12,6 +12,8 @@ const GENERATED_DIRECTORIES = new Set([
 ]);
 
 const SOURCE_LANGUAGES = new Map<string, IndexedFileMetadata['language']>([
+  ['.js', 'js'],
+  ['.jsx', 'jsx'],
   ['.ts', 'ts'],
   ['.tsx', 'tsx'],
 ]);
@@ -31,8 +33,12 @@ function isGeneratedFileName(filePath: string): boolean {
   const normalizedPath = normalizeFilePath(filePath).toLowerCase();
   return (
     normalizedPath.endsWith('.d.ts') ||
+    normalizedPath.endsWith('.generated.js') ||
+    normalizedPath.endsWith('.generated.jsx') ||
     normalizedPath.endsWith('.generated.ts') ||
-    normalizedPath.endsWith('.generated.tsx')
+    normalizedPath.endsWith('.generated.tsx') ||
+    normalizedPath.endsWith('.min.js') ||
+    normalizedPath.endsWith('.min.jsx')
   );
 }
 
@@ -59,6 +65,6 @@ export function classifyFile(
     repo,
     filePath: normalizedFilePath,
     classification,
-    language: language ?? 'ts',
+    language: language ?? 'unknown',
   };
 }

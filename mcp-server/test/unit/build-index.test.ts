@@ -139,6 +139,16 @@ describe('buildIndexedSymbols', () => {
       'export interface GeneratedTypes {}',
       'utf8',
     );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'widget.generated.jsx'),
+      'export const GeneratedWidget = () => <div />;',
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'vendor.min.js'),
+      'window.app=function(){return 1}();',
+      'utf8',
+    );
 
     const index = await buildIndexedSymbols(reposRoot);
 
@@ -163,6 +173,8 @@ describe('buildIndexedSymbols', () => {
         expect.objectContaining({ filePath: 'src/component.generated.tsx' }),
         expect.objectContaining({ filePath: 'generated/api.ts' }),
         expect.objectContaining({ filePath: 'src/types.d.ts' }),
+        expect.objectContaining({ filePath: 'src/widget.generated.jsx' }),
+        expect.objectContaining({ filePath: 'src/vendor.min.js' }),
       ]),
     );
     expect(Object.keys(index.byFile)).toEqual([createFileId('generated-repo', 'src/kept.ts')]);
@@ -193,8 +205,59 @@ describe('buildIndexedSymbols', () => {
     expect(index.stats.byKind.function).toEqual({ keepMe: 1 });
     expect(index.stats.globalByName).not.toHaveProperty('GeneratedRoute');
     expect(index.stats.globalByName).not.toHaveProperty('GeneratedComponent');
+    expect(index.stats.globalByName).not.toHaveProperty('GeneratedWidget');
     expect(index.stats.globalByName).not.toHaveProperty('fromGeneratedDir');
     expect(index.stats.globalByName).not.toHaveProperty('GeneratedTypes');
+  });
+
+  it('indexes JS and JSX source files alongside TS and TSX', async () => {
+    const reposRoot = await createTempDirectory();
+    tempDirectories.push(reposRoot);
+
+    const repositoryRoot = path.join(reposRoot, 'mixed-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'helper.js'),
+      [
+        'export function helper() {',
+        "  return 'ok';",
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'Button.jsx'),
+      [
+        'export const Button = ({ label }) => {',
+        '  return <button>{label}</button>;',
+        '};',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+
+    expect(Object.keys(index.byFile)).toEqual(
+      expect.arrayContaining([
+        createFileId('mixed-repo', 'src/helper.js'),
+        createFileId('mixed-repo', 'src/Button.jsx'),
+      ]),
+    );
+    expect(index.symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: 'src/helper.js',
+          name: 'helper',
+          kind: 'function',
+        }),
+        expect.objectContaining({
+          filePath: 'src/Button.jsx',
+          name: 'Button',
+          kind: 'variable',
+        }),
+      ]),
+    );
   });
 
   it('generates deterministic file and symbol IDs and disambiguates repeated names by ordinal', async () => {

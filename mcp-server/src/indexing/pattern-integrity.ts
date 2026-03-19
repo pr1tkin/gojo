@@ -16,7 +16,7 @@ function isPatternEligibleFile(relation: FileRelation): boolean {
   }
 
   const extension = path.extname(relation.filePath).toLowerCase();
-  return extension === '.ts' || extension === '.tsx';
+  return extension === '.js' || extension === '.jsx' || extension === '.ts' || extension === '.tsx';
 }
 
 function createIssue(
