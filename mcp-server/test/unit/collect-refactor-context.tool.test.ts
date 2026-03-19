@@ -87,7 +87,7 @@ describe('collect_refactor_context tool', () => {
     });
   });
 
-  it('returns shaped refactor context with related tiers and nearby/candidate sections', async () => {
+  it('returns a normalized refactor-context response with grouped context semantics preserved', async () => {
     getCollectRefactorContextMock.mockResolvedValue({
       target: {
         requestedName: 'ArticleContent',
@@ -171,51 +171,130 @@ describe('collect_refactor_context tool', () => {
       mode: 'component',
       limit: 8,
     });
-    expect(parsed.explainabilityMode).toBe('agent');
+    expect(parsed).toEqual(
+      expect.objectContaining({
+        tool: 'collect_refactor_context',
+        version: '1',
+        mode: 'agent',
+        query: expect.objectContaining({
+          target: 'ArticleContent',
+          repo: 'example-news-app',
+          mode: 'component',
+          filePath: 'src/app/articles/[id]/ArticleContent.tsx',
+          symbolName: 'ArticleContent',
+        }),
+      }),
+    );
     expect(parsed.target).toEqual(
       expect.objectContaining({
+        status: 'resolved',
         filePath: 'src/app/articles/[id]/ArticleContent.tsx',
         role: 'component',
-        familyRef: 'ui_component',
+        family: 'ui_component',
         clusterRef: 'cluster:article-content',
       }),
     );
     expect(parsed.results.primary).toEqual([
       expect.objectContaining({
+        kind: 'refactor_related_file',
         filePath: 'src/app/_components/articleHeaderText/ArticleHeaderText.tsx',
-        selectionReason: 'graph-related file context',
+        relationshipKinds: ['file_imports_file'],
+        explanation: expect.objectContaining({
+          short: 'graph-related file context',
+        }),
       }),
     ]);
-    expect(parsed.results.nearby).toEqual([
+    expect(parsed.nearbyFiles).toEqual([
       expect.objectContaining({
+        kind: 'refactor_nearby_file',
         category: 'bundle_family',
         filePath: 'src/app/articles/[id]/ArticleContent.stories.tsx',
-        selectionReason: 'bundle-family companion',
+        explanation: expect.objectContaining({
+          short: 'bundle-family companion',
+        }),
       }),
     ]);
-    expect(parsed.results.candidates).toEqual([
+    expect(parsed.symbolCandidates).toEqual([
       expect.objectContaining({
+        kind: 'refactor_symbol_candidate',
         filePath: 'src/app/_components/articleHeaderText/ArticleHeaderText.tsx',
-        name: 'ArticleHeaderText',
-        selectionReason: 'ranked symbol candidate',
+        symbolName: 'ArticleHeaderText',
+        explanation: expect.objectContaining({
+          short: 'ranked symbol candidate',
+        }),
       }),
     ]);
-    expect(parsed.navigationHints).toEqual(
+    expect(parsed.nextActions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: 'open_related',
-          filePath: 'src/app/_components/articleHeaderText/ArticleHeaderText.tsx',
+          tool: 'explore_component',
+          reason: 'inspect the strongest neighboring file before refactor',
+          query: expect.objectContaining({
+            name: 'src/app/_components/articleHeaderText/ArticleHeaderText.tsx',
+            repo: 'example-news-app',
+          }),
+        }),
+        expect.objectContaining({
+          tool: 'plan_change',
+          query: expect.objectContaining({
+            symbol: 'ArticleContent',
+            filePath: 'src/app/articles/[id]/ArticleContent.tsx',
+            repo: 'example-news-app',
+          }),
         }),
       ]),
     );
     expect(parsed.summary).toEqual(
       expect.objectContaining({
-        resultCount: 3,
-        importingFileCount: 1,
-        importedFileCount: 1,
+        resultCount: 1,
+        primaryCount: 1,
+        confidence: 'high',
       }),
     );
-    expect(parsed.summary.tokenEstimate).toBeGreaterThan(0);
+    expect(parsed.contextSummary).toEqual(
+      expect.objectContaining({
+        importingFileCount: 1,
+        importedFileCount: 1,
+        nearbyFileCount: 1,
+        relatedFileCount: 1,
+        ambiguityDetected: false,
+      }),
+    );
+    expect(parsed.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'target_family',
+          value: 'ui_component',
+        }),
+        expect.objectContaining({
+          kind: 'importing_files',
+          value: '1',
+        }),
+      ]),
+    );
+    expect(parsed.diagnostics).toEqual(
+      expect.objectContaining({
+        warnings: [],
+        limits: expect.objectContaining({
+          resultLimit: 8,
+          navigationHintLimit: 3,
+          relatedItemLimit: 3,
+        }),
+      }),
+    );
+    expect(parsed.expansions).toEqual(
+      expect.objectContaining({
+        'cluster:cluster:article-content': expect.objectContaining({
+          kind: 'cluster-context',
+        }),
+        'refactor:importing-files': expect.objectContaining({
+          kind: 'refactor-importing-files',
+        }),
+        'refactor:imported-files': expect.objectContaining({
+          kind: 'refactor-imported-files',
+        }),
+      }),
+    );
   });
 
   it('defaults to component mode and preserves weak contexts safely', async () => {
@@ -262,10 +341,10 @@ describe('collect_refactor_context tool', () => {
       mode: 'component',
       limit: undefined,
     });
-    expect(parsed.explainabilityMode).toBe('agent');
-    expect(parsed.summary.notes).toContain('target could not be resolved from the current symbol index and graph');
+    expect(parsed.mode).toBe('agent');
+    expect(parsed.diagnostics.notes).toContain('target could not be resolved from the current symbol index and graph');
     expect(parsed.results.primary).toEqual([]);
-    expect(parsed.results.secondary).toEqual([]);
+    expect(parsed.results).not.toHaveProperty('secondary');
   });
 
   it('passes debug explainability mode through helper calls', async () => {
@@ -313,12 +392,14 @@ describe('collect_refactor_context tool', () => {
       },
     });
 
-    await runCollectRefactorContextTool({
+    const result = await runCollectRefactorContextTool({
       name: 'ArticleContent',
       detail: 'debug',
       expandDebug: true,
     });
+    const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
 
     expect(buildIndexedSymbolExplainabilityMock).toHaveBeenCalledWith(expect.any(Object), 'debug');
+    expect(parsed.mode).toBe('debug');
   });
 });

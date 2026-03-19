@@ -1,6 +1,10 @@
 import { planChangeInputSchema } from '../schemas.js';
 import { planSymbolChange } from '../orchestrator/index.js';
 import type { PlanChangeInput } from '../types.js';
+import {
+  normalizePlanChangeResponse,
+  type RawPlanChangeResponse,
+} from '../tool-response/normalize-plan-change.js';
 
 function buildAgentSummary(result: {
   target: { symbolName?: string; filePath: string };
@@ -35,15 +39,25 @@ export async function runPlanChangeTool(
     repoId: input.repo,
     impactMode: input.mode,
   });
+  const rawOutput: RawPlanChangeResponse = {
+    ...result,
+    requestedSymbol: input.symbol,
+    ...(input.filePath ? { requestedFilePath: input.filePath } : {}),
+    ...(input.repo ? { requestedRepo: input.repo } : {}),
+    ...(input.mode ? { requestedMode: input.mode } : {}),
+    explainabilityMode: 'agent',
+    agentSummary: buildAgentSummary(result),
+  };
+  const normalizedOutput = normalizePlanChangeResponse({
+    rawResponse: rawOutput,
+    mode: 'agent',
+  });
 
   return {
     content: [
       {
         type: 'text',
-        text: JSON.stringify({
-          ...result,
-          agentSummary: buildAgentSummary(result),
-        }, null, 2),
+        text: JSON.stringify(normalizedOutput, null, 2),
       },
     ],
   };

@@ -10,11 +10,14 @@ import {
 import {
   SharedContextBuilder,
   dedupeNavigationHints,
-  finalizeShapedResponse,
   splitPrimarySecondary,
   toScoreBucket,
   type ResponseShapingOptions,
 } from './response-shaping.js';
+import {
+  normalizeCollectRefactorContextResponse,
+  type RawCollectRefactorContextResponse,
+} from '../tool-response/normalize-collect-refactor-context.js';
 
 export const collectRefactorContextToolDefinition = {
   name: 'collect_refactor_context',
@@ -166,6 +169,7 @@ export async function runCollectRefactorContextTool(
   const builtSharedContext = sharedContext.build();
 
   const target = {
+    status: (result.target.symbol || result.target.file ? 'resolved' : 'missing') as 'resolved' | 'missing',
     requestedName: result.target.requestedName,
     requestedMode: result.target.requestedMode,
     requestedRepo: result.target.repo,
@@ -186,9 +190,23 @@ export async function runCollectRefactorContextTool(
     ...(targetSymbol?.familyRef ? { familyRef: targetSymbol.familyRef } : {}),
     ...(targetSymbol?.clusterRef ? { clusterRef: targetSymbol.clusterRef } : {}),
     ...(targetSymbol?.membership ? { membership: targetSymbol.membership } : {}),
+    resolution: {
+      candidateCount: result.symbolCandidates.length,
+      ambiguityDetected: result.summary.ambiguityDetected,
+    },
+    symbolSurface: {
+      defined: result.definedSymbols
+        .map((entry) => entry.name)
+        .filter((value): value is string => Boolean(value))
+        .slice(0, 8),
+      exported: result.exportedSymbols
+        .map((entry) => entry.name)
+        .filter((value): value is string => Boolean(value))
+        .slice(0, 8),
+    },
   };
 
-  const shapedOutput = finalizeShapedResponse({
+  const shapedOutput: RawCollectRefactorContextResponse = {
     requestedName: input.name,
     requestedRepo: input.repo,
     requestedMode: input.mode ?? 'component',
@@ -217,8 +235,23 @@ export async function runCollectRefactorContextTool(
       strongMatches: relatedFiles.filter((entry) => entry.confidence === 'high').length,
       importingFileCount: result.summary.importingFileCount,
       importedFileCount: result.summary.importedFileCount,
+      reexportingFileCount: result.summary.reexportingFileCount,
+      reexportedFileCount: result.summary.reexportedFileCount,
       graphNeighborCount: result.summary.graphNeighborCount,
+      nearbyFileCount: result.summary.nearbyFileCount,
+      relatedFileCount: result.summary.relatedFileCount,
+      definedSymbolCount: result.summary.definedSymbolCount,
+      exportedSymbolCount: result.summary.exportedSymbolCount,
       notes: result.summary.notes,
+    },
+    context: {
+      importingFiles: result.importingFiles.map((entry) => inferPathFromFileId(entry.fileId)).filter((value): value is string => Boolean(value)),
+      importedFiles: result.importedFiles.map((entry) => inferPathFromFileId(entry.fileId)).filter((value): value is string => Boolean(value)),
+      reexportingFiles: result.reexportingFiles.map((entry) => inferPathFromFileId(entry.fileId)).filter((value): value is string => Boolean(value)),
+      reexportedFiles: result.reexportedFiles.map((entry) => inferPathFromFileId(entry.fileId)).filter((value): value is string => Boolean(value)),
+      graphNeighbors: result.graphNeighbors.map((entry) => inferPathFromFileId(entry.fileId)).filter((value): value is string => Boolean(value)),
+      definedSymbols: result.definedSymbols.map((entry) => entry.name).filter((value): value is string => Boolean(value)),
+      exportedSymbols: result.exportedSymbols.map((entry) => entry.name).filter((value): value is string => Boolean(value)),
     },
     ...(detail === 'debug' || input.expandDebug
       ? {
@@ -227,13 +260,29 @@ export async function runCollectRefactorContextTool(
           },
         }
       : {}),
+    internal: {
+      returnedRelatedCount: relatedFiles.length,
+      totalRelatedCount: result.summary.relatedFileCount,
+      appliedRelatedLimit: input.limit,
+      returnedNearbyCount: Math.min(nearbyFiles.length, input.expandRelated ? 6 : 3),
+      totalNearbyCount: nearbyFiles.length,
+      appliedNearbyLimit: input.expandRelated ? 6 : 3,
+      returnedCandidateCount: Math.min(symbolCandidates.length, input.expandRelated ? 6 : 3),
+      totalCandidateCount: symbolCandidates.length,
+      appliedCandidateLimit: input.expandRelated ? 6 : 3,
+      navigationHintLimit: 3,
+    },
+  };
+  const normalizedOutput = normalizeCollectRefactorContextResponse({
+    rawResponse: shapedOutput,
+    mode: detail,
   });
 
   return {
     content: [
       {
         type: 'text',
-        text: JSON.stringify(shapedOutput, null, 2),
+        text: JSON.stringify(normalizedOutput, null, 2),
       },
     ],
   };
