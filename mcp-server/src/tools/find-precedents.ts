@@ -28,6 +28,7 @@ export const findPrecedentsToolDefinition = {
   name: 'find_precedents',
   title: 'Find Precedents',
   description: 'Find the strongest reusable implementation precedents for a file, symbol, or component.',
+  visibility: 'public' as const,
   inputSchema: findPrecedentsInputSchema,
 };
 

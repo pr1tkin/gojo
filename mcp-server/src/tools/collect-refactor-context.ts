@@ -20,6 +20,7 @@ export const collectRefactorContextToolDefinition = {
   name: 'collect_refactor_context',
   title: 'Collect Refactor Context',
   description: 'Assemble refactor impact context for a file, component, or symbol using existing graph and symbol signals.',
+  visibility: 'public' as const,
   inputSchema: collectRefactorContextInputSchema,
 };
 

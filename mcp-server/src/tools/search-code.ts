@@ -11,6 +11,7 @@ export const searchCodeToolDefinition = {
   name: 'search_code',
   title: 'Search Code',
   description: 'Searches indexed code through the Zoekt HTTP service.',
+  visibility: 'internal' as const,
   inputSchema: searchCodeInputSchema,
 };
 

@@ -2,7 +2,7 @@
 
 ## Overview
 
-gojo is a local code-intelligence stack for coding agents and developers.
+gojo is an agent-first code-intelligence stack for coding agents and developers.
 
 It combines:
 
@@ -87,16 +87,29 @@ Agent / MCP Client
       extraction -> fingerprints -> similarity -> clustering -> precedents
 ```
 
-gojo is easiest to think about as a progressive stack:
+gojo is easiest to think about as three layers:
 
-`Search -> Structure -> Graph -> Impact -> Ownership -> Planning`
+1. low-level primitives
+2. intelligence
+3. agent tools
 
-UI structure and pattern intelligence are additive capabilities built on the
-same published generation.
+Agents should interact with layer 3 by default.
 
 ## Layer Responsibilities
 
-### Search Layer
+### Layer 1: Low-Level Primitives
+
+Layer 1 contains the raw building blocks:
+
+- Zoekt-backed search
+- Tree-sitter symbols and file metadata
+- deterministic import and export resolution
+- persisted UI composition and prop-surface signals
+
+These capabilities remain available for debugging and expert workflows, but
+they are not the recommended entry point for normal agent use.
+
+#### Search Layer
 
 The search layer is Zoekt-backed full-text retrieval.
 
@@ -109,7 +122,7 @@ It is used for:
 Zoekt does not own symbol, graph, or planning state. Its freshness relative to
 the current MCP generation is tracked explicitly through coordination markers.
 
-### Structure Layer
+#### Structure Layer
 
 The structure layer is built from Tree-sitter parsing plus persisted file
 metadata.
@@ -139,7 +152,7 @@ Published artifacts live under:
 - `/app/.data/generations/<generationId>/change-summary.json`
 - `/app/.data/generations/<generationId>/consistency-report.json` when generated
 
-### Graph Layer
+#### Graph Layer
 
 The graph layer builds deterministic file-level relationships from indexed
 import and export metadata.
@@ -161,7 +174,19 @@ The persisted graph snapshot lives at:
 
 - `/app/.data/generations/<generationId>/code-graph.json`
 
-### Analysis Layer
+### Layer 2: Intelligence
+
+Layer 2 composes the low-level primitives into higher-value reasoning:
+
+- impact and ownership analysis
+- trust and coverage calibration
+- pattern extraction and similarity
+- clustering and precedent ranking
+- response shaping and explainability
+
+This is the internal intelligence substrate that powers the public agent tools.
+
+#### Analysis Layer
 
 The analysis layer derives higher-level change understanding from the published
 structure and graph.
@@ -175,7 +200,7 @@ It currently provides:
 This layer remains heuristic and conservative. It is designed to improve agent
 workflows, not to provide semantic guarantees.
 
-### Health, Consistency, And Trust
+#### Health, Consistency, And Trust
 
 Phase 6 hardening added explicit health and trust tracking around the published
 generation.
@@ -200,7 +225,7 @@ Key concepts:
 This does not make the system transactional. It makes the current state honest
 about what is and is not trustworthy.
 
-### Pattern Intelligence
+#### Pattern Intelligence
 
 gojo also includes an internal pattern-intelligence capability that builds
 on the published structure artifacts.
@@ -213,15 +238,22 @@ It currently provides:
 - same-kind clustering
 - repository-local precedent discovery
 
-Pattern intelligence remains internal. It does not currently expose a separate
-public precedent tool. For the detailed design, see
+Pattern intelligence now feeds the public precedent tooling through the agent
+tool layer. For the detailed design, see
 [Pattern Intelligence](./architecture/pattern-intelligence.md).
 
-### MCP Tool Layer
+### Layer 3: Agent Tools
 
 The MCP tool layer is the public interface exposed over stdio.
 
-Current tools:
+Public core tools:
+
+- `explore_component`
+- `find_precedents`
+- `collect_refactor_context`
+- `plan_change`
+
+Internal and advanced tools:
 
 - `search_code`
 - `open_file`
@@ -229,11 +261,11 @@ Current tools:
 - `find_symbol`
 - `find_references`
 - `find_related_files`
-- `explore_component`
-- `search_patterns`
-- `collect_refactor_context`
 - `analyze_symbol`
-- `plan_change`
+- `search_patterns`
+
+The server registers only the public core tools by default. Internal tools are
+exposed only when `GOJO_INCLUDE_INTERNAL_TOOLS=true`.
 
 The higher-level tools compose the published structure, graph, search, and
 analysis layers instead of reimplementing them.
@@ -315,7 +347,7 @@ The normal runtime model is:
 - ownership and API-boundary approximation
 - ordered change planning for safer refactor workflows
 - internal pattern extraction, similarity, clustering, and precedent discovery
-- public MCP tools for exploration, refactor context, symbol analysis, and planning
+- public MCP tools for component exploration, precedent lookup, refactor context, and planning
 
 ### Not In Scope Today
 
@@ -323,7 +355,6 @@ The normal runtime model is:
 - compiler-complete rename or refactor support
 - runtime UI behavior modeling
 - automatic code generation from precedents
-- public precedent-discovery tooling
 - deeper cross-repo semantic inference beyond the mounted repositories
 
 ## Related Documents

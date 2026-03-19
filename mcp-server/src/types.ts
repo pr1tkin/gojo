@@ -5,7 +5,10 @@ export interface AppConfig {
   port: number;
   reposRoot: string;
   zoektBaseUrl: string;
+  includeInternalTools: boolean;
 }
+
+export type ToolVisibility = 'public' | 'internal';
 
 export interface RepositoryInfo {
   id: string;

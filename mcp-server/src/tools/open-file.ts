@@ -32,6 +32,7 @@ export const openFileToolDefinition = {
   name: 'open_file',
   title: 'Open File',
   description: 'Reads a UTF-8 file from the mounted repositories root with optional line slicing.',
+  visibility: 'internal' as const,
   inputSchema: openFileInputSchema,
 };
 

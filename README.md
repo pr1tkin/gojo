@@ -1,159 +1,107 @@
-# 👁️ Gojo
+# Gojo
 
-> Throughout heaven and earth, I alone see everything.
+Gojo is an agent-first code intelligence engine that helps you understand,
+navigate, and modify complex codebases.
 
-Gojo is a local-first code intelligence engine that gives agents and developers  
-**complete visibility into complex codebases**.
+It combines repository search, structural indexing, graph reasoning, pattern
+intelligence, and planning into a single local-first system designed for coding
+agents.
 
-It combines search, symbol analysis, graph reasoning, and pattern intelligence  
-into a single system — designed for **understanding, not just lookup**.
+## What Is Gojo?
 
----
+Gojo is built around a small public tool surface.
 
-## ✨ What makes Gojo different?
+Agents should start with high-level workflow tools that reflect Gojo's actual
+strengths:
 
-Most tools show you files.
+- understand a component or file
+- find reusable implementation precedents
+- collect bounded refactor context
+- plan a safe change
 
-Gojo shows you:
+Low-level search and symbol tools still exist, but they are now treated as
+internal or advanced tools rather than the default agent interface.
 
-- what matters
-- how things connect
-- what will break if you change something
+## Core Capabilities
 
-> You’re not debugging anymore — you’re seeing.
+- Understand components, files, and their surrounding structure
+- Find strong local precedents for implementation reuse
+- Analyze impact and nearby context before a refactor
+- Plan safe, ordered changes with explicit risk signals
 
----
+## Core Agent Tools
 
-## ⚡ Core Capabilities
+- `explore_component`
+  - Understand structure, UI context, and role
+- `find_precedents`
+  - See how similar components, pages, hooks, or stores are implemented
+- `collect_refactor_context`
+  - Understand impact and surrounding code before a change
+- `plan_change`
+  - Generate a conservative edit and review plan
 
-- 🔍 High-performance repository search (Zoekt)
-- 🧠 Syntax-aware symbol extraction (Tree-sitter)
-- 🕸️ Deterministic code graph from imports & exports
-- 📊 Pattern intelligence & precedent discovery
-- 🤖 Agent-oriented workflows and context assembly
-- ⚙️ Local-first, Docker-based architecture
+These four tools are the public MCP surface by default.
 
----
+## Internal And Advanced Tools
 
-## 🧠 One Query → Full Context
+The following tools remain supported, but they are hidden from the default tool
+surface and are not intended for standard agent workflows:
 
-Instead of asking:
+- `search_code`
+- `open_file`
+- `list_symbols`
+- `find_symbol`
+- `find_references`
+- `find_related_files`
+- `analyze_symbol`
+- `search_patterns`
 
-- where is this defined?
-- who uses it?
-- what depends on it?
+To expose internal tools explicitly, start the MCP server with:
 
-Gojo answers all of them in one coherent view.
-
----
-
-## 🔌 Example Workflow
-
-```ts
-const component = await explore_component({
-  symbol: "WorkspaceCasesExportActions"
-})
-
-const symbol = await analyze_symbol({
-  symbolId: component.symbolId
-})
-
-const patterns = await search_patterns({
-  query: "export modal pattern"
-})
+```bash
+GOJO_INCLUDE_INTERNAL_TOOLS=true
 ```
 
----
+Use that mode for debugging, product evaluation, or expert workflows only.
 
-## 🧩 Recommended Agent Flow
+## Recommended Agent Flow
 
-Before changing code:
+A normal agent workflow is:
 
-1. explore_component
-2. analyze_symbol
-3. search_patterns
-4. collect_refactor_context
-5. plan_change
+1. `explore_component`
+2. `find_precedents`
+3. `collect_refactor_context`
+4. `plan_change`
 
-> Prefer understanding over guessing.
+This is the supported high-level surface.
 
----
-
-## 🏗️ Runtime Model
+## Runtime Model
 
 Gojo runs as three coordinated services against the same `repos/` mount:
 
-### 🔍 zoekt
-- serves indexed search over HTTP (`:6070`)
-- reads shards from `/data/index`
+- `zoekt`
+  - serves indexed search over HTTP on `:6070`
+- `zoekt-indexer`
+  - builds and refreshes Zoekt shards
+- `mcp-server`
+  - publishes the structured generation under `/app/.data`
+  - exposes the public agent tool surface over stdio
 
-### 🛠️ zoekt-indexer
-- scans `/repos`
-- writes search shards to `/data/index`
-- maintains freshness state
-
-### 🧠 mcp-server
-- runs over stdio
-- builds structured repository model
-- publishes artifacts under `/app/.data/generations/<generationId>/`
-- coordinates search refresh via marker files
-
-Gojo separates:
-- search (Zoekt)
-- structure (MCP server)
-
-and synchronizes them through fingerprints and coordination files.
-
----
-
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 docker compose up -d --build
 ```
 
-Mount your repositories → start exploring immediately.
+## Architecture
 
----
+Gojo is easiest to think about as three layers:
 
-## 🧠 Architecture Philosophy
+1. low-level primitives
+2. intelligence
+3. agent tools
 
-> Code understanding should be structured, not guessed.
-
-Gojo combines:
-
-- Search (Zoekt)
-- Syntax (Tree-sitter)
-- Graph (dependencies & relationships)
-- Patterns (real-world precedents)
-- Orchestration (agent workflows)
-
----
-
-## 🧲 Positioning
-
-Gojo is a lightweight, modular alternative to systems like Sourcegraph Cody —  
-focused on clarity, composability, and agent-first workflows.
-
----
-
-## ⚠️ Status
-
-Actively evolving toward:
-
-- better coverage
-- smarter ranking
-- deeper agent workflows
-
----
-
-## 💡 Vision
-
-> No blind spots. No guesswork. Just understanding.
-
-Gojo aims to become the foundation layer for intelligent coding agents.
-
----
+Agents should interact with layer 3.
 
 ## Documentation
 
@@ -162,7 +110,4 @@ Gojo aims to become the foundation layer for intelligent coding agents.
 - [Operations](./docs/operations.md)
 - [Testing](./docs/testing.md)
 - [Tools](./docs/tools.md)
-
-## License
-
 - [LICENSE.md](./LICENSE.md)

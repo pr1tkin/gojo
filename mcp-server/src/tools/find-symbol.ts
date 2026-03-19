@@ -9,6 +9,7 @@ export const findSymbolToolDefinition = {
   name: 'find_symbol',
   title: 'Find Symbol',
   description: 'Find symbol definitions across indexed repositories.',
+  visibility: 'internal' as const,
   inputSchema: findSymbolInputSchema,
 };
 

@@ -72,6 +72,7 @@ export const searchPatternsToolDefinition = {
   name: 'search_patterns',
   title: 'Search Patterns',
   description: 'Find similar implementations and repository precedents using heuristic pattern discovery.',
+  visibility: 'internal' as const,
   inputSchema: searchPatternsInputSchema,
 };
 

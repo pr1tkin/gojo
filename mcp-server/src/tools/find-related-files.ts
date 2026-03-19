@@ -10,6 +10,7 @@ export const findRelatedFilesToolDefinition = {
   name: 'find_related_files',
   title: 'Find Related Files',
   description: 'Find likely related files using the lightweight relation index.',
+  visibility: 'internal' as const,
   inputSchema: findRelatedFilesInputSchema,
 };
 

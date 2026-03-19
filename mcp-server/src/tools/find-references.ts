@@ -71,6 +71,7 @@ export const findReferencesToolDefinition = {
   name: 'find_references',
   title: 'Find References',
   description: 'Find likely usages of a symbol across repositories.',
+  visibility: 'internal' as const,
   inputSchema: findReferencesInputSchema,
 };
 

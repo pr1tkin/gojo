@@ -13,6 +13,7 @@ describe('loadConfig', () => {
       port: 3000,
       reposRoot: path.resolve('/repos'),
       zoektBaseUrl: 'http://zoekt:6070',
+      includeInternalTools: false,
     });
   });
 
@@ -29,6 +30,7 @@ describe('loadConfig', () => {
       port: 4567,
       reposRoot: path.resolve('./repos'),
       zoektBaseUrl: 'http://localhost:6070',
+      includeInternalTools: false,
     });
   });
 
@@ -62,5 +64,10 @@ describe('loadConfig', () => {
     expect(config.nodeEnv).toBe('production');
     expect(config.port).toBe(8080);
     expect(config.zoektBaseUrl).toBe('http://zoekt.internal:7000');
+  });
+
+  it('parses the internal tool exposure flag', () => {
+    expect(loadConfig({ GOJO_INCLUDE_INTERNAL_TOOLS: 'true' }).includeInternalTools).toBe(true);
+    expect(loadConfig({ GOJO_INCLUDE_INTERNAL_TOOLS: 'false' }).includeInternalTools).toBe(false);
   });
 });

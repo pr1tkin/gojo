@@ -6,6 +6,7 @@ export const listSymbolsToolDefinition = {
   name: 'list_symbols',
   title: 'List Symbols',
   description: 'Parses a TypeScript or TSX file and returns detected symbols.',
+  visibility: 'internal' as const,
   inputSchema: listSymbolsInputSchema,
 };
 

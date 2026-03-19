@@ -22,6 +22,7 @@ export const planChangeToolDefinition = {
   name: 'plan_change',
   title: 'Plan Change',
   description: 'Estimate safe change scope and produce an ordered edit/review plan using impact analysis and API-boundary signals.',
+  visibility: 'public' as const,
   inputSchema: planChangeInputSchema,
 };
 

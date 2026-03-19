@@ -6,6 +6,7 @@ export const analyzeSymbolToolDefinition = {
   name: 'analyze_symbol',
   title: 'Analyze Symbol',
   description: 'Assemble structured symbol analysis using symbol, graph, and file-context signals.',
+  visibility: 'internal' as const,
   inputSchema: analyzeSymbolInputSchema,
 };
 
