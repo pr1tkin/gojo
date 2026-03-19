@@ -47,7 +47,20 @@ export interface PatternFingerprint {
   uiSignals?: string[];
   asyncSignals?: string[];
   responsibilitySignals?: string[];
+  precedentFamily?: PatternPrecedentFamily;
 }
+
+export type PatternPrecedentFamily =
+  | 'page'
+  | 'routed_page_or_screen'
+  | 'ui_component'
+  | 'ui_wrapper_or_shell'
+  | 'hook_or_context'
+  | 'util_or_helper'
+  | 'api_or_handler'
+  | 'state_or_store'
+  | 'module_or_integration'
+  | 'support_runtime';
 
 export interface PatternStructuralAnchor {
   structurallyIndexed: boolean;
@@ -91,8 +104,18 @@ export interface SimilarPatternMatch {
 export interface PatternCluster {
   clusterId: string;
   patternKind: PatternKind;
+  precedentFamily: PatternPrecedentFamily;
   memberPatternIds: string[];
+  coreMemberPatternIds: string[];
+  peripheralMemberPatternIds: string[];
   representativePatternId: string;
   size: number;
   dominantSignals: string[];
+  relatedClusterIds: string[];
+  reason: string;
+  cohesion: {
+    sameFamilyRatio: number;
+    averageDependencyOverlap: number;
+    averageStructuralAlignment: number;
+  };
 }

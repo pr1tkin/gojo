@@ -1,5 +1,6 @@
 import { createPatternId } from './ids.js';
 import { loadPatternIndex, savePatternIndex } from './store.js';
+import { withInferredPatternFamily } from './family.js';
 import type {
   PatternCandidate,
   PatternFingerprint,
@@ -35,18 +36,20 @@ function dedupeStrings(values: string[]): string[] {
 }
 
 function normalizePatternCandidate(candidate: PatternCandidate): PatternCandidate {
+  const fingerprint = withInferredPatternFamily(candidate.fingerprint, candidate);
+
   return {
     ...candidate,
     supportingImports: dedupeStrings(candidate.supportingImports),
     relatedSymbolIds: dedupeStrings(candidate.relatedSymbolIds),
     fingerprint: {
-      ...candidate.fingerprint,
-      structuralSignals: dedupeStrings(candidate.fingerprint.structuralSignals),
-      importSet: dedupeStrings(candidate.fingerprint.importSet),
-      ...(candidate.fingerprint.uiSignals ? { uiSignals: dedupeStrings(candidate.fingerprint.uiSignals) } : {}),
-      ...(candidate.fingerprint.asyncSignals ? { asyncSignals: dedupeStrings(candidate.fingerprint.asyncSignals) } : {}),
-      ...(candidate.fingerprint.responsibilitySignals
-        ? { responsibilitySignals: dedupeStrings(candidate.fingerprint.responsibilitySignals) }
+      ...fingerprint,
+      structuralSignals: dedupeStrings(fingerprint.structuralSignals),
+      importSet: dedupeStrings(fingerprint.importSet),
+      ...(fingerprint.uiSignals ? { uiSignals: dedupeStrings(fingerprint.uiSignals) } : {}),
+      ...(fingerprint.asyncSignals ? { asyncSignals: dedupeStrings(fingerprint.asyncSignals) } : {}),
+      ...(fingerprint.responsibilitySignals
+        ? { responsibilitySignals: dedupeStrings(fingerprint.responsibilitySignals) }
         : {}),
     },
     ...(candidate.structuralAnchor

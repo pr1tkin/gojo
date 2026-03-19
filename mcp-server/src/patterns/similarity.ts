@@ -1,4 +1,9 @@
 import { createPatternClusterId } from './ids.js';
+import {
+  arePatternFamiliesCompatible,
+  getPatternPrecedentFamilyLabel,
+  inferPatternPrecedentFamily,
+} from './family.js';
 import { getPatternById } from './repository.js';
 import { loadPatternIndex } from './store.js';
 import type {
@@ -7,6 +12,7 @@ import type {
   PatternFingerprint,
   PatternIndex,
   PatternKind,
+  PatternPrecedentFamily,
   SimilarPatternMatch,
 } from './types.js';
 
@@ -21,10 +27,38 @@ const NAME_AWARE_PATTERN_KINDS = new Set<PatternKind>([
   'async-data-flow',
   'utility-export',
 ]);
+const STRONG_DEPENDENCY_OVERLAP = 0.34;
+const MIN_CLUSTER_DEPENDENCY_OVERLAP = 0.18;
+const MIN_CLUSTER_IMPORT_OVERLAP = 0.45;
+const MIN_CLUSTER_RESPONSIBILITY_OVERLAP = 0.55;
+const MIN_CLUSTER_SCORE = 0.62;
+const MIN_CORE_DEPENDENCY_OVERLAP = 0.2;
+const MIN_CORE_IMPORT_OVERLAP = 0.4;
+const MIN_CORE_RESPONSIBILITY_OVERLAP = 0.5;
+const MIN_RELATED_CLUSTER_SCORE = 0.58;
 
 interface WeightedDimension {
   score: number;
   weight: number;
+}
+
+interface ClusterEdgeMetrics {
+  structuralOverlap: number;
+  importOverlap: number;
+  uiOverlap: number;
+  asyncOverlap: number;
+  responsibilityOverlap: number;
+  resolvedDependencyOverlap: number;
+  dependencyFamilyOverlap: number;
+  dependencyOverlap: number;
+  familyCompatibility: number;
+  sharedStructuralSignals: number;
+  structuralAlignmentScore: number;
+}
+
+interface BuiltCluster {
+  cluster: PatternCluster;
+  representative: PatternCandidate;
 }
 
 function compareSimilarPatterns(left: SimilarPatternMatch, right: SimilarPatternMatch): number {
@@ -217,6 +251,80 @@ function getSignalSets(pattern: PatternCandidate): {
   };
 }
 
+function getPatternFamily(pattern: PatternCandidate): PatternPrecedentFamily {
+  return pattern.fingerprint.precedentFamily ?? inferPatternPrecedentFamily(pattern);
+}
+
+function getPatternStructuralAlignmentScore(pattern: PatternCandidate): number {
+  if (!pattern.structuralAnchor) {
+    return 0.6;
+  }
+
+  if (!pattern.structuralAnchor.structurallyIndexed) {
+    return 0.2;
+  }
+
+  if ((pattern.structuralAnchor.resolvedLocalDependencyFileIds?.length ?? 0) > 0) {
+    return 1;
+  }
+
+  if ((pattern.structuralAnchor.localDependencyFamilyTokens?.length ?? 0) > 0) {
+    return 0.8;
+  }
+
+  return 0.6;
+}
+
+function getPatternFamilyCompatibilityScore(left: PatternCandidate, right: PatternCandidate): number {
+  const leftFamily = getPatternFamily(left);
+  const rightFamily = getPatternFamily(right);
+
+  if (leftFamily === rightFamily) {
+    return 1;
+  }
+
+  if (arePatternFamiliesCompatible(leftFamily, rightFamily)) {
+    return 0.85;
+  }
+
+  return 0;
+}
+
+function computeClusterEdgeMetrics(left: PatternCandidate, right: PatternCandidate): ClusterEdgeMetrics {
+  const leftSets = getSignalSets(left);
+  const rightSets = getSignalSets(right);
+  const structuralOverlap = jaccardSimilarity(leftSets.structuralSignals, rightSets.structuralSignals);
+  const importOverlap = contextualOverlap(leftSets.importSet, rightSets.importSet);
+  const uiOverlap = contextualOverlap(leftSets.uiSignals, rightSets.uiSignals);
+  const asyncOverlap = contextualOverlap(leftSets.asyncSignals, rightSets.asyncSignals);
+  const responsibilityOverlap = contextualOverlap(leftSets.responsibilitySignals, rightSets.responsibilitySignals);
+  const resolvedDependencyOverlap = contextualOverlap(
+    leftSets.resolvedLocalDependencyFileIds,
+    rightSets.resolvedLocalDependencyFileIds,
+  );
+  const dependencyFamilyOverlap = contextualOverlap(
+    leftSets.localDependencyFamilyTokens,
+    rightSets.localDependencyFamilyTokens,
+  );
+
+  return {
+    structuralOverlap,
+    importOverlap,
+    uiOverlap,
+    asyncOverlap,
+    responsibilityOverlap,
+    resolvedDependencyOverlap,
+    dependencyFamilyOverlap,
+    dependencyOverlap: Math.max(resolvedDependencyOverlap, dependencyFamilyOverlap * 0.8, importOverlap * 0.45),
+    familyCompatibility: getPatternFamilyCompatibilityScore(left, right),
+    sharedStructuralSignals: countIntersection(leftSets.structuralSignals, rightSets.structuralSignals),
+    structuralAlignmentScore: Math.min(
+      getPatternStructuralAlignmentScore(left),
+      getPatternStructuralAlignmentScore(right),
+    ),
+  };
+}
+
 function computeRepresentativenessFactor(pattern: PatternCandidate): number {
   let factor = 1;
   const exportShape = pattern.fingerprint.exportShape;
@@ -295,6 +403,7 @@ function computeSimilarityScoreInternal(left: PatternCandidate, right: PatternCa
   const rightSets = getSignalSets(right);
   const sharedStructuralSignals = countIntersection(leftSets.structuralSignals, rightSets.structuralSignals);
   const structuralOverlap = jaccardSimilarity(leftSets.structuralSignals, rightSets.structuralSignals);
+  const familyCompatibility = getPatternFamilyCompatibilityScore(left, right);
   const dimensions: WeightedDimension[] = [
     { score: 1, weight: 0.2 },
     { score: structuralOverlap, weight: 0.3 },
@@ -307,6 +416,7 @@ function computeSimilarityScoreInternal(left: PatternCandidate, right: PatternCa
       score: computeSymbolRoleSimilarity(left.fingerprint.symbolRole, right.fingerprint.symbolRole),
       weight: 0.1,
     },
+    { score: familyCompatibility, weight: 0.12 },
   ];
 
   if (leftSets.uiSignals.size > 0 || rightSets.uiSignals.size > 0) {
@@ -334,7 +444,7 @@ function computeSimilarityScoreInternal(left: PatternCandidate, right: PatternCa
   if (leftSets.localDependencyFamilyTokens.size > 0 || rightSets.localDependencyFamilyTokens.size > 0) {
     dimensions.push({
       score: jaccardSimilarity(leftSets.localDependencyFamilyTokens, rightSets.localDependencyFamilyTokens),
-      weight: 0.08,
+      weight: 0.12,
     });
   }
 
@@ -345,6 +455,10 @@ function computeSimilarityScoreInternal(left: PatternCandidate, right: PatternCa
     score *= 0.25;
   } else if (Math.min(leftSets.structuralSignals.size, rightSets.structuralSignals.size) <= 1) {
     score *= 0.85;
+  }
+
+  if (familyCompatibility === 0) {
+    score *= 0.72;
   }
 
   score = applyPairAdjustments(left, right, score, structuralOverlap);
@@ -362,63 +476,60 @@ function passesClusteringGate(
     return false;
   }
 
-  const leftStructuralSignals = toSet(left.fingerprint.structuralSignals);
-  const rightStructuralSignals = toSet(right.fingerprint.structuralSignals);
-  const sharedStructuralSignals = countIntersection(leftStructuralSignals, rightStructuralSignals);
-  const structuralOverlap = jaccardSimilarity(leftStructuralSignals, rightStructuralSignals);
-  const importOverlap = contextualOverlap(toSet(left.fingerprint.importSet), toSet(right.fingerprint.importSet));
-  const uiOverlap = contextualOverlap(toSet(left.fingerprint.uiSignals), toSet(right.fingerprint.uiSignals));
-  const asyncOverlap = contextualOverlap(toSet(left.fingerprint.asyncSignals), toSet(right.fingerprint.asyncSignals));
-  const responsibilityOverlap = contextualOverlap(
-    toSet(left.fingerprint.responsibilitySignals),
-    toSet(right.fingerprint.responsibilitySignals),
-  );
-  const resolvedDependencyOverlap = contextualOverlap(
-    toSet(left.structuralAnchor?.resolvedLocalDependencyFileIds),
-    toSet(right.structuralAnchor?.resolvedLocalDependencyFileIds),
-  );
-  const dependencyFamilyOverlap = contextualOverlap(
-    toSet(left.structuralAnchor?.localDependencyFamilyTokens),
-    toSet(right.structuralAnchor?.localDependencyFamilyTokens),
-  );
+  const metrics = computeClusterEdgeMetrics(left, right);
   const nameSimilarity = NAME_AWARE_PATTERN_KINDS.has(left.kind)
     ? computeSymbolNameSimilarity(left.name, right.name)
     : 0;
 
-  if (sharedStructuralSignals >= 2) {
-    if (BROAD_PATTERN_KINDS.has(left.kind) && structuralOverlap < 0.5) {
-      return false;
-    }
-
-    if (
-      BROAD_PATTERN_KINDS.has(left.kind) &&
-      Math.min(leftStructuralSignals.size, rightStructuralSignals.size) <= 2 &&
-      importOverlap < 0.2 &&
-      nameSimilarity < 0.2
-    ) {
-      return false;
-    }
-
-    return true;
-  }
-
-  if (sharedStructuralSignals === 0) {
+  if (metrics.familyCompatibility === 0) {
     return false;
   }
 
-  if (BROAD_PATTERN_KINDS.has(left.kind) && structuralOverlap < 0.5) {
+  if (metrics.sharedStructuralSignals === 0) {
     return false;
   }
 
-  return (
-    importOverlap >= 0.35 ||
-    resolvedDependencyOverlap > 0 ||
-    dependencyFamilyOverlap >= 0.34 ||
-    uiOverlap > 0 ||
-    asyncOverlap > 0 ||
-    responsibilityOverlap > 0 ||
-    nameSimilarity >= 0.35
-  );
+  if (BROAD_PATTERN_KINDS.has(left.kind) && metrics.structuralOverlap < 0.5) {
+    return false;
+  }
+
+  if (metrics.structuralAlignmentScore <= 0.2 && metrics.dependencyOverlap < MIN_CLUSTER_DEPENDENCY_OVERLAP) {
+    return false;
+  }
+
+  if (
+    metrics.dependencyOverlap < MIN_CLUSTER_DEPENDENCY_OVERLAP &&
+    metrics.importOverlap < MIN_CLUSTER_IMPORT_OVERLAP &&
+    metrics.responsibilityOverlap < MIN_CLUSTER_RESPONSIBILITY_OVERLAP &&
+    metrics.uiOverlap === 0 &&
+    metrics.asyncOverlap === 0
+  ) {
+    return false;
+  }
+
+  if (
+    metrics.familyCompatibility < 1 &&
+    metrics.dependencyOverlap < STRONG_DEPENDENCY_OVERLAP &&
+    metrics.responsibilityOverlap < MIN_CLUSTER_RESPONSIBILITY_OVERLAP
+  ) {
+    return false;
+  }
+
+  if (
+    BROAD_PATTERN_KINDS.has(left.kind) &&
+    metrics.dependencyOverlap < MIN_CLUSTER_DEPENDENCY_OVERLAP &&
+    metrics.importOverlap < MIN_CLUSTER_IMPORT_OVERLAP &&
+    nameSimilarity < 0.2
+  ) {
+    return false;
+  }
+
+  const minimumScore =
+    metrics.familyCompatibility >= 1 && metrics.dependencyOverlap >= MIN_CLUSTER_DEPENDENCY_OVERLAP
+      ? Math.max(0.56, threshold - 0.12)
+      : Math.max(threshold, MIN_CLUSTER_SCORE);
+
+  return score >= minimumScore;
 }
 
 function collectDominantSignals(patterns: PatternCandidate[]): string[] {
@@ -434,6 +545,120 @@ function collectDominantSignals(patterns: PatternCandidate[]): string[] {
     .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
     .slice(0, MAX_DOMINANT_SIGNALS)
     .map(([signal]) => signal);
+}
+
+function determineClusterFamily(patterns: PatternCandidate[]): PatternPrecedentFamily {
+  const counts = new Map<PatternPrecedentFamily, number>();
+
+  for (const pattern of patterns) {
+    const family = getPatternFamily(pattern);
+    counts.set(family, (counts.get(family) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? 'module_or_integration';
+}
+
+function classifyClusterMembers(
+  family: PatternPrecedentFamily,
+  representative: PatternCandidate,
+  patterns: PatternCandidate[],
+  similarityMatrix: Map<string, Map<string, number>>,
+): { coreMemberPatternIds: string[]; peripheralMemberPatternIds: string[] } {
+  const core: string[] = [];
+  const peripheral: string[] = [];
+
+  for (const pattern of patterns) {
+    if (pattern.patternId === representative.patternId) {
+      core.push(pattern.patternId);
+      continue;
+    }
+
+    const score = similarityMatrix.get(representative.patternId)?.get(pattern.patternId) ?? 0;
+    const metrics = computeClusterEdgeMetrics(representative, pattern);
+    const compatibleFamily = arePatternFamiliesCompatible(family, getPatternFamily(pattern));
+    const isCore =
+      compatibleFamily &&
+      score >= MIN_CLUSTER_SCORE &&
+      metrics.structuralAlignmentScore >= 0.6 &&
+      (
+        metrics.dependencyOverlap >= MIN_CORE_DEPENDENCY_OVERLAP ||
+        metrics.importOverlap >= MIN_CORE_IMPORT_OVERLAP ||
+        metrics.responsibilityOverlap >= MIN_CORE_RESPONSIBILITY_OVERLAP
+      );
+
+    if (isCore) {
+      core.push(pattern.patternId);
+    } else {
+      peripheral.push(pattern.patternId);
+    }
+  }
+
+  return {
+    coreMemberPatternIds: core.sort((left, right) => left.localeCompare(right)),
+    peripheralMemberPatternIds: peripheral.sort((left, right) => left.localeCompare(right)),
+  };
+}
+
+function buildClusterReason(
+  family: PatternPrecedentFamily,
+  patterns: PatternCandidate[],
+): string {
+  const dependencyTokenCounts = new Map<string, number>();
+
+  for (const pattern of patterns) {
+    for (const token of pattern.structuralAnchor?.localDependencyFamilyTokens ?? []) {
+      dependencyTokenCounts.set(token, (dependencyTokenCounts.get(token) ?? 0) + 1);
+    }
+  }
+
+  const topDependencyToken = [...dependencyTokenCounts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0];
+
+  if (topDependencyToken && topDependencyToken[1] >= Math.max(2, Math.ceil(patterns.length * 0.5))) {
+    return `shared ${getPatternPrecedentFamilyLabel(family)} dependencies`;
+  }
+
+  if (family === 'page' || family === 'routed_page_or_screen') {
+    return 'same page family';
+  }
+
+  if (family === 'state_or_store') {
+    return 'shared store pattern';
+  }
+
+  if (family === 'hook_or_context') {
+    return 'shared hook/context pattern';
+  }
+
+  return `same ${getPatternPrecedentFamilyLabel(family)} family`;
+}
+
+function buildClusterCohesion(
+  family: PatternPrecedentFamily,
+  representative: PatternCandidate,
+  patterns: PatternCandidate[],
+): PatternCluster['cohesion'] {
+  const sameFamilyMembers = patterns.filter((pattern) =>
+    arePatternFamiliesCompatible(family, getPatternFamily(pattern)),
+  ).length;
+  const dependencyScores = patterns
+    .filter((pattern) => pattern.patternId !== representative.patternId)
+    .map((pattern) => computeClusterEdgeMetrics(representative, pattern).dependencyOverlap);
+  const structuralScores = patterns.map((pattern) => getPatternStructuralAlignmentScore(pattern));
+  const averageDependencyOverlap =
+    dependencyScores.length === 0
+      ? 1
+      : roundScore(dependencyScores.reduce((sum, value) => sum + value, 0) / dependencyScores.length);
+  const averageStructuralAlignment = roundScore(
+    structuralScores.reduce((sum, value) => sum + value, 0) / Math.max(1, structuralScores.length),
+  );
+
+  return {
+    sameFamilyRatio: roundScore(sameFamilyMembers / Math.max(1, patterns.length)),
+    averageDependencyOverlap,
+    averageStructuralAlignment,
+  };
 }
 
 function pickRepresentativePattern(
@@ -503,7 +728,7 @@ function buildSimilarityMatrix(patterns: PatternCandidate[]): Map<string, Map<st
   return matrix;
 }
 
-function clusterPatternsOfKind(patterns: PatternCandidate[], threshold: number): PatternCluster[] {
+function clusterPatternsOfKind(patterns: PatternCandidate[], threshold: number): BuiltCluster[] {
   if (patterns.length === 0) {
     return [];
   }
@@ -511,7 +736,7 @@ function clusterPatternsOfKind(patterns: PatternCandidate[], threshold: number):
   const orderedPatterns = [...patterns].sort((left, right) => left.patternId.localeCompare(right.patternId));
   const similarityMatrix = buildSimilarityMatrix(orderedPatterns);
   const visited = new Set<string>();
-  const clusters: PatternCluster[] = [];
+  const clusters: BuiltCluster[] = [];
 
   for (const pattern of orderedPatterns) {
     if (visited.has(pattern.patternId)) {
@@ -550,18 +775,67 @@ function clusterPatternsOfKind(patterns: PatternCandidate[], threshold: number):
       .map((memberId) => orderedPatterns.find((entry) => entry.patternId === memberId) as PatternCandidate)
       .sort((left, right) => left.patternId.localeCompare(right.patternId));
     const representative = pickRepresentativePattern(memberPatterns, similarityMatrix);
+    const precedentFamily = determineClusterFamily(memberPatterns);
+    const memberClassification = classifyClusterMembers(precedentFamily, representative, memberPatterns, similarityMatrix);
 
     clusters.push({
-      clusterId: createPatternClusterId(pattern.kind, representative.patternId),
-      patternKind: pattern.kind,
-      memberPatternIds: memberPatterns.map((entry) => entry.patternId),
-      representativePatternId: representative.patternId,
-      size: memberPatterns.length,
-      dominantSignals: collectDominantSignals(memberPatterns),
+      representative,
+      cluster: {
+        clusterId: createPatternClusterId(pattern.kind, representative.patternId),
+        patternKind: pattern.kind,
+        precedentFamily,
+        memberPatternIds: memberPatterns.map((entry) => entry.patternId),
+        coreMemberPatternIds: memberClassification.coreMemberPatternIds,
+        peripheralMemberPatternIds: memberClassification.peripheralMemberPatternIds,
+        representativePatternId: representative.patternId,
+        size: memberPatterns.length,
+        dominantSignals: collectDominantSignals(memberPatterns),
+        relatedClusterIds: [],
+        reason: buildClusterReason(precedentFamily, memberPatterns),
+        cohesion: buildClusterCohesion(precedentFamily, representative, memberPatterns),
+      },
     });
   }
 
-  return clusters.sort(compareClusters);
+  return clusters.sort((left, right) => compareClusters(left.cluster, right.cluster));
+}
+
+function linkRelatedClusters(clusters: BuiltCluster[], threshold: number): BuiltCluster[] {
+  for (let index = 0; index < clusters.length; index += 1) {
+    for (let innerIndex = index + 1; innerIndex < clusters.length; innerIndex += 1) {
+      const left = clusters[index];
+      const right = clusters[innerIndex];
+
+      if (left.cluster.patternKind !== right.cluster.patternKind) {
+        continue;
+      }
+
+      if (arePatternFamiliesCompatible(left.cluster.precedentFamily, right.cluster.precedentFamily)) {
+        continue;
+      }
+
+      const score = computeSimilarityScoreInternal(left.representative, right.representative);
+      const metrics = computeClusterEdgeMetrics(left.representative, right.representative);
+
+      if (
+        (
+          score < Math.max(threshold - 0.08, MIN_RELATED_CLUSTER_SCORE) &&
+          metrics.dependencyOverlap < 0.5
+        ) ||
+        (
+          metrics.dependencyOverlap < MIN_CLUSTER_DEPENDENCY_OVERLAP &&
+          metrics.responsibilityOverlap < MIN_CLUSTER_RESPONSIBILITY_OVERLAP
+        )
+      ) {
+        continue;
+      }
+
+      left.cluster.relatedClusterIds = dedupeAndSort([...left.cluster.relatedClusterIds, right.cluster.clusterId]);
+      right.cluster.relatedClusterIds = dedupeAndSort([...right.cluster.relatedClusterIds, left.cluster.clusterId]);
+    }
+  }
+
+  return clusters;
 }
 
 export class PatternSimilarityService {
@@ -601,14 +875,17 @@ export class PatternSimilarityService {
   }
 
   buildClusters(threshold: number = DEFAULT_CLUSTER_THRESHOLD): PatternCluster[] {
-    const clusters: PatternCluster[] = [];
+    const builtClusters: BuiltCluster[] = [];
 
     for (const kind of dedupeAndSort(this.index.patterns.map((pattern) => pattern.kind))) {
       const patterns = this.index.patterns.filter((pattern) => pattern.kind === kind);
-      clusters.push(...clusterPatternsOfKind(patterns, threshold));
+      builtClusters.push(...clusterPatternsOfKind(patterns, threshold));
     }
 
-    return clusters.filter((cluster) => cluster.size > 0).sort(compareClusters);
+    return linkRelatedClusters(builtClusters, threshold)
+      .map((entry) => entry.cluster)
+      .filter((cluster) => cluster.size > 0)
+      .sort(compareClusters);
   }
 
   formatClusterDebug(cluster: PatternCluster): string {
@@ -621,8 +898,10 @@ export class PatternSimilarityService {
       .join('\n');
 
     return [
-      `Cluster (${cluster.patternKind}) size=${cluster.size}`,
+      `Cluster (${cluster.patternKind}) size=${cluster.size} family=${cluster.precedentFamily}`,
+      `reason: ${cluster.reason}`,
       `signals: ${cluster.dominantSignals.join(', ')}`,
+      `core: ${cluster.coreMemberPatternIds.length} peripheral: ${cluster.peripheralMemberPatternIds.length}`,
       '',
       'Members:',
       members,
