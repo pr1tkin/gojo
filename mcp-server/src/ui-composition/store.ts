@@ -11,6 +11,7 @@ import {
   type UiComponentResolution,
   type UiCompositionEdge,
   type UiCompositionIndex,
+  type UiMemberExpressionMetadata,
 } from './types.js';
 
 function getUiCompositionDirectory(): string {
@@ -39,6 +40,22 @@ function isUiResolution(value: unknown): value is UiComponentResolution {
   );
 }
 
+function isUiMemberExpressionMetadata(value: unknown): value is UiMemberExpressionMetadata {
+  return (
+    isObject(value) &&
+    typeof value.expression === 'string' &&
+    typeof value.baseName === 'string' &&
+    Array.isArray(value.members) &&
+    value.members.every((member) => typeof member === 'string') &&
+    (
+      value.resolutionKind === 'resolved_local_member' ||
+      value.resolutionKind === 'external_dependency_member' ||
+      value.resolutionKind === 'framework_member' ||
+      value.resolutionKind === 'unresolved_member'
+    )
+  );
+}
+
 function isUiCompositionEdge(value: unknown): value is UiCompositionEdge {
   return (
     isObject(value) &&
@@ -53,7 +70,8 @@ function isUiCompositionEdge(value: unknown): value is UiCompositionEdge {
     (value.confidence === 'high' || value.confidence === 'medium') &&
     (value.note === undefined || typeof value.note === 'string') &&
     (value.hint === undefined || typeof value.hint === 'string') &&
-    (value.dependencySource === undefined || typeof value.dependencySource === 'string')
+    (value.dependencySource === undefined || typeof value.dependencySource === 'string') &&
+    (value.memberExpression === undefined || isUiMemberExpressionMetadata(value.memberExpression))
   );
 }
 
@@ -112,6 +130,7 @@ function normalizeLoadedIndex(value: unknown): UiCompositionIndex {
                 note: typeof entry.note === 'string' ? entry.note : undefined,
                 hint: undefined,
                 dependencySource: undefined,
+                memberExpression: undefined,
               };
             }
 

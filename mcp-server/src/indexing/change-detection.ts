@@ -121,7 +121,11 @@ function normalizeUiEdges(edges: UiCompositionEdge[], filePath: string): string[
         (edge) =>
           `${edge.parentFilePath}|${edge.parentSymbolId ?? ''}|${edge.childComponentName}|${edge.childFilePath ?? ''}|${
             edge.childSymbolId ?? ''
-          }|${edge.confidence}|${edge.resolution}|${edge.hint ?? ''}|${edge.dependencySource ?? ''}`,
+          }|${edge.confidence}|${edge.resolution}|${edge.hint ?? ''}|${edge.dependencySource ?? ''}|${
+            edge.memberExpression?.expression ?? ''
+          }|${edge.memberExpression?.baseName ?? ''}|${edge.memberExpression?.members.join('.') ?? ''}|${
+            edge.memberExpression?.resolutionKind ?? ''
+          }`,
       ),
   );
 }

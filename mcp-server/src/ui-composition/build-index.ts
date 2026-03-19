@@ -38,11 +38,10 @@ function createEdge(
   const parent = resolveParentSymbol(fileSymbols, node.startPosition.row + 1);
   const resolvedChild = resolveChildComponent(
     relation,
-    childCandidate.name,
+    childCandidate,
     index,
     fileSymbols,
     repoConfigById,
-    childCandidate.note,
   );
 
   return {
@@ -58,6 +57,7 @@ function createEdge(
     note: resolvedChild.note,
     hint: resolvedChild.hint,
     dependencySource: resolvedChild.dependencySource,
+    memberExpression: resolvedChild.memberExpression,
   };
 }
 
@@ -66,12 +66,14 @@ function dedupeEdges(edges: UiCompositionEdge[]): UiCompositionEdge[] {
   const deduped: UiCompositionEdge[] = [];
 
   for (const edge of edges) {
-    const key = [
+      const key = [
       edge.parentFilePath,
       edge.parentSymbolId ?? '',
       edge.childComponentName,
       edge.childFilePath ?? '',
       edge.childSymbolId ?? '',
+      edge.memberExpression?.expression ?? '',
+      edge.memberExpression?.resolutionKind ?? '',
     ].join('|');
 
     if (seen.has(key)) {

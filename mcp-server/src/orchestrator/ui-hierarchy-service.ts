@@ -57,6 +57,20 @@ function compareComponentRefs(left: UiHierarchyComponentRef, right: UiHierarchyC
   return leftKey.localeCompare(rightKey);
 }
 
+function countsTowardUiCompleteness(node: {
+  resolution: UiHierarchyTreeNode['resolution'];
+  memberExpression?: UiHierarchyTreeNode['memberExpression'];
+}): boolean {
+  if (node.resolution === 'resolved_local') {
+    return true;
+  }
+
+  return (
+    node.memberExpression?.resolutionKind === 'external_dependency_member' ||
+    node.memberExpression?.resolutionKind === 'framework_member'
+  );
+}
+
 function mapChildren(edges: Awaited<ReturnType<typeof getChildrenForComponent>>): UiHierarchyComponentRef[] {
   return dedupeComponentRefs(
     edges.map((edge) => ({
@@ -67,6 +81,7 @@ function mapChildren(edges: Awaited<ReturnType<typeof getChildrenForComponent>>)
       resolution: edge.resolution,
       hint: edge.hint ?? edge.note,
       source: edge.dependencySource,
+      memberExpression: edge.memberExpression,
     })),
   ).sort(compareComponentRefs);
 }
@@ -93,6 +108,7 @@ function createTreeNodeFromChildEdge(edge: Awaited<ReturnType<typeof getChildren
     resolution: edge.resolution,
     hint: edge.hint ?? edge.note,
     source: edge.dependencySource,
+    memberExpression: edge.memberExpression,
     children: [],
   };
 }
@@ -121,7 +137,7 @@ function summarizeTree(nodes: UiHierarchyTreeNode[]): UiHierarchyTreeSummary {
     for (const item of items) {
       totalNodes += 1;
 
-      if (item.resolution === 'resolved_local') {
+      if (countsTowardUiCompleteness(item)) {
         resolvedNodes += 1;
       }
 

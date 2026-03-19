@@ -1,4 +1,7 @@
-import type { UiComponentResolution } from '../ui-composition/types.js';
+import type {
+  UiComponentResolution,
+  UiMemberExpressionMetadata,
+} from '../ui-composition/types.js';
 
 export interface UiHierarchyComponentRef {
   componentName: string;
@@ -8,6 +11,7 @@ export interface UiHierarchyComponentRef {
   resolution: UiComponentResolution;
   hint?: string;
   source?: string;
+  memberExpression?: UiMemberExpressionMetadata;
 }
 
 export interface UiHierarchyTreeNode {
@@ -18,6 +22,7 @@ export interface UiHierarchyTreeNode {
   resolution: UiComponentResolution;
   hint?: string;
   source?: string;
+  memberExpression?: UiMemberExpressionMetadata;
   children: UiHierarchyTreeNode[];
 }
 

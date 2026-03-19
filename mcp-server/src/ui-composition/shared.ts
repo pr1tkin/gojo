@@ -7,11 +7,16 @@ import {
   type SimplePathMapping,
 } from '../graph/repo-config.js';
 import type { IndexedSymbol, ImportBinding, ImportRecord, SymbolIndex } from '../symbol-index/types.js';
-import type { UiComponentResolution } from './types.js';
+import type {
+  UiComponentResolution,
+  UiMemberExpressionMetadata,
+  UiMemberExpressionResolution,
+} from './types.js';
 
 export interface UiComponentCandidate {
   name: string;
   note?: string;
+  memberExpression?: Omit<UiMemberExpressionMetadata, 'resolutionKind'>;
 }
 
 export interface ResolvedParentSymbol {
@@ -27,6 +32,7 @@ export interface ResolvedChildComponent {
   note?: string;
   hint?: string;
   dependencySource?: string;
+  memberExpression?: UiMemberExpressionMetadata;
 }
 
 export function isJsxLikeFile(filePath: string): boolean {
@@ -50,6 +56,81 @@ export function isPascalCaseComponentName(name: string): boolean {
   return /^[A-Z][A-Za-z0-9_$]*$/.test(name);
 }
 
+function getMemberExpressionObjectNode(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  return node.childForFieldName('object') ?? node.namedChildren[0] ?? null;
+}
+
+function getMemberExpressionPropertyNode(node: Parser.SyntaxNode): Parser.SyntaxNode | null {
+  return node.childForFieldName('property') ?? node.namedChildren[node.namedChildren.length - 1] ?? null;
+}
+
+function extractMemberExpressionSegments(
+  node: Parser.SyntaxNode,
+  source: string,
+): string[] {
+  if (node.type === 'identifier' || node.type === 'property_identifier') {
+    const text = getNodeText(node, source).trim();
+    return text ? [text] : [];
+  }
+
+  if (node.type === 'member_expression') {
+    const objectNode = getMemberExpressionObjectNode(node);
+    const propertyNode = getMemberExpressionPropertyNode(node);
+
+    if (!objectNode || !propertyNode) {
+      return [];
+    }
+
+    const objectSegments = extractMemberExpressionSegments(objectNode, source);
+    const propertyText = getNodeText(propertyNode, source).trim();
+
+    if (objectSegments.length === 0 || !propertyText) {
+      return [];
+    }
+
+    return [...objectSegments, propertyText];
+  }
+
+  return [];
+}
+
+function isFrameworkMemberName(name: string): boolean {
+  return name === 'Provider' || name === 'Consumer';
+}
+
+function createMemberExpressionMetadata(
+  candidate: UiComponentCandidate,
+  resolutionKind: UiMemberExpressionResolution,
+): UiMemberExpressionMetadata | undefined {
+  if (!candidate.memberExpression) {
+    return undefined;
+  }
+
+  return {
+    ...candidate.memberExpression,
+    resolutionKind,
+  };
+}
+
+function isFrameworkLikeMemberCandidate(candidate: UiComponentCandidate): boolean {
+  const memberExpression = candidate.memberExpression;
+
+  if (!memberExpression) {
+    return false;
+  }
+
+  const terminalMember = memberExpression.members[memberExpression.members.length - 1];
+
+  return Boolean(
+    terminalMember &&
+    isFrameworkMemberName(terminalMember) &&
+    (
+      memberExpression.baseName.endsWith('Context') ||
+      /(?:^|[.])[^.]*Context\.(Provider|Consumer)$/.test(memberExpression.expression)
+    ),
+  );
+}
+
 export function extractChildComponentCandidate(
   node: Parser.SyntaxNode,
   source: string,
@@ -66,21 +147,28 @@ export function extractChildComponentCandidate(
   }
 
   if (nameNode.type === 'member_expression') {
-    const propertyNode = nameNode.namedChildren[nameNode.namedChildren.length - 1];
+    const segments = extractMemberExpressionSegments(nameNode, source);
 
-    if (!propertyNode) {
+    if (segments.length < 2) {
       return null;
     }
 
-    const propertyName = getNodeText(propertyNode, source);
+    const propertyName = segments[segments.length - 1] ?? '';
 
-    if (!isPascalCaseComponentName(propertyName)) {
+    if (!isPascalCaseComponentName(propertyName) && !isFrameworkMemberName(propertyName)) {
       return null;
     }
+
+    const expression = segments.join('.');
 
     return {
-      name: propertyName,
-      note: `jsx member expression ${getNodeText(nameNode, source)}`,
+      name: expression,
+      note: `jsx member expression ${expression}`,
+      memberExpression: {
+        expression,
+        baseName: segments[0] ?? '',
+        members: segments.slice(1),
+      },
     };
   }
 
@@ -179,14 +267,15 @@ function isAliasLikeImportSource(
 
 function createSameFileResolution(
   sameFileSymbol: IndexedSymbol,
-  candidateNote?: string,
+  candidate: UiComponentCandidate,
 ): ResolvedChildComponent {
   return {
     childFilePath: sameFileSymbol.filePath,
     childSymbolId: sameFileSymbol.symbolId,
     resolution: 'resolved_local',
-    confidence: candidateNote ? 'medium' : 'high',
-    note: candidateNote ?? 'resolved to same-file symbol',
+    confidence: candidate.note ? 'medium' : 'high',
+    note: candidate.note ?? 'resolved to same-file symbol',
+    memberExpression: createMemberExpressionMetadata(candidate, 'resolved_local_member'),
   };
 }
 
@@ -194,17 +283,21 @@ function createUnresolvedImportResolution(
   relation: SymbolIndex['byFile'][string],
   importRecord: ImportRecord,
   resolution: LocalResolutionResult,
-  candidateNote: string | undefined,
+  candidate: UiComponentCandidate,
   repoConfigById: Record<string, RepoResolutionConfig>,
 ): ResolvedChildComponent {
   const aliasLikeSource = isAliasLikeImportSource(relation, importRecord.source, repoConfigById);
+  const memberExpression = candidate.memberExpression
+    ? createMemberExpressionMetadata(candidate, 'unresolved_member')
+    : undefined;
 
   if (aliasLikeSource) {
     return {
       resolution: 'alias_not_resolved',
       confidence: 'medium',
-      note: candidateNote ?? `configured alias did not resolve for ${importRecord.source}`,
+      note: candidate.note ?? `configured alias did not resolve for ${importRecord.source}`,
       hint: importRecord.source,
+      memberExpression,
     };
   }
 
@@ -212,8 +305,15 @@ function createUnresolvedImportResolution(
     return {
       resolution: 'external_dependency',
       confidence: 'medium',
-      note: candidateNote ?? `component imported from external dependency ${importRecord.source}`,
+      note:
+        candidate.note ??
+        (candidate.memberExpression
+          ? `member expression on external dependency ${importRecord.source}`
+          : `component imported from external dependency ${importRecord.source}`),
       dependencySource: importRecord.source,
+      memberExpression: candidate.memberExpression
+        ? createMemberExpressionMetadata(candidate, 'external_dependency_member')
+        : undefined,
     };
   }
 
@@ -221,11 +321,12 @@ function createUnresolvedImportResolution(
     resolution: 'unresolved',
     confidence: 'medium',
     note:
-      candidateNote ??
+      candidate.note ??
       (resolution.status === 'ambiguous'
         ? `ambiguous local resolution for ${importRecord.source}`
         : `unresolved local component import ${importRecord.source}`),
     hint: importRecord.source,
+    memberExpression,
   };
 }
 
@@ -272,25 +373,187 @@ function resolveImportedBinding(
   return null;
 }
 
+function findImportBindingByLocalName(
+  relation: SymbolIndex['byFile'][string],
+  localName: string,
+): { importRecord: ImportRecord; binding: ImportBinding } | null {
+  for (const importRecord of relation.imports) {
+    const binding = importRecord.bindings.find((candidate) => candidate.localName === localName);
+
+    if (binding && !binding.isTypeOnly) {
+      return { importRecord, binding };
+    }
+  }
+
+  return null;
+}
+
+function resolveImportedMemberBinding(
+  targetRelation: SymbolIndex['byFile'][string],
+  memberName: string,
+): { symbolId?: string; note: string } | null {
+  const namedExport = targetRelation.exports.find(
+    (entry) =>
+      entry.kind === 'named' &&
+      entry.exportedName === memberName &&
+      entry.isTypeOnly !== true,
+  );
+
+  if (!namedExport) {
+    return null;
+  }
+
+  return {
+    symbolId: namedExport.symbolId,
+    note: namedExport.symbolId
+      ? `resolved imported member ${memberName}`
+      : `resolved imported member file for ${memberName}`,
+  };
+}
+
+function createFrameworkMemberResolution(
+  candidate: UiComponentCandidate,
+  options: {
+    dependencySource?: string;
+    hint?: string;
+  } = {},
+): ResolvedChildComponent {
+  return {
+    resolution: 'external_dependency',
+    confidence: 'medium',
+    note: `recognized framework-like member expression ${candidate.name}`,
+    dependencySource: options.dependencySource,
+    hint: options.hint,
+    memberExpression: createMemberExpressionMetadata(candidate, 'framework_member'),
+  };
+}
+
+function createUnresolvedMemberResolution(
+  candidate: UiComponentCandidate,
+  note: string,
+  options: {
+    hint?: string;
+    dependencySource?: string;
+    resolution?: UiComponentResolution;
+  } = {},
+): ResolvedChildComponent {
+  return {
+    resolution: options.resolution ?? 'unresolved',
+    confidence: 'medium',
+    note,
+    hint: options.hint,
+    dependencySource: options.dependencySource,
+    memberExpression: createMemberExpressionMetadata(candidate, 'unresolved_member'),
+  };
+}
+
+function resolveMemberExpressionCandidate(
+  relation: SymbolIndex['byFile'][string],
+  candidate: UiComponentCandidate,
+  index: SymbolIndex,
+  repoConfigById: Record<string, RepoResolutionConfig>,
+): ResolvedChildComponent {
+  const memberExpression = candidate.memberExpression;
+
+  if (!memberExpression) {
+    return createUnresolvedMemberResolution(candidate, 'member expression metadata was not available');
+  }
+
+  const terminalMember = memberExpression.members[memberExpression.members.length - 1];
+
+  if (!terminalMember) {
+    return createUnresolvedMemberResolution(candidate, `member expression ${candidate.name} has no terminal member`);
+  }
+
+  const importedBase = findImportBindingByLocalName(relation, memberExpression.baseName);
+
+  if (!importedBase) {
+    if (isFrameworkLikeMemberCandidate(candidate)) {
+      return createFrameworkMemberResolution(candidate);
+    }
+
+    return createUnresolvedMemberResolution(
+      candidate,
+      `unresolved JSX member expression base ${memberExpression.baseName}`,
+    );
+  }
+
+  const target = resolveTargetFile(relation, importedBase.importRecord, index.byFile, repoConfigById);
+
+  if (!target.relation) {
+    const unresolvedImport = createUnresolvedImportResolution(
+      relation,
+      importedBase.importRecord,
+      target.resolution,
+      candidate,
+      repoConfigById,
+    );
+
+    if (
+      unresolvedImport.resolution === 'external_dependency' &&
+      isFrameworkLikeMemberCandidate(candidate)
+    ) {
+      return createFrameworkMemberResolution(candidate, {
+        dependencySource: unresolvedImport.dependencySource,
+        hint: unresolvedImport.hint,
+      });
+    }
+
+    return unresolvedImport;
+  }
+
+  const resolvedMember = resolveImportedMemberBinding(target.relation, terminalMember);
+
+  if (resolvedMember) {
+    return {
+      childFilePath: target.relation.filePath,
+      childSymbolId: resolvedMember.symbolId,
+      resolution: resolvedMember.symbolId ? 'resolved_local' : 'missing_symbol',
+      confidence: resolvedMember.symbolId ? 'high' : 'medium',
+      note: candidate.note ?? resolvedMember.note,
+      hint: resolvedMember.symbolId ? undefined : importedBase.importRecord.source,
+      memberExpression: createMemberExpressionMetadata(candidate, 'resolved_local_member'),
+    };
+  }
+
+  if (isFrameworkLikeMemberCandidate(candidate)) {
+    return createFrameworkMemberResolution(candidate, {
+      hint: importedBase.importRecord.source,
+    });
+  }
+
+  return createUnresolvedMemberResolution(
+    candidate,
+    `local member expression ${candidate.name} could not be verified from module exports`,
+    {
+      hint: importedBase.importRecord.source,
+    },
+  );
+}
+
 export function resolveChildComponent(
   relation: SymbolIndex['byFile'][string],
-  childComponentName: string,
+  candidate: UiComponentCandidate,
   index: SymbolIndex,
   fileSymbols: IndexedSymbol[],
   repoConfigById: Record<string, RepoResolutionConfig>,
-  candidateNote?: string,
 ): ResolvedChildComponent {
+  if (candidate.memberExpression) {
+    return resolveMemberExpressionCandidate(relation, candidate, index, repoConfigById);
+  }
+
+  const childComponentName = candidate.name;
   const sameFileSymbol = resolveSameFileChildSymbol(fileSymbols, childComponentName);
 
   if (sameFileSymbol) {
-    return createSameFileResolution(sameFileSymbol, candidateNote);
+    return createSameFileResolution(sameFileSymbol, candidate);
   }
 
   if (fileSymbols.filter((symbol) => symbol.name === childComponentName).length > 1) {
     return {
       resolution: 'unresolved',
       confidence: 'medium',
-      note: candidateNote ?? `ambiguous same-file symbol match for ${childComponentName}`,
+      note: candidate.note ?? `ambiguous same-file symbol match for ${childComponentName}`,
     };
   }
 
@@ -310,7 +573,7 @@ export function resolveChildComponent(
         relation,
         importRecord,
         target.resolution,
-        candidateNote,
+        candidate,
         repoConfigById,
       );
     }
@@ -323,8 +586,8 @@ export function resolveChildComponent(
       childFilePath: targetRelation.filePath,
       childSymbolId: resolved?.symbolId,
       resolution: resolved?.symbolId ? 'resolved_local' : 'missing_symbol',
-      confidence: candidateNote ? 'medium' : resolved?.symbolId ? 'high' : 'medium',
-      note: candidateNote ?? resolved?.note ?? `resolved from import ${importRecord.source}`,
+      confidence: candidate.note ? 'medium' : resolved?.symbolId ? 'high' : 'medium',
+      note: candidate.note ?? resolved?.note ?? `resolved from import ${importRecord.source}`,
       hint: resolved?.symbolId ? undefined : importRecord.source,
       dependencySource: importRecord.resolvedKind === 'package' ? importRecord.source : undefined,
     };
@@ -333,7 +596,7 @@ export function resolveChildComponent(
   return {
     resolution: 'unresolved',
     confidence: 'medium',
-    note: candidateNote ?? 'unresolved JSX component candidate',
+    note: candidate.note ?? 'unresolved JSX component candidate',
   };
 }
 

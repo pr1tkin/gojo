@@ -66,7 +66,10 @@ describe('ui composition indexing', () => {
         "import { MissingThing } from '@pkg/ui';",
         "import { AliasWidget } from '@/components/AliasWidget';",
         "import { BrokenCard } from '../components/BrokenCard';",
+        "import * as Tabs from '../components/tabs';",
+        "import { Menu } from 'antd';",
         '',
+        'const CustomModalContext = {};',
         'export function Page() {',
         '  return (',
         '    <main>',
@@ -78,6 +81,11 @@ describe('ui composition indexing', () => {
         '        <AliasWidget />',
         '        <BrokenCard />',
         '        <LooseWidget />',
+        '        <Tabs.List />',
+        '        <Tabs.Panel />',
+        '        <Menu.Item />',
+        '        <CustomModalContext.Provider />',
+        '        <Unknown.Slot />',
         '        <div><span /></div>',
         '      </section>',
         '    </main>',
@@ -126,6 +134,14 @@ describe('ui composition indexing', () => {
       ].join('\n'),
       'utf8',
     );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'components', 'tabs.tsx'),
+      [
+        'export function List() { return <div />; }',
+        'export function Trigger() { return <button />; }',
+      ].join('\n'),
+      'utf8',
+    );
 
     const symbolIndex = await buildIndexedSymbols(reposRoot);
     await saveSymbolIndex(symbolIndex);
@@ -146,7 +162,7 @@ describe('ui composition indexing', () => {
     });
 
     expect(getUiCompositionFilePath()).toBe(path.join(tempRoot, '.data', 'ui-composition.json'));
-    expect(loadedIndex.schemaVersion).toBe(2);
+    expect(loadedIndex.schemaVersion).toBe(3);
     expect(loadedIndex.sourceSymbolIndexSchemaVersion).toBe(symbolIndex.schemaVersion);
     expect(loadedIndex.edges).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -231,6 +247,85 @@ describe('ui composition indexing', () => {
         confidence: 'medium',
       }),
       expect.objectContaining({
+        parentFilePath: 'src/app/page.tsx',
+        parentSymbolName: 'Page',
+        childComponentName: 'Tabs.List',
+        childFilePath: 'src/components/tabs.tsx',
+        childSymbolId: createSymbolId(
+          createFileId('ui-repo', 'src/components/tabs.tsx'),
+          'function',
+          'List',
+          1,
+        ),
+        resolution: 'resolved_local',
+        source: 'jsx',
+        confidence: 'high',
+        memberExpression: {
+          expression: 'Tabs.List',
+          baseName: 'Tabs',
+          members: ['List'],
+          resolutionKind: 'resolved_local_member',
+        },
+      }),
+      expect.objectContaining({
+        parentFilePath: 'src/app/page.tsx',
+        parentSymbolName: 'Page',
+        childComponentName: 'Tabs.Panel',
+        resolution: 'unresolved',
+        source: 'jsx',
+        confidence: 'medium',
+        hint: '../components/tabs',
+        memberExpression: {
+          expression: 'Tabs.Panel',
+          baseName: 'Tabs',
+          members: ['Panel'],
+          resolutionKind: 'unresolved_member',
+        },
+      }),
+      expect.objectContaining({
+        parentFilePath: 'src/app/page.tsx',
+        parentSymbolName: 'Page',
+        childComponentName: 'Menu.Item',
+        resolution: 'external_dependency',
+        dependencySource: 'antd',
+        source: 'jsx',
+        confidence: 'medium',
+        memberExpression: {
+          expression: 'Menu.Item',
+          baseName: 'Menu',
+          members: ['Item'],
+          resolutionKind: 'external_dependency_member',
+        },
+      }),
+      expect.objectContaining({
+        parentFilePath: 'src/app/page.tsx',
+        parentSymbolName: 'Page',
+        childComponentName: 'CustomModalContext.Provider',
+        resolution: 'external_dependency',
+        source: 'jsx',
+        confidence: 'medium',
+        memberExpression: {
+          expression: 'CustomModalContext.Provider',
+          baseName: 'CustomModalContext',
+          members: ['Provider'],
+          resolutionKind: 'framework_member',
+        },
+      }),
+      expect.objectContaining({
+        parentFilePath: 'src/app/page.tsx',
+        parentSymbolName: 'Page',
+        childComponentName: 'Unknown.Slot',
+        resolution: 'unresolved',
+        source: 'jsx',
+        confidence: 'medium',
+        memberExpression: {
+          expression: 'Unknown.Slot',
+          baseName: 'Unknown',
+          members: ['Slot'],
+          resolutionKind: 'unresolved_member',
+        },
+      }),
+      expect.objectContaining({
         parentFilePath: 'src/components/ButtonGroup.tsx',
         parentSymbolName: 'ButtonGroup',
         childComponentName: 'Button',
@@ -265,10 +360,15 @@ describe('ui composition indexing', () => {
       'AliasWidget',
       'AudioHero',
       'BrokenCard',
+      'CustomModalContext.Provider',
       'Header',
       'LooseWidget',
+      'Menu.Item',
       'MetadataFooter',
       'MissingThing',
+      'Tabs.List',
+      'Tabs.Panel',
+      'Unknown.Slot',
     ]);
     expect(headerParents).toEqual([
       expect.objectContaining({
@@ -287,6 +387,20 @@ describe('ui composition indexing', () => {
         parentFilePath: 'src/components/ButtonGroup.tsx',
         parentSymbolName: 'ButtonGroup',
         childComponentName: 'Button',
+      }),
+    ]);
+    expect(await getParentsForComponent({
+      symbolId: createSymbolId(
+        createFileId('ui-repo', 'src/components/tabs.tsx'),
+        'function',
+        'List',
+        1,
+      ),
+    })).toEqual([
+      expect.objectContaining({
+        parentFilePath: 'src/app/page.tsx',
+        parentSymbolName: 'Page',
+        childComponentName: 'Tabs.List',
       }),
     ]);
   });

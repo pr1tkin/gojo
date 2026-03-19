@@ -95,11 +95,10 @@ function createPropUsagesForNode(
   const parent = resolveParentSymbol(fileSymbols, node.startPosition.row + 1);
   const resolvedChild = resolveChildComponent(
     relation,
-    childCandidate.name,
+    childCandidate,
     index,
     fileSymbols,
     repoConfigById,
-    childCandidate.note,
   );
   const attributes = getJsxOpeningNode(node).namedChildren.filter((child) => child.type === 'jsx_attribute');
   const propUsages: UiPropUsage[] = [];

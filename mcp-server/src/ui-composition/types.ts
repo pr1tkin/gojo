@@ -1,4 +1,4 @@
-export const UI_COMPOSITION_SCHEMA_VERSION = 2;
+export const UI_COMPOSITION_SCHEMA_VERSION = 3;
 
 export type UiComponentResolution =
   | 'resolved_local'
@@ -6,6 +6,19 @@ export type UiComponentResolution =
   | 'alias_not_resolved'
   | 'missing_symbol'
   | 'unresolved';
+
+export type UiMemberExpressionResolution =
+  | 'resolved_local_member'
+  | 'external_dependency_member'
+  | 'framework_member'
+  | 'unresolved_member';
+
+export interface UiMemberExpressionMetadata {
+  expression: string;
+  baseName: string;
+  members: string[];
+  resolutionKind: UiMemberExpressionResolution;
+}
 
 export interface UiCompositionEdge {
   parentFilePath: string;
@@ -20,6 +33,7 @@ export interface UiCompositionEdge {
   note?: string;
   hint?: string;
   dependencySource?: string;
+  memberExpression?: UiMemberExpressionMetadata;
 }
 
 export interface UiCompositionIndex {
