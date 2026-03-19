@@ -21,11 +21,14 @@ import { runSearchCodeTool, searchCodeToolDefinition } from './tools/search-code
 import { runSearchPatternsTool, searchPatternsToolDefinition } from './tools/search-patterns.js';
 import type { AppConfig, ToolVisibility } from './types.js';
 
+type ToolRole = 'primary' | 'specialist' | 'internal';
+
 export interface ToolDefinitionLike {
   name: string;
   title: string;
   description: string;
   visibility: ToolVisibility;
+  role?: ToolRole;
   inputSchema: any;
 }
 
@@ -54,9 +57,13 @@ export const INTERNAL_TOOL_NAMES = [
 ] as const;
 
 function buildDescription(definition: ToolDefinitionLike): string {
-  return definition.visibility === 'public'
+  if (definition.visibility === 'internal') {
+    return `[INTERNAL] Not intended for direct agent use. ${definition.description}`;
+  }
+
+  return definition.role === 'primary'
     ? `Recommended entry point. ${definition.description}`
-    : `[INTERNAL] Not intended for direct agent use. ${definition.description}`;
+    : `Specialist tool. ${definition.description}`;
 }
 
 function registerTool(
@@ -73,7 +80,8 @@ function registerTool(
       _meta: {
         visibility: definition.visibility,
         internal: definition.visibility === 'internal',
-        recommendedEntryPoint: definition.visibility === 'public',
+        role: definition.role ?? (definition.visibility === 'internal' ? 'internal' : 'specialist'),
+        recommendedEntryPoint: definition.role === 'primary',
       },
     },
     handler,

@@ -25,8 +25,9 @@ function buildAgentSummary(result: {
 export const planChangeToolDefinition = {
   name: 'plan_change',
   title: 'Plan Change',
-  description: 'Estimate safe change scope and produce an ordered edit/review plan using impact analysis and API-boundary signals.',
+  description: 'Targeted planning tool for turning grounded context into an ordered edit and review sequence.',
   visibility: 'public' as const,
+  role: 'specialist' as const,
   inputSchema: planChangeInputSchema,
 };
 

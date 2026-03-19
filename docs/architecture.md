@@ -35,7 +35,7 @@ Includes:
 
 Artifacts live under:
 
-```
+```text
 /app/.data
 ```
 
@@ -69,10 +69,17 @@ It exists to power **better decisions**, not APIs.
 
 ### Layer 3 — Agent Tools
 
-The **only public interface**.
+The **public interface**.
+
+#### 🥇 Primary tool
+
+- `build_change_context`
+
+The default workflow entry point.
+
+#### 🥈 Specialist tools
 
 - `explore_component`
-- `build_change_context`
 - `find_precedents`
 - `collect_refactor_context`
 - `plan_change`
@@ -81,11 +88,13 @@ These tools already compose:
 
 search + graph + ranking + trust + shaping
 
+Agents should normally start with the primary tool and drop to specialist tools when they need tighter control.
+
 ---
 
 ## 🔁 Data Flow
 
-```
+```text
 repos → indexing → symbols → graph → patterns
       → intelligence → ranking + trust
       → agent tools (MCP)

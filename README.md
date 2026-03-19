@@ -61,43 +61,87 @@ when an agent or developer needs grounded context, not guesses.
 
 ---
 
-## 🧰 Core Agent Tools
+## 🛠️ Core Capabilities
 
-These are the **recommended public entry points**:
+Gojo helps agents:
 
-- `build_change_context`  
-  Bundle exploration, precedents, refactor context, and optional planning in one tool call.
+- understand what a target is
+- find the closest reusable precedent
+- collect bounded change impact context
+- turn grounded context into an edit plan
+- bundle those steps when the workflow should stay compact
 
-- `explore_component`  
-  Understand structure, dependencies, role, and UI context.
+---
 
-- `find_precedents`  
-  Find the closest reusable implementation precedents.
+## 🥇 Primary Tool
 
-- `collect_refactor_context`  
-  Gather bounded context, impact, and nearby files before changing code.
+### `build_change_context`
 
-- `plan_change`  
-  Produce safe, ordered change plans on top of grounded context.
+The default entry point.
+
+Use it when the agent wants the whole picture in one pass:
+
+- target summary
+- best precedents
+- refactor/change context
+- optional plan generation when justified
+
+Example:
+
+```text
+build_change_context({
+  symbolName: "ContractDetailPage",
+  repo: "prototype-repo",
+  intent: "refactor"
+})
+```
+
+Use this first when the agent is asking:
+
+- “What should I inspect before changing this?”
+- “Give me the bundled context for this target.”
+- “Show me the safest path forward without manually chaining tools.”
+
+---
+
+## 🥈 Specialist Tools
+
+These remain fully public and fully usable.
+
+They are the precision tools for agents that need tighter control.
+
+### `explore_component`
+Targeted structure inspection.
+Use when the agent needs role, dependencies, UI context, or symbol ambiguity details.
+
+### `find_precedents`
+Targeted precedent lookup.
+Use when the agent already understands the target and needs the best implementation peers.
+
+### `collect_refactor_context`
+Targeted impact/context gathering.
+Use when the agent needs nearby files, graph neighbors, and likely coordinated change surfaces.
+
+### `plan_change`
+Targeted planning.
+Use when the agent already has enough context and wants an ordered edit/review sequence.
 
 ---
 
 ## 🧭 Example Workflow
 
 ```text
+Default path:
 build_change_context("ContractDetailPage")
-or
+
+Fine-grained path:
 explore_component("ContractDetailPage")
 → find_precedents(...)
 → collect_refactor_context(...)
 → plan_change(...)
 ```
 
-This ensures:
-
-- context before action
-- precedents before implementation
-- safer, grounded changes
+This keeps the default path simple without taking precision away from specialist workflows.
 
 ---
 
@@ -134,12 +178,13 @@ It is optimized for **deterministic code intelligence** and **agent grounding**.
 | Precedent discovery | ❌ | ✅ |
 | Trust / grounding signals | ❌ | ✅ |
 | Agent-first response shaping | ❌ | ✅ |
+| Bundled workflow context | ❌ | ✅ |
 | Local-first operation | ⚠️ Sometimes | ✅ |
 
 **The difference in practice:**
 
 - Traditional tools often answer: **“Here are some files.”**
-- Gojo answers: **“Here is the best precedent, why it was selected, what family it belongs to, and what you should inspect next.”**
+- Gojo answers: **“Here is the best entry point, the strongest precedent, the likely impact surface, and the next move.”**
 
 ---
 
@@ -167,7 +212,7 @@ docker compose up -d --build
 
 ---
 
-## 🧠 Architecture
+## 🧱 Architecture
 
 Gojo is organized into three layers:
 
@@ -178,7 +223,7 @@ search, symbols, graph
 patterns, clustering, ranking, trust, explainability
 
 **Layer 3 — Agent Tools**  
-explore, precedents, context, planning
+one primary workflow tool + specialist tools for targeted control
 
 Agents should interact with **Layer 3**.
 

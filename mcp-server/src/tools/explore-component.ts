@@ -30,8 +30,9 @@ const DEFAULT_RELATED_LIMIT = 10;
 export const exploreComponentToolDefinition = {
   name: 'explore_component',
   title: 'Explore Component',
-  description: 'Explore the structure and context of a component or symbol in a repository.',
+  description: 'Targeted component inspection tool for structure, dependencies, role, and UI context.',
   visibility: 'public' as const,
+  role: 'specialist' as const,
   inputSchema: exploreComponentInputSchema,
 };
 

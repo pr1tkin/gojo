@@ -55,8 +55,33 @@ describe('tool registry visibility enforcement', () => {
     });
 
     expect(registerTool).toHaveBeenCalledTimes(5);
-    const descriptions = registerTool.mock.calls.map((call) => call[1].description);
-    expect(descriptions.every((entry) => String(entry).startsWith('Recommended entry point.'))).toBe(true);
+    const entries = registerTool.mock.calls.map((call) => ({
+      name: call[0],
+      description: call[1].description,
+      meta: call[1]._meta,
+    }));
+    expect(entries.find((entry) => entry.name === 'build_change_context')).toEqual(
+      expect.objectContaining({
+        description: expect.stringContaining('Recommended entry point.'),
+        meta: expect.objectContaining({
+          visibility: 'public',
+          role: 'primary',
+          recommendedEntryPoint: true,
+        }),
+      }),
+    );
+    for (const name of ['explore_component', 'find_precedents', 'collect_refactor_context', 'plan_change']) {
+      expect(entries.find((entry) => entry.name === name)).toEqual(
+        expect.objectContaining({
+          description: expect.stringContaining('Specialist tool.'),
+          meta: expect.objectContaining({
+            visibility: 'public',
+            role: 'specialist',
+            recommendedEntryPoint: false,
+          }),
+        }),
+      );
+    }
   });
 
   it('registers internal tools only when explicitly enabled', () => {
@@ -83,6 +108,7 @@ describe('tool registry visibility enforcement', () => {
     expect(internalConfig._meta).toEqual(
       expect.objectContaining({
         visibility: 'internal',
+        role: 'internal',
         internal: true,
         recommendedEntryPoint: false,
       }),

@@ -81,8 +81,9 @@ interface BuildChangeContextResponse
 export const buildChangeContextToolDefinition = {
   name: 'build_change_context',
   title: 'Build Change Context',
-  description: 'Compose component exploration, precedents, refactor context, and optional change planning into one agent-ready context bundle.',
+  description: 'Default workflow entry point for building bundled change context from exploration, precedents, refactor impact, and optional planning.',
   visibility: 'public' as const,
+  role: 'primary' as const,
   inputSchema: buildChangeContextInputSchema,
 };
 
