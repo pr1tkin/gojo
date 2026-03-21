@@ -19,6 +19,10 @@ function renderSection(title: string, lines: string[]): string[] {
 }
 
 export function renderRuntimeResponse(response: RenderableRuntimeResponse, command?: CliCommand): string {
+  if (response.capability === 'GetProductVersion') {
+    return `${response.summary.text}\n`;
+  }
+
   const sections: string[] = [
     `${response.summary.title}\n${response.summary.text}`,
   ];

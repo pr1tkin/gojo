@@ -1,6 +1,7 @@
 import type { ParsedCliResult } from './types.js';
 
 const usageText = `Usage:
+  gojo [--json] version
   gojo [--repo <repo-id-or-path>] [--json] [--debug] index [repo-path]
   gojo [--repo <repo-id-or-path>] [--json] [--debug] refresh [repo-path]
   gojo [--repo <repo-id-or-path>] [--json] [--debug] explore <target>
@@ -65,14 +66,34 @@ export function buildUsageText(): string {
 }
 
 export function parseCliArgs(argv: string[]): ParsedCliResult {
+  if (argv.includes('--help') || argv.includes('-h') || (argv.length === 1 && argv[0] === 'help')) {
+    return {
+      helpText: usageText,
+    };
+  }
+
   const { options, rest } = parseGlobalOptions(argv);
 
   if (rest.length === 0) {
-    throw new Error(usageText.trim());
+    return {
+      helpText: usageText,
+    };
   }
 
   const [command, ...tail] = rest;
   const executionContext = toExecutionContext(options);
+
+  if (command === 'version') {
+    return {
+      command: {
+        name: 'version',
+        capability: 'GetProductVersion',
+        request: {},
+        executionContext,
+        renderResult: true,
+      },
+    };
+  }
 
   if (command === 'index') {
     const repoPath = tail[0];

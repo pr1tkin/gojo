@@ -11,6 +11,11 @@ import { finalizeCliCommand } from './cli/repo-target.js';
 import type { ParsedCliResult } from './cli/types.js';
 
 async function runCli(parsed: ParsedCliResult): Promise<number> {
+  if (!parsed.command) {
+    process.stdout.write(parsed.helpText ?? '');
+    return 0;
+  }
+
   const config = loadConfig();
   const finalizedCommand = await finalizeCliCommand(parsed.command, {
     config,
@@ -29,7 +34,11 @@ async function runCli(parsed: ParsedCliResult): Promise<number> {
   );
 
   if (finalizedCommand.executionContext.outputMode === 'json') {
-    process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
+    const payload =
+      finalizedCommand.capability === 'GetProductVersion'
+        ? response.machine_payload
+        : response;
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
   } else if (finalizedCommand.renderResult) {
     process.stdout.write(renderRuntimeResponse(response, finalizedCommand));
   }
@@ -57,7 +66,7 @@ const requestedJsonOutput = process.argv.slice(2).includes('--json');
   } catch (error: unknown) {
     const structuredError = buildCliStructuredError(error, parsedCommand?.command);
 
-    if (parsedCommand?.command.executionContext.outputMode === 'json' || requestedJsonOutput) {
+    if (parsedCommand?.command?.executionContext.outputMode === 'json' || requestedJsonOutput) {
       process.stdout.write(`${JSON.stringify(structuredError, null, 2)}\n`);
     } else {
       process.stderr.write(renderCliError(structuredError));

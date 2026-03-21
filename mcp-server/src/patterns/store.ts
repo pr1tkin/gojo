@@ -2,12 +2,13 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getIndexesDirectory,
+  getTempDirectory,
   getGenerationArtifactFilePath,
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
 import type { CoordinationMarkerParseStatus } from '../indexing/types.js';
-import { getProductEnvironment } from '../product/environment.js';
 import {
   PATTERN_INDEX_SCHEMA_VERSION,
   type PatternCandidate,
@@ -26,11 +27,11 @@ export interface PatternIndexLoadResult {
 }
 
 function getPatternDirectory(): string {
-  return getProductEnvironment().paths.dataDir;
+  return getIndexesDirectory();
 }
 
 function getPatternTempFilePath(): string {
-  return path.join(getPatternDirectory(), 'pattern-candidates.tmp.json');
+  return path.join(getTempDirectory(), 'pattern-candidates.tmp.json');
 }
 
 function getPatternFilePathInternal(): string {

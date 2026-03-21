@@ -3,7 +3,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { GojoPackagingModel, ProductIdentity, ProductPaths } from '../types.js';
+import type {
+  GojoPackagingModel,
+  ProductIdentity,
+  ProductPaths,
+  SearchRuntimeConfig,
+} from '../types.js';
 
 const PRODUCT_NAME = 'gojo';
 const PRODUCT_VERSION_FALLBACK = '1.0.0';
@@ -98,6 +103,9 @@ function resolveProductPaths(env: NodeJS.ProcessEnv, packageRoot: string): Produ
   const logDir = path.resolve(env.GOJO_LOG_DIR?.trim() || path.join(stateBaseDir, 'logs'));
   const runtimeDir = path.resolve(env.GOJO_RUNTIME_DIR?.trim() || path.join(stateBaseDir, 'runtime'));
   const tempDir = path.resolve(env.GOJO_TEMP_DIR?.trim() || path.join(runtimeDir, 'tmp'));
+  const searchHelpersDir = path.resolve(
+    env.GOJO_SEARCH_HELPERS_DIR?.trim() || path.join(packageRoot, 'bin', 'search'),
+  );
 
   return {
     packageRoot,
@@ -109,7 +117,25 @@ function resolveProductPaths(env: NodeJS.ProcessEnv, packageRoot: string): Produ
     logDir,
     runtimeDir,
     tempDir,
+    searchHelpersDir,
   };
+}
+
+export function ensureProductDirectories(paths: ProductPaths): void {
+  const requiredDirectories = [
+    paths.homeDir,
+    paths.configDir,
+    paths.dataDir,
+    paths.indexesDir,
+    paths.cacheDir,
+    paths.logDir,
+    paths.runtimeDir,
+    paths.tempDir,
+  ];
+
+  for (const directory of requiredDirectories) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
 }
 
 export function resolveProductIdentity(env: NodeJS.ProcessEnv = process.env): ProductIdentity {
@@ -146,6 +172,23 @@ export function resolveDefaultReposRoot(
   return path.resolve('/repos');
 }
 
+export function resolveSearchRuntimeConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): SearchRuntimeConfig {
+  const paths = resolveProductPathsForEnvironment(env);
+  const baseUrl = env.ZOEKT_BASE_URL?.trim() || 'http://127.0.0.1:6070';
+
+  return {
+    baseUrl: new URL(baseUrl).toString().replace(/\/$/, ''),
+    packagingStrategy: 'bundled_helper_binaries',
+    helperBinaryDir: paths.searchHelpersDir,
+    helperBinaries: {
+      webserver: path.join(paths.searchHelpersDir, process.platform === 'win32' ? 'zoekt-webserver.exe' : 'zoekt-webserver'),
+      indexer: path.join(paths.searchHelpersDir, process.platform === 'win32' ? 'zoekt-git-index.exe' : 'zoekt-git-index'),
+    },
+  };
+}
+
 let cachedEnvironment:
   | {
       identity: ProductIdentity;
@@ -158,9 +201,11 @@ export function getProductEnvironment(): {
   paths: ProductPaths;
 } {
   if (!cachedEnvironment) {
+    const paths = resolveProductPathsForEnvironment(process.env);
+    ensureProductDirectories(paths);
     cachedEnvironment = {
       identity: resolveProductIdentity(process.env),
-      paths: resolveProductPathsForEnvironment(process.env),
+      paths,
     };
   }
 

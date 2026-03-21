@@ -2,20 +2,21 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getIndexesDirectory,
+  getTempDirectory,
   getGenerationArtifactFilePath,
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
-import { getProductEnvironment } from '../product/environment.js';
 import { createDeclarationFingerprint, createFileId, createSymbolId } from './ids.js';
 import type { FileRelation, IndexedSymbol, SymbolFrequencyStats, SymbolIndex } from './types.js';
 
 function getSymbolIndexDirectory(): string {
-  return getProductEnvironment().paths.dataDir;
+  return getIndexesDirectory();
 }
 
 function getSymbolIndexTempFilePath(): string {
-  return path.join(getSymbolIndexDirectory(), 'symbol-index.tmp.json');
+  return path.join(getTempDirectory(), 'symbol-index.tmp.json');
 }
 
 function getSymbolIndexFilePathInternal(): string {

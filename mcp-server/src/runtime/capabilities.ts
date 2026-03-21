@@ -2,6 +2,12 @@ import type { RuntimeCapabilityDefinition } from './types.js';
 
 export const runtimeCapabilityDefinitions: RuntimeCapabilityDefinition[] = [
   {
+    name: 'GetProductVersion',
+    executionMode: 'one_shot',
+    description: 'Report the Gojo product identity and packaged version.',
+    implemented: true,
+  },
+  {
     name: 'IndexRepo',
     executionMode: 'one_shot',
     description: 'Build or refresh repository index artifacts required for Gojo runtime flows.',

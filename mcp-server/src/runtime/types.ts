@@ -88,6 +88,7 @@ export interface RuntimeCapabilityHandler<TRequest, TResponse extends RuntimeRes
 }
 
 export type RuntimeCapabilityName =
+  | 'GetProductVersion'
   | 'IndexRepo'
   | 'RefreshRepo'
   | 'ExploreComponent'
@@ -98,6 +99,15 @@ export type RuntimeCapabilityName =
   | 'ComputeImpact'
   | 'RunDoctor'
   | 'TraceFlow';
+
+export interface GetProductVersionRequest {}
+
+export interface GetProductVersionMachinePayload {
+  name: string;
+  version: string;
+}
+
+export type GetProductVersionResponse = RuntimeResponse<GetProductVersionMachinePayload>;
 
 export interface IndexRepoRequest {
   repo?: RepoTarget;
@@ -224,6 +234,7 @@ export interface TraceFlowRequest {
 export type TraceFlowResponse = RuntimeResponse;
 
 export interface RuntimeCapabilityRequestMap {
+  GetProductVersion: GetProductVersionRequest;
   IndexRepo: IndexRepoRequest;
   RefreshRepo: RefreshRepoRequest;
   ExploreComponent: ExploreComponentRequest;
@@ -237,6 +248,7 @@ export interface RuntimeCapabilityRequestMap {
 }
 
 export interface RuntimeCapabilityResponseMap {
+  GetProductVersion: GetProductVersionResponse;
   IndexRepo: IndexRepoResponse;
   RefreshRepo: RefreshRepoResponse;
   ExploreComponent: ExploreComponentResponse;

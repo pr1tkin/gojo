@@ -1,15 +1,16 @@
 import path from 'node:path';
 
 import {
+  ensureProductDirectories,
   resolveDefaultReposRoot,
   resolveProductIdentity,
   resolveProductPathsForEnvironment,
+  resolveSearchRuntimeConfig,
 } from './product/environment.js';
 import type { AppConfig, NodeEnv } from './types.js';
 
 const DEFAULT_NODE_ENV: NodeEnv = 'development';
 const DEFAULT_PORT = 3000;
-const DEFAULT_ZOEKT_BASE_URL = 'http://zoekt:6070';
 const DEFAULT_INCLUDE_INTERNAL_TOOLS = false;
 
 function parseNodeEnv(value: string | undefined): NodeEnv {
@@ -69,11 +70,14 @@ function parseBooleanFlag(value: string | undefined, fallback: boolean): boolean
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const productIdentity = resolveProductIdentity(env);
   const productPaths = resolveProductPathsForEnvironment(env);
+  ensureProductDirectories(productPaths);
+  const search = resolveSearchRuntimeConfig(env);
   return {
     nodeEnv: parseNodeEnv(env.NODE_ENV),
     port: parsePort(env.PORT),
     reposRoot: normalizePath(env.REPOS_ROOT, resolveDefaultReposRoot(process.cwd(), env)),
-    zoektBaseUrl: normalizeUrl(env.ZOEKT_BASE_URL, DEFAULT_ZOEKT_BASE_URL),
+    zoektBaseUrl: normalizeUrl(env.ZOEKT_BASE_URL, search.baseUrl),
+    search,
     includeInternalTools: parseBooleanFlag(env.GOJO_INCLUDE_INTERNAL_TOOLS, DEFAULT_INCLUDE_INTERNAL_TOOLS),
     product: {
       identity: productIdentity,

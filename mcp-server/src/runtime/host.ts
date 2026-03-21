@@ -1,6 +1,7 @@
 import { runtimeCapabilityDefinitions } from './capabilities.js';
 import {
   exploreComponentHandler,
+  getProductVersionHandler,
   indexRepoHandler,
   refreshRepoHandler,
   runHealthChecksHandler,
@@ -28,6 +29,7 @@ export class RuntimeHost {
   private readonly handlers = new Map<RuntimeCapabilityName, AnyRuntimeHandler>();
 
   public constructor(private readonly dependencies: RuntimeDependencies) {
+    this.register(getProductVersionHandler);
     this.register(indexRepoHandler);
     this.register(refreshRepoHandler);
     this.register(exploreComponentHandler);

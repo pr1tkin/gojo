@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+﻿import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 
@@ -34,7 +34,23 @@ export function getDataDirectory(): string {
   return getProductEnvironment().paths.dataDir;
 }
 
+export function getIndexesDirectory(): string {
+  return getProductEnvironment().paths.indexesDir;
+}
+
+export function getRuntimeDirectory(): string {
+  return getProductEnvironment().paths.runtimeDir;
+}
+
+export function getTempDirectory(): string {
+  return getProductEnvironment().paths.tempDir;
+}
+
 export function getCoordinationDirectory(): string {
+  return path.join(getRuntimeDirectory(), 'coordination');
+}
+
+function getLegacyCoordinationDirectory(): string {
   return path.join(getDataDirectory(), 'coordination');
 }
 
@@ -47,23 +63,39 @@ function getSearchRefreshSnapshotFilePath(): string {
 }
 
 function getLegacyArtifactFilePath(fileName: string): string {
+  return path.join(getIndexesDirectory(), fileName);
+}
+
+function getLegacyRootArtifactFilePath(fileName: string): string {
   return path.join(getDataDirectory(), fileName);
 }
 
 export function getGenerationsDirectory(): string {
+  return path.join(getIndexesDirectory(), 'generations');
+}
+
+function getLegacyGenerationsDirectory(): string {
   return path.join(getDataDirectory(), 'generations');
 }
 
 function getCurrentGenerationPointerFilePath(): string {
+  return path.join(getIndexesDirectory(), 'current-generation.json');
+}
+
+function getLegacyCurrentGenerationPointerFilePath(): string {
   return path.join(getDataDirectory(), 'current-generation.json');
 }
 
 function getCurrentGenerationPointerTempFilePath(): string {
-  return path.join(getDataDirectory(), 'current-generation.tmp.json');
+  return path.join(getTempDirectory(), 'current-generation.tmp.json');
 }
 
 export function getGenerationDirectory(generationId: string): string {
   return path.join(getGenerationsDirectory(), generationId);
+}
+
+function getLegacyGenerationDirectory(generationId: string): string {
+  return path.join(getLegacyGenerationsDirectory(), generationId);
 }
 
 export function getGenerationArtifactFilePath(generationId: string, fileName: string): string {
@@ -195,7 +227,24 @@ export async function loadCurrentGenerationPointer(): Promise<CurrentGenerationP
         : '';
 
     if (code === 'ENOENT') {
-      return null;
+      try {
+        const legacyContent = await fsPromises.readFile(
+          getLegacyCurrentGenerationPointerFilePath(),
+          'utf8',
+        );
+        return normalizeCurrentGenerationPointer(JSON.parse(legacyContent) as unknown);
+      } catch (legacyError) {
+        const legacyCode =
+          typeof legacyError === 'object' && legacyError !== null && 'code' in legacyError
+            ? String((legacyError as { code?: string }).code)
+            : '';
+
+        if (legacyCode === 'ENOENT') {
+          return null;
+        }
+
+        throw legacyError;
+      }
     }
 
     throw error;
@@ -213,7 +262,21 @@ export function loadCurrentGenerationPointerSync(): CurrentGenerationPointer | n
         : '';
 
     if (code === 'ENOENT') {
-      return null;
+      try {
+        const legacyContent = fs.readFileSync(getLegacyCurrentGenerationPointerFilePath(), 'utf8');
+        return normalizeCurrentGenerationPointer(JSON.parse(legacyContent) as unknown);
+      } catch (legacyError) {
+        const legacyCode =
+          typeof legacyError === 'object' && legacyError !== null && 'code' in legacyError
+            ? String((legacyError as { code?: string }).code)
+            : '';
+
+        if (legacyCode === 'ENOENT') {
+          return null;
+        }
+
+        throw legacyError;
+      }
     }
 
     throw error;
@@ -237,7 +300,24 @@ export async function loadCurrentGenerationState(): Promise<IndexGenerationState
         : '';
 
     if (code === 'ENOENT') {
-      return null;
+      try {
+        const legacyContent = await fsPromises.readFile(
+          path.join(getLegacyGenerationDirectory(pointer.generationId), 'index-generation.json'),
+          'utf8',
+        );
+        return normalizeGenerationState(JSON.parse(legacyContent) as unknown);
+      } catch (legacyError) {
+        const legacyCode =
+          typeof legacyError === 'object' && legacyError !== null && 'code' in legacyError
+            ? String((legacyError as { code?: string }).code)
+            : '';
+
+        if (legacyCode === 'ENOENT') {
+          return null;
+        }
+
+        throw legacyError;
+      }
     }
 
     throw error;
@@ -290,7 +370,24 @@ export async function loadGenerationLifecycleMarker(
         : '';
 
     if (code === 'ENOENT') {
-      return null;
+      try {
+        const legacyContent = await fsPromises.readFile(
+          path.join(getLegacyGenerationDirectory(generationId), 'generation-lifecycle.json'),
+          'utf8',
+        );
+        return normalizeGenerationLifecycleMarker(JSON.parse(legacyContent) as unknown);
+      } catch (legacyError) {
+        const legacyCode =
+          typeof legacyError === 'object' && legacyError !== null && 'code' in legacyError
+            ? String((legacyError as { code?: string }).code)
+            : '';
+
+        if (legacyCode === 'ENOENT') {
+          return null;
+        }
+
+        throw legacyError;
+      }
     }
 
     throw error;
@@ -376,7 +473,7 @@ export async function publishGeneration(generationId: string, publishedAt: strin
     publishedAt,
   };
 
-  await fsPromises.mkdir(getDataDirectory(), { recursive: true });
+  await fsPromises.mkdir(path.dirname(getCurrentGenerationPointerFilePath()), { recursive: true });
   await fsPromises.writeFile(
     getCurrentGenerationPointerTempFilePath(),
     JSON.stringify(pointer, null, 2),
@@ -392,20 +489,30 @@ export async function resolveArtifactFilePath(fileName: string): Promise<string>
   const pointer = await loadCurrentGenerationPointer();
 
   if (!pointer) {
-    return getLegacyArtifactFilePath(fileName);
+    return fs.existsSync(getLegacyArtifactFilePath(fileName))
+      ? getLegacyArtifactFilePath(fileName)
+      : getLegacyRootArtifactFilePath(fileName);
   }
 
-  return getGenerationArtifactFilePath(pointer.generationId, fileName);
+  const primaryPath = getGenerationArtifactFilePath(pointer.generationId, fileName);
+  return fs.existsSync(primaryPath)
+    ? primaryPath
+    : path.join(getLegacyGenerationDirectory(pointer.generationId), fileName);
 }
 
 export function resolveArtifactFilePathSync(fileName: string): string {
   const pointer = loadCurrentGenerationPointerSync();
 
   if (!pointer) {
-    return getLegacyArtifactFilePath(fileName);
+    return fs.existsSync(getLegacyArtifactFilePath(fileName))
+      ? getLegacyArtifactFilePath(fileName)
+      : getLegacyRootArtifactFilePath(fileName);
   }
 
-  return getGenerationArtifactFilePath(pointer.generationId, fileName);
+  const primaryPath = getGenerationArtifactFilePath(pointer.generationId, fileName);
+  return fs.existsSync(primaryPath)
+    ? primaryPath
+    : path.join(getLegacyGenerationDirectory(pointer.generationId), fileName);
 }
 
 function normalizeSearchRefreshRequest(value: unknown): SearchRefreshRequest | null {
@@ -568,7 +675,7 @@ function summarizeRawMarkerValue(value: unknown): string | undefined {
 
   if (isObject(value)) {
     const keys = Object.keys(value).sort((left, right) => left.localeCompare(right));
-    return `json-object(keys=${keys.slice(0, 8).join(',')}${keys.length > 8 ? ',…' : ''})`;
+    return `json-object(keys=${keys.slice(0, 8).join(',')}${keys.length > 8 ? ',â€¦' : ''})`;
   }
 
   if (value === null) {
@@ -582,6 +689,7 @@ async function loadCoordinationMarker<T>(
   filePath: string,
   normalizer: (value: unknown) => T | null,
   expectedSchemaVersion: number,
+  fallbackFilePath?: string,
 ): Promise<CoordinationMarkerParseResult<T>> {
   try {
     const content = await fsPromises.readFile(filePath, 'utf8');
@@ -628,6 +736,14 @@ async function loadCoordinationMarker<T>(
         : '';
 
     if (code === 'ENOENT') {
+      if (fallbackFilePath && fallbackFilePath !== filePath) {
+        return loadCoordinationMarker(
+          fallbackFilePath,
+          normalizer,
+          expectedSchemaVersion,
+        );
+      }
+
       return {
         status: 'missing',
         path: filePath,
@@ -672,6 +788,7 @@ export async function loadSearchRefreshRequestResult(): Promise<CoordinationMark
     getSearchRefreshRequestFilePath(),
     normalizeSearchRefreshRequest,
     1,
+    path.join(getLegacyCoordinationDirectory(), 'search-refresh-request.json'),
   );
 }
 
@@ -685,6 +802,7 @@ export async function loadSearchRefreshSnapshotResult(): Promise<CoordinationMar
     getSearchRefreshSnapshotFilePath(),
     normalizeSearchRefreshSnapshot,
     1,
+    path.join(getLegacyCoordinationDirectory(), 'zoekt-refresh-state.json'),
   );
 }
 
@@ -692,3 +810,4 @@ export async function loadSearchRefreshSnapshot(): Promise<SearchRefreshSnapshot
   const result = await loadSearchRefreshSnapshotResult();
   return result.status === 'ok' ? result.value : null;
 }
+

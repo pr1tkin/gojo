@@ -6,6 +6,8 @@ import type { RuntimeCapabilityHandler } from './types.js';
 import {
   type ExploreComponentRequest,
   type ExploreComponentResponse,
+  type GetProductVersionRequest,
+  type GetProductVersionResponse,
   type IndexRepoRequest,
   type IndexRepoResponse,
   type RefreshRepoRequest,
@@ -18,6 +20,52 @@ import {
 import { createRuntimeResponse } from './response.js';
 import { assessRuntimeStateFromHealth, detectRepositoryDrift } from './trust.js';
 import { serveMcpRuntime } from './mcp-service.js';
+
+export const getProductVersionHandler: RuntimeCapabilityHandler<
+  GetProductVersionRequest,
+  GetProductVersionResponse
+> = {
+  capability: 'GetProductVersion',
+  executionMode: 'one_shot',
+  async execute(_request, context) {
+    const identity = context.dependencies.config.product.identity;
+
+    return createRuntimeResponse({
+      capability: 'GetProductVersion',
+      executionMode: 'one_shot',
+      summary: {
+        title: identity.name,
+        text: `${identity.name} v${identity.version}`,
+      },
+      findings: [
+        {
+          id: 'product-version',
+          title: 'Product version',
+          summary: `${identity.name} ${identity.version} using packaging model ${identity.packagingModel}.`,
+        },
+      ],
+      relatedEntities: [
+        {
+          kind: 'artifact',
+          name: 'package-root',
+          path: context.dependencies.config.product.paths.packageRoot,
+        },
+      ],
+      signals: [
+        { name: 'version', value: identity.version, importance: 'high' },
+        { name: 'packaging_model', value: identity.packagingModel, importance: 'medium' },
+      ],
+      machinePayload: {
+        name: identity.name,
+        version: identity.version,
+      },
+      trustLevel: 'high',
+      readinessState: 'ready',
+      confidence: 'high',
+      trust: 'high',
+    });
+  },
+};
 
 function resolveRepoId(
   requestRepoId: string | undefined,

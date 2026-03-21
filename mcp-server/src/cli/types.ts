@@ -18,7 +18,8 @@ export interface CliCommand {
 }
 
 export interface ParsedCliResult {
-  command: CliCommand;
+  command?: CliCommand;
+  helpText?: string;
 }
 
 export type RenderableRuntimeResponse = RuntimeResponse<unknown>;

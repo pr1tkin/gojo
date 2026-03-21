@@ -2,11 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getIndexesDirectory,
+  getTempDirectory,
   getGenerationArtifactFilePath,
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
-import { getProductEnvironment } from '../product/environment.js';
 import {
   UI_PROP_SURFACE_SCHEMA_VERSION,
   type UiPropSurfaceIndex,
@@ -14,11 +15,11 @@ import {
 } from './types.js';
 
 function getUiPropsDirectory(): string {
-  return getProductEnvironment().paths.dataDir;
+  return getIndexesDirectory();
 }
 
 function getUiPropsTempFilePath(): string {
-  return path.join(getUiPropsDirectory(), 'ui-props.tmp.json');
+  return path.join(getTempDirectory(), 'ui-props.tmp.json');
 }
 
 function getUiPropsFilePathInternal(): string {

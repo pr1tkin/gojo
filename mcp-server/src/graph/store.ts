@@ -2,19 +2,20 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getIndexesDirectory,
+  getTempDirectory,
   getGenerationArtifactFilePath,
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
-import { getProductEnvironment } from '../product/environment.js';
 import { CODE_GRAPH_SCHEMA_VERSION, type CodeGraphSnapshot, type GraphEdge, type GraphEdgeType } from './types.js';
 
 function getCodeGraphDirectory(): string {
-  return getProductEnvironment().paths.dataDir;
+  return getIndexesDirectory();
 }
 
 function getCodeGraphTempFilePath(): string {
-  return path.join(getCodeGraphDirectory(), 'code-graph.tmp.json');
+  return path.join(getTempDirectory(), 'code-graph.tmp.json');
 }
 
 function getCodeGraphFilePathInternal(): string {

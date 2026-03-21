@@ -2,11 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getIndexesDirectory,
+  getTempDirectory,
   getGenerationArtifactFilePath,
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
-import { getProductEnvironment } from '../product/environment.js';
 import {
   UI_COMPOSITION_SCHEMA_VERSION,
   type UiComponentResolution,
@@ -16,11 +17,11 @@ import {
 } from './types.js';
 
 function getUiCompositionDirectory(): string {
-  return getProductEnvironment().paths.dataDir;
+  return getIndexesDirectory();
 }
 
 function getUiCompositionTempFilePath(): string {
-  return path.join(getUiCompositionDirectory(), 'ui-composition.tmp.json');
+  return path.join(getTempDirectory(), 'ui-composition.tmp.json');
 }
 
 function getUiCompositionFilePathInternal(): string {

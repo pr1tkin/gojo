@@ -13,6 +13,8 @@ export type {
   ExploreComponentResponse,
   FindPrecedentsRequest,
   FindPrecedentsResponse,
+  GetProductVersionRequest,
+  GetProductVersionResponse,
   IndexRepoRequest,
   IndexRepoResponse,
   RepoTarget,
