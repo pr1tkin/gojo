@@ -78,8 +78,10 @@ Rendering stays in the CLI layer so the runtime response remains surface-neutral
 
 `gojo mcp serve` is the first long-running CLI command.
 
-The CLI invokes the runtime capability and the runtime uses the MCP adapter from `server.ts`.
+The CLI invokes the runtime capability directly and does not own MCP startup logic.
 The command is long-running because the MCP transport stays active after startup.
+
+`server.ts` is now only a deprecated compatibility entrypoint and is not part of the official product surface.
 
 ## Deferred
 

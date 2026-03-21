@@ -2,9 +2,13 @@ import { loadConfig } from './config.js';
 import { silentLogger, stderrLogger } from './logging.js';
 import { RuntimeHost } from './runtime/index.js';
 
-// Transitional compatibility entrypoint.
-// Packaged product builds should target the `gojo` CLI surface and let the runtime
-// own service startup through `ServeMCP`.
+// Deprecated compatibility entrypoint.
+// Official product entrypoints are:
+// - `gojo`
+// - `gojo mcp serve`
+//
+// This file remains only to avoid breaking older local/dev flows while release
+// and documentation surfaces consolidate around the CLI-first product story.
 
 async function main(): Promise<void> {
   const config = loadConfig();

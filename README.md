@@ -206,9 +206,22 @@ Artifacts are generated under:
 
 ## 🚀 Quick Start
 
+Current official product surface:
+
+- `gojo`
+- `gojo mcp serve`
+
+From this repository today, the quickest path is:
+
 ```bash
-docker compose up -d --build
+cd mcp-server
+npm install
+npm run build
+node dist/gojo.js health
+node dist/gojo.js mcp serve
 ```
+
+Docker Compose remains available for repository development only. It is not the primary product entrypoint.
 
 ---
 

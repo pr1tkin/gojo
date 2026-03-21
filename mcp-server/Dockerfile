@@ -23,4 +23,5 @@ COPY --from=build /app/dist ./dist
 
 RUN mkdir -p /app/.data /app/.data/coordination
 
-CMD ["node", "dist/server.js"]
+# Dev/container compatibility only. Official product entry is `gojo`.
+CMD ["node", "dist/gojo.js", "mcp", "serve"]
