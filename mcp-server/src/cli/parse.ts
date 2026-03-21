@@ -96,6 +96,7 @@ export function parseCliArgs(argv: string[]): ParsedCliResult {
     const repoPath = tail[0];
     return {
       command: {
+        name: 'index',
         capability: 'IndexRepo',
         request: repoPath ? { repo: { repoPath } } : {},
         executionContext,
@@ -113,6 +114,7 @@ export function parseCliArgs(argv: string[]): ParsedCliResult {
 
     return {
       command: {
+        name: 'explore',
         capability: 'ExploreComponent',
         request: {
           target,
@@ -127,6 +129,7 @@ export function parseCliArgs(argv: string[]): ParsedCliResult {
   if (command === 'health') {
     return {
       command: {
+        name: 'health',
         capability: 'RunHealthChecks',
         request: classifyRepoTarget(options.repo) ? { repo: classifyRepoTarget(options.repo) } : {},
         executionContext,
@@ -138,6 +141,7 @@ export function parseCliArgs(argv: string[]): ParsedCliResult {
   if (command === 'mcp' && tail[0] === 'serve') {
     return {
       command: {
+        name: 'mcp serve',
         capability: 'ServeMCP',
         request: {
           transport: 'stdio',

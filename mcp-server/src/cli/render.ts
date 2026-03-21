@@ -1,4 +1,6 @@
 import type { RenderableRuntimeResponse } from './types.js';
+import type { CliCommand } from './types.js';
+import { deriveSuggestedCommands } from './experience.js';
 
 function formatSignalValue(value: string | number | boolean | null): string {
   if (value === null) {
@@ -16,40 +18,58 @@ function renderSection(title: string, lines: string[]): string[] {
   return [title, ...lines.map((line) => `  ${line}`)];
 }
 
-export function renderRuntimeResponse(response: RenderableRuntimeResponse): string {
-  const lines: string[] = [];
+export function renderRuntimeResponse(response: RenderableRuntimeResponse, command?: CliCommand): string {
+  const sections: string[] = [
+    `${response.summary.title}\n${response.summary.text}`,
+  ];
 
-  lines.push(response.summary.title);
-  lines.push(response.summary.text);
-
-  lines.push(...renderSection(
+  const findingsSection = renderSection(
     'Findings',
     response.findings.map((finding) => {
       const severity = finding.severity ? `[${finding.severity}] ` : '';
       return `${severity}${finding.title}: ${finding.summary}`;
     }),
-  ));
+  );
+  if (findingsSection.length > 0) {
+    sections.push(findingsSection.join('\n'));
+  }
 
-  lines.push(...renderSection(
+  const warningsSection = renderSection(
     'Warnings',
     response.warnings.map((warning) => warning),
-  ));
+  );
+  if (warningsSection.length > 0) {
+    sections.push(warningsSection.join('\n'));
+  }
 
-  lines.push(...renderSection(
+  const relatedSection = renderSection(
     'Related',
     response.related_entities.map((entity) =>
       entity.path ? `${entity.kind}: ${entity.name} (${entity.path})` : `${entity.kind}: ${entity.name}`,
     ),
-  ));
+  );
+  if (relatedSection.length > 0) {
+    sections.push(relatedSection.join('\n'));
+  }
 
-  lines.push(...renderSection(
+  const signalsSection = renderSection(
     'Signals',
     [
       `trust: ${response.trust}`,
       `confidence: ${response.confidence}`,
       ...response.signals.map((signal) => `${signal.name}: ${formatSignalValue(signal.value)}`),
     ],
-  ));
+  );
+  if (signalsSection.length > 0) {
+    sections.push(signalsSection.join('\n'));
+  }
 
-  return `${lines.filter((line) => line.length > 0).join('\n')}\n`;
+  if (command) {
+    const nextStepsSection = renderSection('Next step', deriveSuggestedCommands(response, command));
+    if (nextStepsSection.length > 0) {
+      sections.push(nextStepsSection.join('\n'));
+    }
+  }
+
+  return `${sections.join('\n\n')}\n`;
 }
