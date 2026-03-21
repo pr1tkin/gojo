@@ -1,100 +1,25 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-
 import { loadConfig } from './config.js';
-import { cleanupGenerationDebris } from './indexing/generation-debris.js';
 import { silentLogger, stderrLogger } from './logging.js';
-import { createRuntimeResponse } from './runtime/index.js';
-import { buildSymbolIndex } from './symbol-index/indexer.js';
-import { registerGojoTools } from './tool-registry.js';
-import type {
-  RuntimeHandlerContext,
-  ServeMCPRequest,
-  ServeMCPResponse,
-} from './runtime/index.js';
-
-export async function startMcpServer(
-  context: RuntimeHandlerContext,
-  request: ServeMCPRequest,
-): Promise<ServeMCPResponse> {
-  const config = context.dependencies.config;
-  const logger = context.dependencies.logger ?? stderrLogger;
-  const shouldBuildSymbolIndex = process.env.BUILD_SYMBOL_INDEX_ON_STARTUP === 'true';
-  await cleanupGenerationDebris({ logger, applyDeletes: true });
-
-  const server = new McpServer({
-    name: 'local-code-search',
-    version: '0.1.0',
-  });
-
-  registerGojoTools(server, config);
-
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-
-  if (shouldBuildSymbolIndex) {
-    logger.info('Startup index refresh scheduled in background.');
-    void buildSymbolIndex(config.reposRoot).catch((error: unknown) => {
-      logger.error('Background startup index refresh failed.', error);
-    });
-  }
-
-  return createRuntimeResponse({
-    capability: 'ServeMCP',
-    executionMode: 'long_running',
-    summary: {
-      title: 'MCP server started',
-      text: `Gojo MCP server is serving over ${request.transport ?? 'stdio'}.`,
-    },
-    findings: [
-      {
-        id: 'mcp-server',
-        title: 'Transport connected',
-        summary: 'The MCP transport is active and owned by the runtime host.',
-      },
-    ],
-    relatedEntities: [
-      {
-        kind: 'service',
-        name: 'mcp',
-      },
-    ],
-    signals: [
-      {
-        name: 'transport',
-        value: request.transport ?? 'stdio',
-        importance: 'high',
-      },
-    ],
-    machinePayload: {
-      transport: request.transport ?? 'stdio',
-      status: 'started',
-    },
-    trustLevel: 'high',
-    readinessState: 'ready',
-    confidence: 'high',
-    trust: 'high',
-  });
-}
+import { RuntimeHost } from './runtime/index.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  await startMcpServer(
-    {
-      executionContext: {
-        debug: false,
-        outputMode: 'human',
-      },
-      dependencies: {
-        config,
-        logger: silentLogger,
-      },
-    },
+  const runtime = new RuntimeHost({
+    config,
+    logger: silentLogger,
+  });
+
+  await runtime.execute(
+    'ServeMCP',
     { transport: 'stdio' },
+    {
+      debug: false,
+      outputMode: 'human',
+    },
   );
 }
 
 main().catch((error: unknown) => {
-  stderrLogger.error('Failed to start MCP server.', error);
+  stderrLogger.error('Failed to start Gojo MCP runtime.', error);
   process.exit(1);
 });

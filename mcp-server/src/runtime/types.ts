@@ -74,7 +74,6 @@ export interface RuntimeLogger {
 export interface RuntimeDependencies {
   config: AppConfig;
   logger?: RuntimeLogger;
-  startMcpServer?: (context: RuntimeHandlerContext, request: ServeMCPRequest) => Promise<ServeMCPResponse>;
 }
 
 export interface RuntimeHandlerContext {
@@ -169,7 +168,8 @@ export interface ServeMCPRequest {
 
 export interface ServeMCPMachinePayload {
   transport: 'stdio';
-  status: 'started' | 'stubbed';
+  status: 'starting' | 'serving' | 'failed';
+  lifecycle: 'startup_complete' | 'serving';
 }
 
 export type ServeMCPResponse = RuntimeResponse<ServeMCPMachinePayload>;

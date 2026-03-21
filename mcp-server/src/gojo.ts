@@ -8,7 +8,6 @@ import { renderRuntimeResponse } from './cli/render.js';
 import { buildCliStructuredError, getCliExitCode } from './cli/experience.js';
 import { renderCliError } from './cli/error-render.js';
 import { finalizeCliCommand } from './cli/repo-target.js';
-import { startMcpServer } from './server.js';
 import type { ParsedCliResult } from './cli/types.js';
 
 async function runCli(parsed: ParsedCliResult): Promise<number> {
@@ -21,7 +20,6 @@ async function runCli(parsed: ParsedCliResult): Promise<number> {
   const runtime = new RuntimeHost({
     config,
     logger: finalizedCommand.executionContext.debug ? stderrLogger : silentLogger,
-    startMcpServer,
   });
 
   const response = await runtime.execute(

@@ -17,6 +17,7 @@ import {
 } from './types.js';
 import { createRuntimeResponse } from './response.js';
 import { assessRuntimeStateFromHealth, detectRepositoryDrift } from './trust.js';
+import { serveMcpRuntime } from './mcp-service.js';
 
 function resolveRepoId(
   requestRepoId: string | undefined,
@@ -527,46 +528,8 @@ export const serveMcpHandler: RuntimeCapabilityHandler<ServeMCPRequest, ServeMCP
   capability: 'ServeMCP',
   executionMode: 'long_running',
   async execute(request, context) {
-    if (context.dependencies.startMcpServer) {
-      return context.dependencies.startMcpServer(context, {
-        transport: request.transport ?? 'stdio',
-      });
-    }
-
-    return createRuntimeResponse({
-      capability: 'ServeMCP',
-      executionMode: 'long_running',
-      summary: {
-        title: 'MCP serve handler stub',
-        text: 'No MCP adapter has been attached to the runtime host yet.',
-      },
-      findings: [
-        {
-          id: 'serve-mcp-stub',
-          title: 'Adapter missing',
-          summary: 'Attach a startMcpServer dependency from the future MCP surface integration layer.',
-          severity: 'warning',
-        },
-      ],
-      relatedEntities: [
-        {
-          kind: 'service',
-          name: 'mcp',
-        },
-      ],
-      signals: [{ name: 'transport', value: request.transport ?? 'stdio', importance: 'medium' }],
-      warnings: ['ServeMCP is intentionally stubbed until the MCP surface is moved onto RuntimeHost.'],
-      details: {
-        // TODO(phase9): wire the existing MCP server startup through an injected adapter using RuntimeHost.
-      },
-      machinePayload: {
-        transport: request.transport ?? 'stdio',
-        status: 'stubbed',
-      },
-      trustLevel: 'low',
-      readinessState: 'unknown',
-      confidence: 'low',
-      trust: 'low',
+    return serveMcpRuntime(context, {
+      transport: request.transport ?? 'stdio',
     });
   },
 };

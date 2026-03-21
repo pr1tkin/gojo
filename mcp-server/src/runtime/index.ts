@@ -1,5 +1,6 @@
 export { runtimeCapabilityDefinitions } from './capabilities.js';
 export { RuntimeHost } from './host.js';
+export { serveMcpRuntime } from './mcp-service.js';
 export { createRuntimeResponse } from './response.js';
 export { assessRuntimeStateFromHealth, detectRepositoryDrift } from './trust.js';
 export type {
