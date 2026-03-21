@@ -19,6 +19,19 @@ function commandForIndex(command: CliCommand): string {
   return 'gojo index';
 }
 
+function commandForRefresh(command: CliCommand): string {
+  const repoTarget = command.executionContext.repoTarget;
+  if (repoTarget?.repoId) {
+    return `gojo refresh --repo ${repoTarget.repoId}`;
+  }
+
+  if (repoTarget?.repoPath) {
+    return `gojo refresh --repo ${repoTarget.repoPath}`;
+  }
+
+  return 'gojo refresh';
+}
+
 function commandForHealth(command: CliCommand): string {
   const repoTarget = command.executionContext.repoTarget;
   if (repoTarget?.repoId) {
@@ -183,18 +196,45 @@ export function deriveSuggestedCommands(response: RuntimeResponse<unknown>, comm
       recommendedAction?: string;
     };
 
-    if (
-      payload.generationStatus === 'missing' ||
-      payload.readinessState === 'stale' ||
-      payload.readinessState === 'inconsistent' ||
-      response.readiness_state === 'unknown'
-    ) {
+    if (payload.generationStatus === 'missing' || response.readiness_state === 'unknown') {
+      appendUnique(suggestions, commandForIndex(command));
+    }
+
+    if (payload.readinessState === 'stale' || response.readiness_state === 'stale') {
+      appendUnique(suggestions, commandForRefresh(command));
+    }
+
+    if (payload.readinessState === 'inconsistent' || response.readiness_state === 'inconsistent') {
       appendUnique(suggestions, commandForIndex(command));
     }
   }
 
-  if (response.capability === 'ExploreComponent' && response.readiness_state !== 'ready') {
-    appendUnique(suggestions, commandForHealth(command));
+  if (response.capability === 'ExploreComponent') {
+    if (response.readiness_state === 'stale') {
+      appendUnique(suggestions, commandForRefresh(command));
+    }
+
+    if (response.readiness_state === 'inconsistent' || response.readiness_state === 'unknown') {
+      appendUnique(suggestions, commandForIndex(command));
+    }
+
+    if (response.readiness_state !== 'ready') {
+      appendUnique(suggestions, commandForHealth(command));
+    }
+  }
+
+  if (response.capability === 'IndexRepo' && response.readiness_state === 'stale') {
+    appendUnique(suggestions, commandForRefresh(command));
+  }
+
+  if (response.capability === 'RefreshRepo') {
+    if (response.readiness_state === 'stale') {
+      appendUnique(suggestions, commandForHealth(command));
+    }
+
+    if (response.readiness_state === 'inconsistent' || response.readiness_state === 'unknown') {
+      appendUnique(suggestions, commandForIndex(command));
+    }
   }
 
   return suggestions;

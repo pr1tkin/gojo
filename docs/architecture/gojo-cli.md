@@ -22,6 +22,7 @@ Those remain in the runtime layer.
 
 Implemented MVP commands:
 - `gojo index`
+- `gojo refresh`
 - `gojo explore <target>`
 - `gojo health`
 - `gojo mcp serve`
@@ -31,6 +32,7 @@ Implemented MVP commands:
 The CLI routes through `RuntimeHost` only:
 
 - `gojo index` -> `IndexRepo`
+- `gojo refresh` -> `RefreshRepo`
 - `gojo explore` -> `ExploreComponent`
 - `gojo health` -> `RunHealthChecks`
 - `gojo mcp serve` -> `ServeMCP`

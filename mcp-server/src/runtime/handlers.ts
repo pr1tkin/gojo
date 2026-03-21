@@ -217,8 +217,8 @@ export const refreshRepoHandler: RuntimeCapabilityHandler<RefreshRepoRequest, Re
       capability: 'RefreshRepo',
       executionMode: 'one_shot',
       summary: {
-        title: 'Repository refreshed',
-        text: `${buildStateSummaryText(runtimeState.stateSummary, runtimeState.stateExplanation)} Refresh completed with status ${result.diagnostics.status} for generation ${result.diagnostics.generationId}.`,
+        title: 'Refresh completed',
+        text: `${buildStateSummaryText(runtimeState.stateSummary, runtimeState.stateExplanation)} Refreshed ${reposRoot} with generation ${result.diagnostics.generationId}.`,
       },
       findings: [
         {

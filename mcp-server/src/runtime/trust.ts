@@ -105,6 +105,7 @@ function recommendedActionFromHealth(
   driftWarning?: string,
 ): string | undefined {
   const indexCommand = repoPath ? `gojo index ${repoPath}` : 'gojo index';
+  const refreshCommand = repoPath ? `gojo refresh --repo ${repoPath}` : 'gojo refresh';
 
   if (health.trustState === 'inconsistent') {
     return `Run ${indexCommand} to rebuild Gojo artifacts from a clean generation.`;
@@ -115,7 +116,7 @@ function recommendedActionFromHealth(
   }
 
   if (driftWarning || health.trustState === 'stale-search' || health.trustState === 'degraded' || health.trustState === 'repair-recommended') {
-    return `Run ${indexCommand} to rebuild and republish current repo data.`;
+    return `Run ${refreshCommand} to reconcile stale Gojo data for this repo.`;
   }
 
   return undefined;

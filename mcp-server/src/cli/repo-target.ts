@@ -98,7 +98,7 @@ export async function finalizeCliCommand(
     ...(resolvedRepoTarget ? { repoTarget: resolvedRepoTarget } : {}),
   };
 
-  if (command.capability === 'IndexRepo') {
+  if (command.capability === 'IndexRepo' || command.capability === 'RefreshRepo') {
     const indexPathInput = command.indexPathInput ?? command.repoInput;
 
     if (!indexPathInput) {

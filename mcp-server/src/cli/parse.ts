@@ -2,6 +2,7 @@ import type { ParsedCliResult } from './types.js';
 
 const usageText = `Usage:
   gojo [--repo <repo-id-or-path>] [--json] [--debug] index [repo-path]
+  gojo [--repo <repo-id-or-path>] [--json] [--debug] refresh [repo-path]
   gojo [--repo <repo-id-or-path>] [--json] [--debug] explore <target>
   gojo [--repo <repo-id-or-path>] [--json] [--debug] health
   gojo [--repo <repo-id-or-path>] [--json] [--debug] mcp serve
@@ -79,6 +80,21 @@ export function parseCliArgs(argv: string[]): ParsedCliResult {
       command: {
         name: 'index',
         capability: 'IndexRepo',
+        request: {},
+        executionContext,
+        renderResult: true,
+        repoInput: options.repo,
+        ...(repoPath ? { indexPathInput: repoPath } : {}),
+      },
+    };
+  }
+
+  if (command === 'refresh') {
+    const repoPath = tail[0];
+    return {
+      command: {
+        name: 'refresh',
+        capability: 'RefreshRepo',
         request: {},
         executionContext,
         renderResult: true,
