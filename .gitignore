@@ -43,3 +43,7 @@ zoekt-data/
 
 # Local MCP symbol index
 mcp-server/.data/*
+
+#evaluations
+docs/evaluations/*
+.ai/*

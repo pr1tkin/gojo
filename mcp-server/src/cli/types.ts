@@ -1,4 +1,5 @@
 import type { ExecutionContext, RuntimeCapabilityName, RuntimeResponse } from '../runtime/index.js';
+import type { AppConfig } from '../types.js';
 
 export interface CliGlobalOptions {
   repo?: string;
@@ -12,6 +13,8 @@ export interface CliCommand {
   request: Record<string, unknown>;
   executionContext: Partial<ExecutionContext>;
   renderResult: boolean;
+  repoInput?: string;
+  indexPathInput?: string;
 }
 
 export interface ParsedCliResult {
@@ -20,8 +23,19 @@ export interface ParsedCliResult {
 
 export type RenderableRuntimeResponse = RuntimeResponse<unknown>;
 
+export interface RepoResolutionContext {
+  config: AppConfig;
+  cwd: string;
+}
+
+export interface ResolvedRepoTarget {
+  repoId?: string;
+  repoPath?: string;
+}
+
 export type CliErrorCode =
   | 'invalid_usage'
+  | 'invalid_repo_target'
   | 'missing_index'
   | 'runtime_failure'
   | 'health_recovery';

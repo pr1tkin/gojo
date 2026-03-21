@@ -7,11 +7,17 @@ import { parseCliArgs } from './cli/parse.js';
 import { renderRuntimeResponse } from './cli/render.js';
 import { buildCliStructuredError, getCliExitCode } from './cli/experience.js';
 import { renderCliError } from './cli/error-render.js';
+import { finalizeCliCommand } from './cli/repo-target.js';
 import { startMcpServer } from './server.js';
 import type { ParsedCliResult } from './cli/types.js';
 
 async function runCli(parsed: ParsedCliResult): Promise<number> {
   const config = loadConfig();
+  const finalizedCommand = await finalizeCliCommand(parsed.command, {
+    config,
+    cwd: process.cwd(),
+  });
+  parsed.command = finalizedCommand;
   const runtime = new RuntimeHost({
     config,
     logger: stderrLogger,
@@ -19,15 +25,15 @@ async function runCli(parsed: ParsedCliResult): Promise<number> {
   });
 
   const response = await runtime.execute(
-    parsed.command.capability,
-    parsed.command.request as never,
-    parsed.command.executionContext,
+    finalizedCommand.capability,
+    finalizedCommand.request as never,
+    finalizedCommand.executionContext,
   );
 
-  if (parsed.command.executionContext.outputMode === 'json') {
+  if (finalizedCommand.executionContext.outputMode === 'json') {
     process.stdout.write(`${JSON.stringify(response, null, 2)}\n`);
-  } else if (parsed.command.renderResult) {
-    process.stdout.write(renderRuntimeResponse(response, parsed.command));
+  } else if (finalizedCommand.renderResult) {
+    process.stdout.write(renderRuntimeResponse(response, finalizedCommand));
   }
 
   if (response.executionMode === 'long_running') {

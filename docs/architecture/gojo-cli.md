@@ -48,6 +48,22 @@ Phase 9 MVP global flags:
 
 These are translated into runtime execution context and request data where applicable.
 
+## Repo Targeting Model
+
+Gojo now distinguishes between:
+- `RepoPath`
+  - filesystem path
+  - always valid input for `gojo index <path>`
+- `RepoId`
+  - logical identifier such as `dlf-web`
+  - used for insight commands after repo resolution
+
+CLI resolution rule:
+- if `--repo <value>` points to an existing path, treat it as `RepoPath`
+- otherwise treat it as `RepoId` and resolve it to a path when possible
+
+This resolution happens in the CLI layer before the runtime host is called.
+
 ## Output Model
 
 Default output is human-readable plain text.

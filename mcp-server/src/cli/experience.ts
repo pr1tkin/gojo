@@ -3,17 +3,33 @@ import type { CliCommand, CliStructuredError } from './types.js';
 
 function repoLabel(command: CliCommand): string | undefined {
   const repoTarget = command.executionContext.repoTarget;
-  return repoTarget?.repoId ?? repoTarget?.repoPath;
+  return repoTarget?.repoPath ?? repoTarget?.repoId;
 }
 
 function commandForIndex(command: CliCommand): string {
-  const repo = repoLabel(command);
-  return repo ? `gojo index --repo ${repo}` : 'gojo index';
+  const repoTarget = command.executionContext.repoTarget;
+  if (repoTarget?.repoPath) {
+    return `gojo index ${repoTarget.repoPath}`;
+  }
+
+  if (repoTarget?.repoId) {
+    return `gojo index --repo ${repoTarget.repoId}`;
+  }
+
+  return 'gojo index';
 }
 
 function commandForHealth(command: CliCommand): string {
-  const repo = repoLabel(command);
-  return repo ? `gojo health --repo ${repo}` : 'gojo health';
+  const repoTarget = command.executionContext.repoTarget;
+  if (repoTarget?.repoId) {
+    return `gojo health --repo ${repoTarget.repoId}`;
+  }
+
+  if (repoTarget?.repoPath) {
+    return `gojo health --repo ${repoTarget.repoPath}`;
+  }
+
+  return 'gojo health';
 }
 
 function commandForRetryExplore(command: CliCommand): string | undefined {
@@ -26,12 +42,28 @@ function commandForRetryExplore(command: CliCommand): string | undefined {
     return undefined;
   }
 
-  const repo = repoLabel(command);
-  return repo ? `gojo explore ${request.target} --repo ${repo}` : `gojo explore ${request.target}`;
+  const repoTarget = command.executionContext.repoTarget;
+  if (repoTarget?.repoId) {
+    return `gojo explore ${request.target} --repo ${repoTarget.repoId}`;
+  }
+
+  if (repoTarget?.repoPath) {
+    return `gojo explore ${request.target} --repo ${repoTarget.repoPath}`;
+  }
+
+  return `gojo explore ${request.target}`;
 }
 
 function isMissingIndexError(error: unknown): boolean {
   return error instanceof Error && /Symbol index not found/i.test(error.message);
+}
+
+function isRepoResolutionError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message.startsWith('Repo path does not exist:') ||
+      error.message.startsWith('Repo could not be resolved:'))
+  );
 }
 
 function isUsageError(error: unknown): boolean {
@@ -95,12 +127,28 @@ export function buildCliStructuredError(error: unknown, command?: CliCommand): C
     };
   }
 
+  if (isRepoResolutionError(error)) {
+    return {
+      ok: false,
+      error: {
+        code: 'invalid_repo_target',
+        title: 'Repo target could not be resolved',
+        reason: error instanceof Error ? error.message : String(error),
+        how_to_fix: [
+          'Pass an existing filesystem path for indexing, or a repo id/path that Gojo can resolve.',
+          'If the repo has already been indexed, use its repo id. Otherwise use the filesystem path.',
+        ],
+        suggested_commands: ['gojo health'],
+      },
+    };
+  }
+
   return {
     ok: false,
-    error: {
-      code: 'runtime_failure',
-      title: command ? `Command failed: ${command.name}` : 'Command failed',
-      reason: error instanceof Error ? error.message : String(error),
+      error: {
+        code: 'runtime_failure',
+        title: command ? `Command failed: ${command.name}` : 'Command failed',
+        reason: error instanceof Error ? error.message : String(error),
       how_to_fix: [
         'Check the reported reason and retry once the runtime prerequisites are satisfied.',
       ],

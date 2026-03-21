@@ -52,27 +52,8 @@ function parseGlobalOptions(argv: string[]): {
   return { options, rest };
 }
 
-function classifyRepoTarget(value: string | undefined): { repoId?: string; repoPath?: string } | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  if (
-    value.includes('/') ||
-    value.includes('\\') ||
-    value.startsWith('.') ||
-    /^[A-Za-z]:/.test(value)
-  ) {
-    return { repoPath: value };
-  }
-
-  return { repoId: value };
-}
-
 function toExecutionContext(input: { repo?: string; json: boolean; debug: boolean }) {
-  const repoTarget = classifyRepoTarget(input.repo);
   return {
-    ...(repoTarget ? { repoTarget } : {}),
     debug: input.debug,
     outputMode: input.json ? ('json' as const) : ('human' as const),
   };
@@ -98,9 +79,11 @@ export function parseCliArgs(argv: string[]): ParsedCliResult {
       command: {
         name: 'index',
         capability: 'IndexRepo',
-        request: repoPath ? { repo: { repoPath } } : {},
+        request: {},
         executionContext,
         renderResult: true,
+        repoInput: options.repo,
+        ...(repoPath ? { indexPathInput: repoPath } : {}),
       },
     };
   }
@@ -118,10 +101,10 @@ export function parseCliArgs(argv: string[]): ParsedCliResult {
         capability: 'ExploreComponent',
         request: {
           target,
-          ...(classifyRepoTarget(options.repo)?.repoId ? { repo: { repoId: classifyRepoTarget(options.repo)?.repoId } } : {}),
         },
         executionContext,
         renderResult: true,
+        repoInput: options.repo,
       },
     };
   }
@@ -131,9 +114,10 @@ export function parseCliArgs(argv: string[]): ParsedCliResult {
       command: {
         name: 'health',
         capability: 'RunHealthChecks',
-        request: classifyRepoTarget(options.repo) ? { repo: classifyRepoTarget(options.repo) } : {},
+        request: {},
         executionContext,
         renderResult: true,
+        repoInput: options.repo,
       },
     };
   }
