@@ -28,6 +28,7 @@ export type {
   RuntimeDependencies,
   RuntimeExecutionMode,
   RuntimeFinding,
+  RuntimeHandlerContext,
   RuntimeLogger,
   RuntimeOutputMode,
   RuntimeRelatedEntity,
