@@ -1,4 +1,5 @@
 import type { RuntimeResponse } from '../runtime/index.js';
+import { SearchHelperError } from '../search/helpers.js';
 import type { CliCommand, CliStructuredError } from './types.js';
 
 function repoLabel(command: CliCommand): string | undefined {
@@ -97,6 +98,10 @@ function isUsageError(error: unknown): boolean {
   );
 }
 
+function isSearchHelperError(error: unknown): error is SearchHelperError {
+  return error instanceof SearchHelperError;
+}
+
 export function getCliExitCode(error: unknown): number {
   return isUsageError(error) ? 2 : 1;
 }
@@ -160,6 +165,32 @@ export function buildCliStructuredError(error: unknown, command?: CliCommand): C
           'If the repo has already been indexed, use its repo id. Otherwise use the filesystem path.',
         ],
         suggested_commands: ['gojo health'],
+      },
+    };
+  }
+
+  if (isSearchHelperError(error)) {
+    return {
+      ok: false,
+      error: {
+        code: 'missing_search_helper',
+        title: 'Search helper is unavailable',
+        reason: error.message,
+        how_to_fix:
+          error.suggestions.length > 0
+            ? error.suggestions
+            : ['Reinstall Gojo so the bundled search helpers are present and executable.'],
+        suggested_commands: command ? [commandForHealth(command)] : ['gojo health'],
+        details: {
+          helper: error.helper,
+          code: error.code,
+          ...(command
+            ? {
+                capability: command.capability,
+                command: command.name,
+              }
+            : {}),
+        },
       },
     };
   }

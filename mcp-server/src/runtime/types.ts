@@ -180,6 +180,8 @@ export interface ServeMCPMachinePayload {
   transport: 'stdio';
   status: 'starting' | 'serving' | 'failed';
   lifecycle: 'startup_complete' | 'serving';
+  searchBaseUrl?: string;
+  searchReachable?: boolean;
 }
 
 export type ServeMCPResponse = RuntimeResponse<ServeMCPMachinePayload>;

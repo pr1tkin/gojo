@@ -3,6 +3,7 @@ export type NodeEnv = 'development' | 'test' | 'production';
 export type GojoPackagingModel = 'single_surface_with_packaged_runtime';
 
 export type SearchPackagingStrategy = 'bundled_helper_binaries';
+export type SearchRuntimeMode = 'development' | 'packaged';
 
 export interface ProductIdentity {
   name: string;
@@ -25,8 +26,11 @@ export interface ProductPaths {
 
 export interface SearchRuntimeConfig {
   baseUrl: string;
+  mode: SearchRuntimeMode;
   packagingStrategy: SearchPackagingStrategy;
   helperBinaryDir: string;
+  helperManifestPath: string;
+  indexDirectory: string;
   helperBinaries: {
     webserver: string;
     indexer: string;

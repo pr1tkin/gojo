@@ -8,6 +8,7 @@ import type {
   ProductIdentity,
   ProductPaths,
   SearchRuntimeConfig,
+  SearchRuntimeMode,
 } from '../types.js';
 
 const PRODUCT_NAME = 'gojo';
@@ -177,11 +178,21 @@ export function resolveSearchRuntimeConfig(
 ): SearchRuntimeConfig {
   const paths = resolveProductPathsForEnvironment(env);
   const baseUrl = env.ZOEKT_BASE_URL?.trim() || 'http://127.0.0.1:6070';
+  const configuredMode = env.GOJO_RUNTIME_MODE?.trim();
+  const mode: SearchRuntimeMode =
+    configuredMode === 'packaged' || configuredMode === 'development'
+      ? configuredMode
+      : env.GOJO_PACKAGED === 'true'
+        ? 'packaged'
+        : 'development';
 
   return {
     baseUrl: new URL(baseUrl).toString().replace(/\/$/, ''),
+    mode,
     packagingStrategy: 'bundled_helper_binaries',
     helperBinaryDir: paths.searchHelpersDir,
+    helperManifestPath: path.join(paths.searchHelpersDir, 'manifest.json'),
+    indexDirectory: path.join(paths.indexesDir, 'search'),
     helperBinaries: {
       webserver: path.join(paths.searchHelpersDir, process.platform === 'win32' ? 'zoekt-webserver.exe' : 'zoekt-webserver'),
       indexer: path.join(paths.searchHelpersDir, process.platform === 'win32' ? 'zoekt-git-index.exe' : 'zoekt-git-index'),

@@ -38,6 +38,7 @@ export type CliErrorCode =
   | 'invalid_usage'
   | 'invalid_repo_target'
   | 'missing_index'
+  | 'missing_search_helper'
   | 'runtime_failure'
   | 'health_recovery';
 

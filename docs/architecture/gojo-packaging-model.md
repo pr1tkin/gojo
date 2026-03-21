@@ -1,128 +1,142 @@
-﻿# Gojo Packaging Model
+# Gojo Packaging Model
 
 ## Current packaging model
-
-Gojo now targets a **single product-surface binary** with a packaged runtime.
+Gojo targets a single product-facing command with packaged runtime dependencies.
 
 Current model:
-
-- one primary user-facing command: `gojo`
-- runtime-owned capability execution behind that command surface
+- one official user-facing command: `gojo`
+- runtime-owned capability execution behind that surface
 - packaged runtime state directories for config, data, cache, logs, and runtime files
-- pragmatic allowance for internal helper processes or external services where the product still needs them
+- bundled helper binaries for search where Gojo still depends on Zoekt processes
 
-This is not yet a strict "all code and all dependencies inside one immutable executable" model.
-
-The honest current model is:
-
-- **single binary product surface with packaged runtime state and transitional helper/service dependencies**
+This is still a transitional model. It is a single product surface, not strict single-executable purity.
 
 ## What "single binary" means today
+For Gojo today, the product promise is:
+- the user installs one Gojo distribution
+- the user runs one primary command: `gojo`
+- required runtime helpers are bundled inside that distribution when they are still necessary
+- the runtime, not the CLI, owns helper discovery and startup
 
-For Gojo today, "single binary" means:
+Known transitional compromises:
+- Zoekt remains process-based rather than embedded as a TypeScript library
+- MCP lifecycle is still startup-snapshot based
+- `server.ts` still exists as a compatibility shim
+- there is not yet a general supervisor layer for multiple long-running helpers
 
-- the user installs and invokes one primary executable: `gojo`
-- all product commands are entered through that surface
-- the runtime core owns capability execution and long-running startup paths
-- packaged builds can supply supporting runtime state directories and, where still necessary, helper/service dependencies behind the unified product surface
+## Helper packaging model
+Gojo now formalizes search helper packaging as `bundled_helper_binaries`.
 
-Known exceptions and transitional compromises:
+Expected distribution layout:
+```text
+<gojo-dist>/
+  bin/
+    gojo
+    search/
+      manifest.json
+      zoekt-webserver(.exe)
+      zoekt-git-index(.exe)
+  data/
+  runtime/
+  cache/
+  logs/
+```
 
-- Zoekt integration still behaves as an external dependency boundary
-- MCP lifecycle is still snapshot-based after startup
-- `server.ts` still exists as a compatibility entrypoint
-- there is not yet a runtime supervisor layer for multiple long-running services
+Current repository-backed layout for local validation:
+```text
+mcp-server/
+  dist/
+  bin/
+    search/
+      manifest.json
+```
 
-## Packaging boundaries
+The helper manifest records:
+- schema version
+- packaging strategy
+- pinned Zoekt ref
+- expected helper names
 
-The following pieces must be packaged together conceptually:
+## Helper resolution logic
+Search helper resolution is centralized in `src/search/helpers.ts`.
 
-### Product surface
+Resolution order:
+1. packaged helper location under `config.search.helperBinaries`
+2. environment override:
+   - `GOJO_ZOEKT_WEBSERVER_PATH`
+   - `GOJO_ZOEKT_GIT_INDEX_PATH`
+3. development fallback only:
+   - helper path under `GOJO_SEARCH_HELPERS_DIR`
+   - executable discovered on `PATH`
 
-- `gojo` CLI entrypoint (`src/gojo.ts`)
-- command parsing and rendering layer (`src/cli/*`)
+The CLI does not participate in helper discovery.
 
-### Runtime core
+## Dev vs packaged behavior
+Search runtime mode is controlled by:
+- `GOJO_RUNTIME_MODE=packaged|development`
+- otherwise defaults to `development` unless `GOJO_PACKAGED=true` is set
 
-- `RuntimeHost`
-- runtime handlers
-- runtime MCP service
-- shared runtime response and state model
+### Packaged mode
+Packaged mode is strict.
 
-### MCP runtime path
+Behavior:
+- helper discovery must succeed from the packaged layout or explicit override
+- helper startup failures are treated as product errors
+- `gojo mcp serve` fails fast with an incomplete-installation error if bundled helpers are missing
+- `index` and `refresh` treat search sync failures as command failures rather than silent degradation
 
-- runtime-owned `ServeMCP`
-- MCP tool registry
-- MCP transport startup code
+### Development mode
+Development mode remains permissive.
 
-### Indexing and analysis runtime
+Behavior:
+- Gojo may use an already-running external Zoekt endpoint
+- missing helpers do not block MCP startup if the user is intentionally working without managed search helpers
+- search sync may remain stale when helper binaries are unavailable, preserving current local workflows without claiming packaged completeness
 
-- symbol index
-- graph index
-- UI composition and props indexes
-- pattern index
-- health and generation-state management
+## Runtime ownership
+Runtime-owned search logic now lives in:
+- `src/runtime/search-service.ts`
+- `src/search/helpers.ts`
 
-### Product environment / metadata
+Responsibilities:
+- resolve helper binaries
+- validate helper executability
+- probe helper version when possible
+- build Zoekt search indexes during refresh/index flows
+- start the Zoekt webserver for runtime-owned MCP serving when appropriate
+- write refreshed search snapshot markers for readiness reconciliation
 
-- product identity (name, version, packaging model)
-- product directory resolver
-- config loading defaults
-
-### Transitional helper / dependency boundaries
-
-- Zoekt endpoint / search integration
-- any future packaged helper binaries required by search
+This keeps helper lifecycle out of the CLI layer.
 
 ## Product path and state layout
+Gojo resolves product paths through the product environment layer.
 
-Gojo now resolves product directories through a central environment layer.
+Relevant directories:
+- `configDir`: user or install configuration
+- `dataDir`: persistent runtime data root
+- `indexesDir`: Gojo generation artifacts and search index directory
+- `cacheDir`: regenerable caches
+- `logDir`: persisted logs
+- `runtimeDir`: transient runtime state and coordination markers
+- `tempDir`: temporary files for atomic writes
+- `searchHelpersDir`: packaged helper binary directory
 
-Current directory model:
+Search-specific locations:
+- `config.search.indexDirectory` -> `indexesDir/search`
+- search coordination marker -> `runtimeDir/coordination/zoekt-refresh-state.json`
 
-- `packageRoot`: packaged application root containing runtime code and package metadata
-- `homeDir`: base Gojo product home when `GOJO_HOME` is set, otherwise platform default
-- `configDir`: product config location
-- `dataDir`: runtime data and generation artifacts
-- `indexesDir`: reserved product directory for index-oriented packaged layout
-- `cacheDir`: cacheable runtime artifacts
-- `logDir`: logs for packaged/runtime operation
-- `runtimeDir`: transient runtime state
-- `tempDir`: temporary runtime files
+## Version compatibility
+Compatibility is currently ensured through a pragmatic contract:
+- packaged helper manifest pins a Zoekt ref
+- runtime probes helper executability with `-version` when possible
+- if version output is unavailable, runtime degrades to executable validation plus manifest expectation
 
-Current artifact behavior:
-
-- generation artifacts continue to live under `dataDir`
-- current runtime health and coordination files also live under `dataDir`
-- index-specific and cache-specific separation is now modeled, even if not every subsystem has migrated yet
-- when an existing workspace-local `.data` directory is present, Gojo currently reuses it as a compatibility fallback instead of forcing immediate state migration
-
-## Packaging-readiness improvements now implemented
-
-- product identity is resolved centrally from package metadata or environment override
-- runtime data directories no longer default to `.data` under the caller's current working directory
-- major storage modules now resolve through the product environment layer
-- MCP startup reports product identity from the same metadata source used by config
-- default repo-root resolution is less container-specific and can fall back to workspace-adjacent `repos/`
-
-## Version and product identity
-
-Product identity is now explicit in code.
-
-Source of truth:
-
-- package metadata version from `mcp-server/package.json`
-- optional environment override via `GOJO_VERSION`
-
-This identity is available to runtime code and is already used by the MCP runtime service.
+This is enough for release preparation, but not yet a full helper compatibility policy.
 
 ## What remains for release-pipeline work
-
 Still deferred:
-
-- producing distributable binaries/installers
-- copying or embedding any helper binaries needed by search
-- final install-time OS-specific path conventions
-- explicit migration of every storage subsystem into `indexesDir`, `cacheDir`, or `logDir`
-- consolidation or retirement of `server.ts`
-- release automation and artifact signing
+- assembling real release archives with helper binaries included
+- signing or checksumming helper artifacts
+- verifying helper version compatibility during release builds
+- helper supervision beyond the current managed webserver process
+- removing the legacy `server.ts` compatibility entrypoint

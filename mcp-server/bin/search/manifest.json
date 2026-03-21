@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "strategy": "bundled_helper_binaries",
+  "zoektRef": "c747a3bccc2a4a427204ac08eea62a522df6d2ec",
+  "helpers": {
+    "webserver": "zoekt-webserver",
+    "indexer": "zoekt-git-index"
+  }
+}

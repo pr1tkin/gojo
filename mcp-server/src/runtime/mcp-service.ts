@@ -5,6 +5,7 @@ import { cleanupGenerationDebris } from '../indexing/generation-debris.js';
 import { buildSymbolIndex } from '../symbol-index/indexer.js';
 import { registerGojoTools } from '../tool-registry.js';
 import { createRuntimeResponse } from './response.js';
+import { ensureSearchWebserver } from './search-service.js';
 import type {
   RuntimeHandlerContext,
   ServeMCPRequest,
@@ -19,6 +20,7 @@ export async function serveMcpRuntime(
   const logger = context.dependencies.logger;
   const shouldBuildSymbolIndex = process.env.BUILD_SYMBOL_INDEX_ON_STARTUP === 'true';
   const productIdentity = config.product.identity;
+  const searchRuntime = await ensureSearchWebserver(config, logger);
 
   await cleanupGenerationDebris({ logger, applyDeletes: true });
 
@@ -61,6 +63,15 @@ export async function serveMcpRuntime(
         title: 'Product identity',
         summary: `${productIdentity.name} ${productIdentity.version} is serving with packaging model ${productIdentity.packagingModel}.`,
       },
+      {
+        id: 'search-runtime',
+        title: 'Search runtime',
+        summary: searchRuntime.managed
+          ? `Zoekt webserver is running from the runtime-managed helper path at ${config.search.baseUrl}.`
+          : searchRuntime.reachable
+            ? `Zoekt is available at ${config.search.baseUrl}.`
+            : `Zoekt is not currently reachable at ${config.search.baseUrl}; Gojo will continue in ${config.search.mode} mode.`,
+      },
     ],
     relatedEntities: [
       {
@@ -88,20 +99,46 @@ export async function serveMcpRuntime(
         value: registrations.length,
         importance: 'medium',
       },
+      {
+        name: 'search_runtime_mode',
+        value: config.search.mode,
+        importance: 'medium',
+      },
+      {
+        name: 'search_endpoint_reachable',
+        value: searchRuntime.reachable,
+        importance: 'high',
+      },
     ],
-    warnings: shouldBuildSymbolIndex
-      ? ['Background symbol indexing was scheduled during MCP startup.']
-      : [],
+    warnings: [
+      ...(shouldBuildSymbolIndex
+        ? ['Background symbol indexing was scheduled during MCP startup.']
+        : []),
+      ...(!searchRuntime.reachable
+        ? ['Search endpoint is not reachable; search-backed MCP tools may remain unavailable until helpers are installed or an external Zoekt endpoint is started.']
+        : []),
+      ...(searchRuntime.validation?.warnings ?? []),
+    ],
     details: {
       startupPhase: 'startup_complete',
       lifecycle: 'serving',
       productIdentity,
+      search: {
+        baseUrl: config.search.baseUrl,
+        mode: config.search.mode,
+        helperSource: searchRuntime.validation?.helper.source,
+        helperExecutable: searchRuntime.validation?.helper.executable,
+        helperVersion: searchRuntime.validation?.version,
+        helperExpectedVersion: searchRuntime.validation?.expectedVersion,
+      },
       toolNames: registrations.map((registration) => registration.definition.name),
     },
     machinePayload: {
       transport: request.transport ?? 'stdio',
       status: 'serving',
       lifecycle: 'startup_complete',
+      searchBaseUrl: config.search.baseUrl,
+      searchReachable: searchRuntime.reachable,
     },
     trustLevel: 'high',
     readinessState: 'ready',

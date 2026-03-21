@@ -20,6 +20,7 @@ import {
 import { createRuntimeResponse } from './response.js';
 import { assessRuntimeStateFromHealth, detectRepositoryDrift } from './trust.js';
 import { serveMcpRuntime } from './mcp-service.js';
+import { inspectSearchRuntime } from './search-service.js';
 
 export const getProductVersionHandler: RuntimeCapabilityHandler<
   GetProductVersionRequest,
@@ -95,6 +96,10 @@ function toProductWarning(warning: string): string {
     return 'Search index has not synchronized with the latest Gojo generation yet.';
   }
 
+  if (warning.startsWith('Search helper not found')) {
+    return 'Bundled search helpers are missing from this Gojo installation.';
+  }
+
   if (warning === 'consistency report is unavailable for the current generation') {
     return 'Consistency maintenance has not produced a report for the current generation yet.';
   }
@@ -122,6 +127,7 @@ function scopeHealthWarnings(warnings: string[], repoPath: string | undefined): 
       warning.includes(repoName) ||
       warning.includes(repoPath) ||
       warning.startsWith('State is stale because') ||
+      warning.includes('Bundled search helpers') ||
       warning.includes('Search index has not synchronized') ||
       warning.includes('Consistency maintenance') ||
       warning.includes('Required runtime artifacts'),
@@ -474,9 +480,10 @@ export const runHealthChecksHandler: RuntimeCapabilityHandler<
   executionMode: 'one_shot',
   async execute(request, context) {
     const repoPath = request.repo?.repoPath ?? context.executionContext.repoTarget?.repoPath;
-    const [result, generationState] = await Promise.all([
+    const [result, generationState, searchRuntime] = await Promise.all([
       getCurrentIndexHealth(),
       loadCurrentGenerationState().catch(() => null),
+      inspectSearchRuntime(context.dependencies.config),
     ]);
     const drift = await detectRepositoryDrift({
       repoPath,
@@ -490,8 +497,16 @@ export const runHealthChecksHandler: RuntimeCapabilityHandler<
       request.repo?.repoId ??
       context.executionContext.repoTarget?.repoId ??
       repoPath?.split(/[/\\]/).filter(Boolean).at(-1);
+    const searchWarnings =
+      context.dependencies.config.search.mode === 'packaged' &&
+      (!searchRuntime.webserverHelperAvailable || !searchRuntime.indexerHelperAvailable)
+        ? [
+            'Search helper not found. This Gojo installation is incomplete.',
+            ...searchRuntime.helperWarnings,
+          ]
+        : searchRuntime.helperWarnings;
     const scopedWarnings = scopeHealthWarnings(
-      [...result.warnings, ...result.errors, ...runtimeState.warnings],
+      [...result.warnings, ...result.errors, ...runtimeState.warnings, ...searchWarnings],
       repoPath,
     );
 
@@ -547,12 +562,15 @@ export const runHealthChecksHandler: RuntimeCapabilityHandler<
         { name: 'suitable_for_agent_workflows', value: result.suitableForAgentWorkflows, importance: 'high' },
         { name: 'warning_count', value: scopedWarnings.length, importance: 'medium' },
         { name: 'error_count', value: result.errors.length, importance: 'high' },
+        { name: 'search_endpoint_reachable', value: searchRuntime.endpointReachable, importance: 'high' },
+        { name: 'search_runtime_mode', value: searchRuntime.mode, importance: 'medium' },
       ],
       warnings: scopedWarnings,
       details: {
         reasons: result.reasons,
         recentActivity: result.recentActivity,
         search: result.search,
+        searchHelpers: searchRuntime,
         stateExplanation: runtimeState.stateExplanation,
         ...(runtimeState.recommendedAction ? { recommendedAction: runtimeState.recommendedAction } : {}),
       },
@@ -563,6 +581,7 @@ export const runHealthChecksHandler: RuntimeCapabilityHandler<
         generationStatus: result.generationStatus,
         readinessState: runtimeState.readinessState,
         recommendedAction: runtimeState.recommendedAction,
+        searchHelpers: searchRuntime,
       },
       trustLevel: runtimeState.trustLevel,
       readinessState: runtimeState.readinessState,
