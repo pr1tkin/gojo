@@ -171,14 +171,16 @@ export function deriveSuggestedCommands(response: RuntimeResponse<unknown>, comm
       trustState?: string;
       generationStatus?: string;
       suitableForAgentWorkflows?: boolean;
+      readinessState?: string;
+      recommendedAction?: string;
     };
 
-    if (payload.generationStatus === 'missing') {
+    if (payload.generationStatus === 'missing' || payload.readinessState === 'stale' || payload.readinessState === 'inconsistent') {
       suggestions.push(commandForIndex(command));
     }
   }
 
-  if (response.capability === 'ExploreComponent' && response.trust !== 'high') {
+  if (response.capability === 'ExploreComponent' && response.readiness_state !== 'ready') {
     suggestions.push(commandForHealth(command));
   }
 

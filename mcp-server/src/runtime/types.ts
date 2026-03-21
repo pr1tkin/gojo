@@ -6,7 +6,9 @@ import type { AppConfig } from '../types.js';
 
 export type RuntimeOutputMode = 'human' | 'json';
 
-export type RuntimeTrustLevel = 'high' | 'medium' | 'low';
+export type RuntimeTrustLevel = 'high' | 'medium' | 'low' | 'degraded';
+
+export type RuntimeReadinessState = 'ready' | 'stale' | 'inconsistent' | 'unknown';
 
 export type RuntimeExecutionMode = 'one_shot' | 'long_running';
 
@@ -57,6 +59,8 @@ export interface RuntimeResponse<TMachinePayload = unknown> {
   warnings: string[];
   details?: Record<string, unknown>;
   machine_payload: TMachinePayload;
+  trust_level: RuntimeTrustLevel;
+  readiness_state: RuntimeReadinessState;
   confidence: RuntimeTrustLevel;
   trust: RuntimeTrustLevel;
 }
@@ -146,6 +150,8 @@ export interface ExploreComponentMachinePayload {
   symbolName?: string;
   candidateCount: number;
   relatedFileCount: number;
+  readinessState?: RuntimeReadinessState;
+  lastIndexedAt?: string;
 }
 
 export type ExploreComponentResponse = RuntimeResponse<ExploreComponentMachinePayload>;
@@ -170,6 +176,8 @@ export interface RunHealthChecksMachinePayload {
   suitableForAgentWorkflows: boolean;
   generationId?: string;
   generationStatus: string;
+  readinessState?: RuntimeReadinessState;
+  recommendedAction?: string;
 }
 
 export type RunHealthChecksResponse = RuntimeResponse<RunHealthChecksMachinePayload>;

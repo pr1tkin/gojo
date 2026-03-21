@@ -1,6 +1,7 @@
 export { runtimeCapabilityDefinitions } from './capabilities.js';
 export { RuntimeHost } from './host.js';
 export { createRuntimeResponse } from './response.js';
+export { assessTrustFromHealth, detectRepositoryDrift } from './trust.js';
 export type {
   BuildChangeContextRequest,
   BuildChangeContextResponse,
@@ -31,6 +32,7 @@ export type {
   RuntimeHandlerContext,
   RuntimeLogger,
   RuntimeOutputMode,
+  RuntimeReadinessState,
   RuntimeRelatedEntity,
   RuntimeResponse,
   RuntimeSignal,

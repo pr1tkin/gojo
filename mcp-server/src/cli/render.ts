@@ -55,7 +55,8 @@ export function renderRuntimeResponse(response: RenderableRuntimeResponse, comma
   const signalsSection = renderSection(
     'Signals',
     [
-      `trust: ${response.trust}`,
+      `readiness: ${response.readiness_state}`,
+      `trust: ${response.trust_level}`,
       `confidence: ${response.confidence}`,
       ...response.signals.map((signal) => `${signal.name}: ${formatSignalValue(signal.value)}`),
     ],

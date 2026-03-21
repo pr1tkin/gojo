@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { loadConfig } from './config.js';
-import { stderrLogger } from './logging.js';
+import { silentLogger, stderrLogger } from './logging.js';
 import { RuntimeHost } from './runtime/index.js';
 import { parseCliArgs } from './cli/parse.js';
 import { renderRuntimeResponse } from './cli/render.js';
@@ -20,7 +20,7 @@ async function runCli(parsed: ParsedCliResult): Promise<number> {
   parsed.command = finalizedCommand;
   const runtime = new RuntimeHost({
     config,
-    logger: stderrLogger,
+    logger: finalizedCommand.executionContext.debug ? stderrLogger : silentLogger,
     startMcpServer,
   });
 

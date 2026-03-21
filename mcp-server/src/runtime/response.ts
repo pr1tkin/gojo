@@ -2,6 +2,7 @@ import type {
   RuntimeCapabilityName,
   RuntimeExecutionMode,
   RuntimeFinding,
+  RuntimeReadinessState,
   RuntimeRelatedEntity,
   RuntimeResponse,
   RuntimeSignal,
@@ -21,6 +22,8 @@ export interface CreateRuntimeResponseOptions<TMachinePayload> {
   details?: Record<string, unknown>;
   confidence?: RuntimeTrustLevel;
   trust?: RuntimeTrustLevel;
+  trustLevel?: RuntimeTrustLevel;
+  readinessState?: RuntimeReadinessState;
 }
 
 export function createRuntimeResponse<TMachinePayload>(
@@ -36,6 +39,8 @@ export function createRuntimeResponse<TMachinePayload>(
     warnings: options.warnings ?? [],
     ...(options.details ? { details: options.details } : {}),
     machine_payload: options.machinePayload,
+    trust_level: options.trustLevel ?? options.trust ?? options.confidence ?? 'medium',
+    readiness_state: options.readinessState ?? 'unknown',
     confidence: options.confidence ?? 'medium',
     trust: options.trust ?? options.confidence ?? 'medium',
   };

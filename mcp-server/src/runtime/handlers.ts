@@ -1,4 +1,5 @@
 import { getCurrentIndexHealth } from '../indexing/health.js';
+import { loadCurrentGenerationState } from '../indexing/generation-store.js';
 import { refreshIndexes } from '../indexing/refresh.js';
 import { getSymbolExplorationContext } from '../orchestrator/index.js';
 import type { RuntimeCapabilityHandler } from './types.js';
@@ -15,6 +16,7 @@ import {
   type ServeMCPResponse,
 } from './types.js';
 import { createRuntimeResponse } from './response.js';
+import { assessTrustFromHealth, detectRepositoryDrift } from './trust.js';
 
 function resolveRepoId(
   requestRepoId: string | undefined,
@@ -82,6 +84,8 @@ export const indexRepoHandler: RuntimeCapabilityHandler<IndexRepoRequest, IndexR
           uiPropUsages: result.diagnostics.counts.uiPropUsages,
         },
       },
+      trustLevel: result.diagnostics.warnings.length > 0 ? 'medium' : 'high',
+      readinessState: 'ready',
       confidence: 'high',
       trust: result.diagnostics.warnings.length > 0 ? 'medium' : 'high',
     });
@@ -144,6 +148,8 @@ export const refreshRepoHandler: RuntimeCapabilityHandler<RefreshRepoRequest, Re
         },
         warnings: result.diagnostics.warnings,
       },
+      trustLevel: result.diagnostics.search.status === 'ready' ? 'high' : 'medium',
+      readinessState: result.diagnostics.search.status === 'ready' ? 'ready' : 'stale',
       confidence: result.diagnostics.status === 'committed' ? 'high' : 'medium',
       trust: result.diagnostics.search.status === 'ready' ? 'high' : 'medium',
     });
@@ -161,15 +167,47 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
       request.repo?.repoId,
       context.executionContext.repoTarget?.repoId,
     );
-    const result = await getSymbolExplorationContext(request.target, {
-      repo: repoId,
-      limit: request.limit,
-      relatedLimit: request.relatedLimit,
+    const repoPath = request.repo?.repoPath ?? context.executionContext.repoTarget?.repoPath;
+    const [result, health, generationState] = await Promise.all([
+      getSymbolExplorationContext(request.target, {
+        repo: repoId,
+        limit: request.limit,
+        relatedLimit: request.relatedLimit,
+      }),
+      getCurrentIndexHealth(),
+      loadCurrentGenerationState().catch(() => null),
+    ]);
+    const drift = await detectRepositoryDrift({
+      repoPath,
+      generationCreatedAt: generationState?.createdAt,
+    });
+    const trustAssessment = assessTrustFromHealth(health, {
+      additionalWarnings: drift.warning ? [drift.warning] : [],
     });
 
     const primarySymbol = result.primarySymbol;
     const primaryFile = result.primaryFile;
     const ambiguityDetected = result.summary.totalCandidateCount > 1;
+    const warnings = [
+      ...(ambiguityDetected
+        ? ['Target resolution is ambiguous; runtime result is intentionally compact.']
+        : []),
+      ...trustAssessment.warnings,
+    ];
+    const finalTrustLevel =
+      primarySymbol && !ambiguityDetected && trustAssessment.trustLevel === 'high'
+        ? 'high'
+        : primarySymbol && trustAssessment.trustLevel === 'high'
+          ? 'medium'
+          : trustAssessment.trustLevel;
+    const finalConfidence =
+      primarySymbol && !ambiguityDetected && trustAssessment.confidence === 'high'
+        ? 'high'
+        : primarySymbol && trustAssessment.confidence === 'high'
+          ? 'medium'
+          : primarySymbol
+            ? trustAssessment.confidence
+            : 'low';
 
     return createRuntimeResponse({
       capability: 'ExploreComponent',
@@ -218,12 +256,17 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
         { name: 'candidate_count', value: result.summary.totalCandidateCount, importance: 'high' },
         { name: 'related_file_count', value: result.summary.totalRelatedFileCount, importance: 'medium' },
         { name: 'ambiguity_detected', value: ambiguityDetected, importance: 'high' },
+        { name: 'readiness_state', value: trustAssessment.readinessState, importance: 'high' },
+        { name: 'agent_workflows_ready', value: health.suitableForAgentWorkflows, importance: 'high' },
       ],
-      warnings: ambiguityDetected ? ['Target resolution is ambiguous; runtime result is intentionally compact.'] : [],
+      warnings,
       details: {
         query: result.query,
         repo: result.repo,
         rawSummary: result.summary,
+        healthTrustState: health.trustState,
+        suitableForAgentWorkflows: health.suitableForAgentWorkflows,
+        ...(generationState?.createdAt ? { lastIndexedAt: generationState.createdAt } : {}),
         // TODO(phase9): route this capability through runtime-owned response normalization instead of direct summarization.
       },
       machinePayload: {
@@ -233,9 +276,13 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
         ...(primarySymbol?.name ? { symbolName: primarySymbol.name } : {}),
         candidateCount: result.summary.totalCandidateCount,
         relatedFileCount: result.summary.totalRelatedFileCount,
+        readinessState: trustAssessment.readinessState,
+        ...(generationState?.createdAt ? { lastIndexedAt: generationState.createdAt } : {}),
       },
-      confidence: primarySymbol ? (ambiguityDetected ? 'medium' : 'high') : 'low',
-      trust: primarySymbol ? (ambiguityDetected ? 'medium' : 'high') : 'low',
+      trustLevel: primarySymbol ? finalTrustLevel : trustAssessment.trustLevel,
+      readinessState: trustAssessment.readinessState,
+      confidence: finalConfidence,
+      trust: primarySymbol ? finalTrustLevel : trustAssessment.trustLevel,
     });
   },
 };
@@ -246,8 +293,25 @@ export const runHealthChecksHandler: RuntimeCapabilityHandler<
 > = {
   capability: 'RunHealthChecks',
   executionMode: 'one_shot',
-  async execute(_request, _context) {
-    const result = await getCurrentIndexHealth();
+  async execute(request, context) {
+    const repoPath = request.repo?.repoPath ?? context.executionContext.repoTarget?.repoPath;
+    const [result, generationState] = await Promise.all([
+      getCurrentIndexHealth(),
+      loadCurrentGenerationState().catch(() => null),
+    ]);
+    const drift = await detectRepositoryDrift({
+      repoPath,
+      generationCreatedAt: generationState?.createdAt,
+    });
+    const trustAssessment = assessTrustFromHealth(result, {
+      additionalWarnings: drift.warning ? [drift.warning] : [],
+    });
+    const correctiveCommand =
+      result.trustState === 'stale-search' ? 'Run gojo index to refresh search and symbol data.' :
+      result.trustState === 'inconsistent' ? 'Run gojo index to rebuild Gojo artifacts from a clean generation.' :
+      drift.stale ? 'Run gojo index to rebuild data against the current filesystem state.' :
+      result.generationStatus === 'missing' ? 'Run gojo index to create the first published generation.' :
+      undefined;
 
     return createRuntimeResponse({
       capability: 'RunHealthChecks',
@@ -281,30 +345,25 @@ export const runHealthChecksHandler: RuntimeCapabilityHandler<
         { name: 'warning_count', value: result.warnings.length, importance: 'medium' },
         { name: 'error_count', value: result.errors.length, importance: 'high' },
       ],
-      warnings: [...result.warnings, ...result.errors],
+      warnings: [...result.warnings, ...result.errors, ...trustAssessment.warnings],
       details: {
         reasons: result.reasons,
         recentActivity: result.recentActivity,
         search: result.search,
+        ...(correctiveCommand ? { recommendedAction: correctiveCommand } : {}),
       },
       machinePayload: {
         trustState: result.trustState,
         suitableForAgentWorkflows: result.suitableForAgentWorkflows,
         generationId: result.generationId,
         generationStatus: result.generationStatus,
+        readinessState: trustAssessment.readinessState,
+        ...(correctiveCommand ? { recommendedAction: correctiveCommand } : {}),
       },
-      confidence:
-        result.trustState === 'healthy'
-          ? 'high'
-          : result.trustState === 'degraded' || result.trustState === 'repair-recommended'
-            ? 'medium'
-            : 'low',
-      trust:
-        result.trustState === 'healthy'
-          ? 'high'
-          : result.trustState === 'degraded' || result.trustState === 'repair-recommended'
-            ? 'medium'
-            : 'low',
+      trustLevel: trustAssessment.trustLevel,
+      readinessState: trustAssessment.readinessState,
+      confidence: trustAssessment.confidence,
+      trust: trustAssessment.trustLevel,
     });
   },
 };
@@ -349,6 +408,8 @@ export const serveMcpHandler: RuntimeCapabilityHandler<ServeMCPRequest, ServeMCP
         transport: request.transport ?? 'stdio',
         status: 'stubbed',
       },
+      trustLevel: 'low',
+      readinessState: 'unknown',
       confidence: 'low',
       trust: 'low',
     });

@@ -3,7 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 
 import { loadConfig } from './config.js';
 import { cleanupGenerationDebris } from './indexing/generation-debris.js';
-import { stderrLogger } from './logging.js';
+import { silentLogger, stderrLogger } from './logging.js';
 import { createRuntimeResponse } from './runtime/index.js';
 import { buildSymbolIndex } from './symbol-index/indexer.js';
 import { registerGojoTools } from './tool-registry.js';
@@ -18,8 +18,9 @@ export async function startMcpServer(
   request: ServeMCPRequest,
 ): Promise<ServeMCPResponse> {
   const config = context.dependencies.config;
+  const logger = context.dependencies.logger ?? stderrLogger;
   const shouldBuildSymbolIndex = process.env.BUILD_SYMBOL_INDEX_ON_STARTUP === 'true';
-  await cleanupGenerationDebris({ logger: stderrLogger, applyDeletes: true });
+  await cleanupGenerationDebris({ logger, applyDeletes: true });
 
   const server = new McpServer({
     name: 'local-code-search',
@@ -32,9 +33,9 @@ export async function startMcpServer(
   await server.connect(transport);
 
   if (shouldBuildSymbolIndex) {
-    stderrLogger.info('Startup index refresh scheduled in background.');
+    logger.info('Startup index refresh scheduled in background.');
     void buildSymbolIndex(config.reposRoot).catch((error: unknown) => {
-      stderrLogger.error('Background startup index refresh failed.', error);
+      logger.error('Background startup index refresh failed.', error);
     });
   }
 
@@ -69,6 +70,8 @@ export async function startMcpServer(
       transport: request.transport ?? 'stdio',
       status: 'started',
     },
+    trustLevel: 'high',
+    readinessState: 'ready',
     confidence: 'high',
     trust: 'high',
   });
@@ -84,7 +87,7 @@ async function main(): Promise<void> {
       },
       dependencies: {
         config,
-        logger: stderrLogger,
+        logger: silentLogger,
       },
     },
     { transport: 'stdio' },
