@@ -16,7 +16,7 @@ import {
   type ServeMCPResponse,
 } from './types.js';
 import { createRuntimeResponse } from './response.js';
-import { assessTrustFromHealth, detectRepositoryDrift } from './trust.js';
+import { assessRuntimeStateFromHealth, detectRepositoryDrift } from './trust.js';
 
 function resolveRepoId(
   requestRepoId: string | undefined,
@@ -29,24 +29,89 @@ function resolveReposRoot(repoPath: string | undefined, defaultReposRoot: string
   return repoPath ?? defaultReposRoot;
 }
 
+function buildStateSummaryText(title: string, explanation: string): string {
+  return `State: ${title} - ${explanation}`;
+}
+
+function dedupeWarnings(warnings: string[]): string[] {
+  return [...new Set(warnings)];
+}
+
+function prepareWarnings(warnings: string[]): string[] {
+  return dedupeWarnings(warnings.map(toProductWarning));
+}
+
+function toProductWarning(warning: string): string {
+  if (warning.startsWith('Zoekt refresh snapshot coordination marker is missing')) {
+    return 'Search index has not synchronized with the latest Gojo generation yet.';
+  }
+
+  if (warning === 'consistency report is unavailable for the current generation') {
+    return 'Consistency maintenance has not produced a report for the current generation yet.';
+  }
+
+  if (
+    warning ===
+    'code graph and UI artifacts rebuild globally on changed generations to keep cross-file resolution deterministic'
+  ) {
+    return 'Cross-file graph data was rebuilt conservatively for this generation.';
+  }
+
+  return warning;
+}
+
+function scopeHealthWarnings(warnings: string[], repoPath: string | undefined): string[] {
+  const normalizedWarnings = prepareWarnings(warnings);
+
+  if (!repoPath) {
+    return normalizedWarnings;
+  }
+
+  const repoName = repoPath.split(/[/\\]/).filter(Boolean).at(-1) ?? repoPath;
+  const scopedWarnings = normalizedWarnings.filter(
+    (warning) =>
+      warning.includes(repoName) ||
+      warning.includes(repoPath) ||
+      warning.startsWith('State is stale because') ||
+      warning.includes('Search index has not synchronized') ||
+      warning.includes('Consistency maintenance') ||
+      warning.includes('Required runtime artifacts'),
+  );
+
+  return dedupeWarnings(scopedWarnings.length > 0 ? scopedWarnings : normalizedWarnings);
+}
+
 export const indexRepoHandler: RuntimeCapabilityHandler<IndexRepoRequest, IndexRepoResponse> = {
   capability: 'IndexRepo',
   executionMode: 'one_shot',
   async execute(request, context) {
+    const repoPath = request.repo?.repoPath ?? context.executionContext.repoTarget?.repoPath;
     const reposRoot = resolveReposRoot(
-      request.repo?.repoPath ?? context.executionContext.repoTarget?.repoPath,
+      repoPath,
       context.dependencies.config.reposRoot,
     );
     const result = await refreshIndexes(reposRoot, {
       logger: context.dependencies.logger,
+    });
+    const [health, generationState] = await Promise.all([
+      getCurrentIndexHealth(),
+      loadCurrentGenerationState().catch(() => null),
+    ]);
+    const drift = await detectRepositoryDrift({
+      repoPath,
+      generationCreatedAt: generationState?.createdAt,
+    });
+    const runtimeState = assessRuntimeStateFromHealth(health, {
+      additionalWarnings: drift.warning ? [drift.warning] : [],
+      repoPath,
     });
 
     return createRuntimeResponse({
       capability: 'IndexRepo',
       executionMode: 'one_shot',
       summary: {
-        title: 'Repository indexed',
-        text: `Indexed generation ${result.diagnostics.generationId} for repos root ${reposRoot}.`,
+        title: 'Index completed',
+        text: `${buildStateSummaryText(runtimeState.stateSummary, runtimeState.stateExplanation)} Indexed generation ${result.diagnostics.generationId} for ${reposRoot}.`,
       },
       findings: [
         {
@@ -54,8 +119,33 @@ export const indexRepoHandler: RuntimeCapabilityHandler<IndexRepoRequest, IndexR
           title: 'Published generation',
           summary: `Generation ${result.diagnostics.generationId} is available for runtime consumers.`,
         },
+        {
+          id: 'readiness-state',
+          title: `State: ${runtimeState.stateSummary}`,
+          summary: runtimeState.stateExplanation,
+          severity:
+            runtimeState.readinessState === 'ready'
+              ? 'info'
+              : runtimeState.readinessState === 'inconsistent'
+                ? 'error'
+                : 'warning',
+        },
       ],
       relatedEntities: [
+        ...(request.repo?.repoId || repoPath
+          ? [
+              {
+                kind: 'repo' as const,
+                id: request.repo?.repoId ?? context.executionContext.repoTarget?.repoId,
+                name:
+                  request.repo?.repoId ??
+                  context.executionContext.repoTarget?.repoId ??
+                  reposRoot.split(/[/\\]/).filter(Boolean).at(-1) ??
+                  reposRoot,
+                ...(repoPath ? { path: repoPath } : {}),
+              },
+            ]
+          : []),
         {
           kind: 'artifact',
           name: 'repos-root',
@@ -66,16 +156,22 @@ export const indexRepoHandler: RuntimeCapabilityHandler<IndexRepoRequest, IndexR
         { name: 'symbols', value: result.diagnostics.counts.symbols, importance: 'high' },
         { name: 'patterns', value: result.diagnostics.counts.patterns, importance: 'medium' },
         { name: 'graph_edges', value: result.diagnostics.counts.graphEdges, importance: 'medium' },
+        { name: 'state', value: runtimeState.stateSummary, importance: 'high' },
       ],
-      warnings: result.diagnostics.warnings,
+      warnings: prepareWarnings([...result.diagnostics.warnings, ...runtimeState.warnings]),
       details: {
         status: result.diagnostics.status,
         search: result.diagnostics.search,
+        stateExplanation: runtimeState.stateExplanation,
+        ...(runtimeState.recommendedAction ? { recommendedAction: runtimeState.recommendedAction } : {}),
         // TODO(phase9): split pure index bootstrap from refresh semantics once the runtime owns both flows.
       },
       machinePayload: {
         reposRoot,
         generationId: result.diagnostics.generationId,
+        readinessState: runtimeState.readinessState,
+        stateExplanation: runtimeState.stateExplanation,
+        ...(runtimeState.recommendedAction ? { recommendedAction: runtimeState.recommendedAction } : {}),
         counts: {
           symbols: result.diagnostics.counts.symbols,
           patterns: result.diagnostics.counts.patterns,
@@ -84,10 +180,10 @@ export const indexRepoHandler: RuntimeCapabilityHandler<IndexRepoRequest, IndexR
           uiPropUsages: result.diagnostics.counts.uiPropUsages,
         },
       },
-      trustLevel: result.diagnostics.warnings.length > 0 ? 'medium' : 'high',
-      readinessState: 'ready',
-      confidence: 'high',
-      trust: result.diagnostics.warnings.length > 0 ? 'medium' : 'high',
+      trustLevel: runtimeState.trustLevel,
+      readinessState: runtimeState.readinessState,
+      confidence: runtimeState.confidence,
+      trust: runtimeState.trustLevel,
     });
   },
 };
@@ -96,12 +192,25 @@ export const refreshRepoHandler: RuntimeCapabilityHandler<RefreshRepoRequest, Re
   capability: 'RefreshRepo',
   executionMode: 'one_shot',
   async execute(request, context) {
+    const repoPath = request.repo?.repoPath ?? context.executionContext.repoTarget?.repoPath;
     const reposRoot = resolveReposRoot(
-      request.repo?.repoPath ?? context.executionContext.repoTarget?.repoPath,
+      repoPath,
       context.dependencies.config.reposRoot,
     );
     const result = await refreshIndexes(reposRoot, {
       logger: context.dependencies.logger,
+    });
+    const [health, generationState] = await Promise.all([
+      getCurrentIndexHealth(),
+      loadCurrentGenerationState().catch(() => null),
+    ]);
+    const drift = await detectRepositoryDrift({
+      repoPath,
+      generationCreatedAt: generationState?.createdAt,
+    });
+    const runtimeState = assessRuntimeStateFromHealth(health, {
+      additionalWarnings: drift.warning ? [drift.warning] : [],
+      repoPath,
     });
 
     return createRuntimeResponse({
@@ -109,13 +218,24 @@ export const refreshRepoHandler: RuntimeCapabilityHandler<RefreshRepoRequest, Re
       executionMode: 'one_shot',
       summary: {
         title: 'Repository refreshed',
-        text: `Refresh completed with status ${result.diagnostics.status} for generation ${result.diagnostics.generationId}.`,
+        text: `${buildStateSummaryText(runtimeState.stateSummary, runtimeState.stateExplanation)} Refresh completed with status ${result.diagnostics.status} for generation ${result.diagnostics.generationId}.`,
       },
       findings: [
         {
           id: 'delta',
           title: 'Refresh delta',
           summary: `${result.diagnostics.delta.added.length} added, ${result.diagnostics.delta.modified.length} modified, ${result.diagnostics.delta.deleted.length} deleted.`,
+        },
+        {
+          id: 'readiness-state',
+          title: `State: ${runtimeState.stateSummary}`,
+          summary: runtimeState.stateExplanation,
+          severity:
+            runtimeState.readinessState === 'ready'
+              ? 'info'
+              : runtimeState.readinessState === 'inconsistent'
+                ? 'error'
+                : 'warning',
         },
       ],
       relatedEntities: [
@@ -130,17 +250,23 @@ export const refreshRepoHandler: RuntimeCapabilityHandler<RefreshRepoRequest, Re
         { name: 'modified', value: result.diagnostics.delta.modified.length, importance: 'high' },
         { name: 'deleted', value: result.diagnostics.delta.deleted.length, importance: 'medium' },
         { name: 'search_status', value: result.diagnostics.search.status, importance: 'high' },
+        { name: 'state', value: runtimeState.stateSummary, importance: 'high' },
       ],
-      warnings: result.diagnostics.warnings,
+      warnings: prepareWarnings([...result.diagnostics.warnings, ...runtimeState.warnings]),
       details: {
         search: result.diagnostics.search,
         rebuild: result.diagnostics.rebuild,
         cleanup: result.diagnostics.cleanup,
+        stateExplanation: runtimeState.stateExplanation,
+        ...(runtimeState.recommendedAction ? { recommendedAction: runtimeState.recommendedAction } : {}),
       },
       machinePayload: {
         reposRoot,
         generationId: result.diagnostics.generationId,
         status: result.diagnostics.status,
+        readinessState: runtimeState.readinessState,
+        stateExplanation: runtimeState.stateExplanation,
+        ...(runtimeState.recommendedAction ? { recommendedAction: runtimeState.recommendedAction } : {}),
         delta: {
           added: result.diagnostics.delta.added.length,
           modified: result.diagnostics.delta.modified.length,
@@ -148,10 +274,10 @@ export const refreshRepoHandler: RuntimeCapabilityHandler<RefreshRepoRequest, Re
         },
         warnings: result.diagnostics.warnings,
       },
-      trustLevel: result.diagnostics.search.status === 'ready' ? 'high' : 'medium',
-      readinessState: result.diagnostics.search.status === 'ready' ? 'ready' : 'stale',
-      confidence: result.diagnostics.status === 'committed' ? 'high' : 'medium',
-      trust: result.diagnostics.search.status === 'ready' ? 'high' : 'medium',
+      trustLevel: runtimeState.trustLevel,
+      readinessState: runtimeState.readinessState,
+      confidence: runtimeState.confidence,
+      trust: runtimeState.trustLevel,
     });
   },
 };
@@ -181,8 +307,9 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
       repoPath,
       generationCreatedAt: generationState?.createdAt,
     });
-    const trustAssessment = assessTrustFromHealth(health, {
+    const runtimeState = assessRuntimeStateFromHealth(health, {
       additionalWarnings: drift.warning ? [drift.warning] : [],
+      repoPath,
     });
 
     const primarySymbol = result.primarySymbol;
@@ -192,21 +319,21 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
       ...(ambiguityDetected
         ? ['Target resolution is ambiguous; runtime result is intentionally compact.']
         : []),
-      ...trustAssessment.warnings,
+      ...runtimeState.warnings,
     ];
     const finalTrustLevel =
-      primarySymbol && !ambiguityDetected && trustAssessment.trustLevel === 'high'
+      primarySymbol && !ambiguityDetected && runtimeState.trustLevel === 'high'
         ? 'high'
-        : primarySymbol && trustAssessment.trustLevel === 'high'
+        : primarySymbol && runtimeState.trustLevel === 'high'
           ? 'medium'
-          : trustAssessment.trustLevel;
+          : runtimeState.trustLevel;
     const finalConfidence =
-      primarySymbol && !ambiguityDetected && trustAssessment.confidence === 'high'
+      primarySymbol && !ambiguityDetected && runtimeState.confidence === 'high'
         ? 'high'
-        : primarySymbol && trustAssessment.confidence === 'high'
+        : primarySymbol && runtimeState.confidence === 'high'
           ? 'medium'
           : primarySymbol
-            ? trustAssessment.confidence
+            ? runtimeState.confidence
             : 'low';
 
     return createRuntimeResponse({
@@ -215,8 +342,8 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
       summary: {
         title: primarySymbol?.name ?? request.target,
         text: primarySymbol
-          ? `Resolved ${primarySymbol.name} with ${result.summary.relatedFileCount} related files.`
-          : `No exact symbol resolution was found for ${request.target}.`,
+          ? `Resolved ${primarySymbol.name} with ${result.summary.relatedFileCount} related files. ${buildStateSummaryText(runtimeState.stateSummary, runtimeState.stateExplanation)}`
+          : `No exact symbol resolution was found for ${request.target}. ${buildStateSummaryText(runtimeState.stateSummary, runtimeState.stateExplanation)}`,
       },
       findings: primarySymbol
         ? [
@@ -256,8 +383,9 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
         { name: 'candidate_count', value: result.summary.totalCandidateCount, importance: 'high' },
         { name: 'related_file_count', value: result.summary.totalRelatedFileCount, importance: 'medium' },
         { name: 'ambiguity_detected', value: ambiguityDetected, importance: 'high' },
-        { name: 'readiness_state', value: trustAssessment.readinessState, importance: 'high' },
+        { name: 'readiness_state', value: runtimeState.readinessState, importance: 'high' },
         { name: 'agent_workflows_ready', value: health.suitableForAgentWorkflows, importance: 'high' },
+        { name: 'state', value: runtimeState.stateSummary, importance: 'high' },
       ],
       warnings,
       details: {
@@ -266,6 +394,7 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
         rawSummary: result.summary,
         healthTrustState: health.trustState,
         suitableForAgentWorkflows: health.suitableForAgentWorkflows,
+        stateExplanation: runtimeState.stateExplanation,
         ...(generationState?.createdAt ? { lastIndexedAt: generationState.createdAt } : {}),
         // TODO(phase9): route this capability through runtime-owned response normalization instead of direct summarization.
       },
@@ -276,13 +405,14 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
         ...(primarySymbol?.name ? { symbolName: primarySymbol.name } : {}),
         candidateCount: result.summary.totalCandidateCount,
         relatedFileCount: result.summary.totalRelatedFileCount,
-        readinessState: trustAssessment.readinessState,
+        readinessState: runtimeState.readinessState,
+        stateExplanation: runtimeState.stateExplanation,
         ...(generationState?.createdAt ? { lastIndexedAt: generationState.createdAt } : {}),
       },
-      trustLevel: primarySymbol ? finalTrustLevel : trustAssessment.trustLevel,
-      readinessState: trustAssessment.readinessState,
+      trustLevel: primarySymbol ? finalTrustLevel : runtimeState.trustLevel,
+      readinessState: runtimeState.readinessState,
       confidence: finalConfidence,
-      trust: primarySymbol ? finalTrustLevel : trustAssessment.trustLevel,
+      trust: primarySymbol ? finalTrustLevel : runtimeState.trustLevel,
     });
   },
 };
@@ -303,32 +433,55 @@ export const runHealthChecksHandler: RuntimeCapabilityHandler<
       repoPath,
       generationCreatedAt: generationState?.createdAt,
     });
-    const trustAssessment = assessTrustFromHealth(result, {
+    const runtimeState = assessRuntimeStateFromHealth(result, {
       additionalWarnings: drift.warning ? [drift.warning] : [],
+      repoPath,
     });
-    const correctiveCommand =
-      result.trustState === 'stale-search' ? 'Run gojo index to refresh search and symbol data.' :
-      result.trustState === 'inconsistent' ? 'Run gojo index to rebuild Gojo artifacts from a clean generation.' :
-      drift.stale ? 'Run gojo index to rebuild data against the current filesystem state.' :
-      result.generationStatus === 'missing' ? 'Run gojo index to create the first published generation.' :
-      undefined;
+    const repoLabel =
+      request.repo?.repoId ??
+      context.executionContext.repoTarget?.repoId ??
+      repoPath?.split(/[/\\]/).filter(Boolean).at(-1);
+    const scopedWarnings = scopeHealthWarnings(
+      [...result.warnings, ...result.errors, ...runtimeState.warnings],
+      repoPath,
+    );
 
     return createRuntimeResponse({
       capability: 'RunHealthChecks',
       executionMode: 'one_shot',
       summary: {
-        title: 'Runtime health',
-        text: `Current trust state is ${result.trustState}.`,
+        title: repoLabel ? `Health for ${repoLabel}` : 'Runtime health',
+        text: buildStateSummaryText(runtimeState.stateSummary, runtimeState.stateExplanation),
       },
       findings: [
         {
           id: 'trust-state',
-          title: result.trustState,
-          summary: result.reasons[0] ?? 'No additional health reason was recorded.',
+          title: `State: ${runtimeState.stateSummary}`,
+          summary: runtimeState.stateExplanation,
           severity: result.errors.length > 0 ? 'error' : result.warnings.length > 0 ? 'warning' : 'info',
         },
+        ...(repoPath
+          ? [
+              {
+                id: 'repo-scope',
+                title: 'Repo scope',
+                summary: `${repoLabel ?? repoPath} (${repoPath})`,
+                severity: 'info' as const,
+              },
+            ]
+          : []),
       ],
       relatedEntities: [
+        ...(repoPath
+          ? [
+              {
+                kind: 'repo' as const,
+                id: request.repo?.repoId ?? context.executionContext.repoTarget?.repoId,
+                name: repoLabel ?? repoPath,
+                path: repoPath,
+              },
+            ]
+          : []),
         ...(result.reposRoot
           ? [
               {
@@ -340,30 +493,32 @@ export const runHealthChecksHandler: RuntimeCapabilityHandler<
           : []),
       ],
       signals: [
+        { name: 'state', value: runtimeState.stateSummary, importance: 'high' },
         { name: 'trust_state', value: result.trustState, importance: 'high' },
         { name: 'suitable_for_agent_workflows', value: result.suitableForAgentWorkflows, importance: 'high' },
-        { name: 'warning_count', value: result.warnings.length, importance: 'medium' },
+        { name: 'warning_count', value: scopedWarnings.length, importance: 'medium' },
         { name: 'error_count', value: result.errors.length, importance: 'high' },
       ],
-      warnings: [...result.warnings, ...result.errors, ...trustAssessment.warnings],
+      warnings: scopedWarnings,
       details: {
         reasons: result.reasons,
         recentActivity: result.recentActivity,
         search: result.search,
-        ...(correctiveCommand ? { recommendedAction: correctiveCommand } : {}),
+        stateExplanation: runtimeState.stateExplanation,
+        ...(runtimeState.recommendedAction ? { recommendedAction: runtimeState.recommendedAction } : {}),
       },
       machinePayload: {
         trustState: result.trustState,
         suitableForAgentWorkflows: result.suitableForAgentWorkflows,
         generationId: result.generationId,
         generationStatus: result.generationStatus,
-        readinessState: trustAssessment.readinessState,
-        ...(correctiveCommand ? { recommendedAction: correctiveCommand } : {}),
+        readinessState: runtimeState.readinessState,
+        recommendedAction: runtimeState.recommendedAction,
       },
-      trustLevel: trustAssessment.trustLevel,
-      readinessState: trustAssessment.readinessState,
-      confidence: trustAssessment.confidence,
-      trust: trustAssessment.trustLevel,
+      trustLevel: runtimeState.trustLevel,
+      readinessState: runtimeState.readinessState,
+      confidence: runtimeState.confidence,
+      trust: runtimeState.trustLevel,
     });
   },
 };

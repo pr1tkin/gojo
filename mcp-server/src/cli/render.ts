@@ -23,6 +23,15 @@ export function renderRuntimeResponse(response: RenderableRuntimeResponse, comma
     `${response.summary.title}\n${response.summary.text}`,
   ];
 
+  const stateSection = renderSection('State', [
+    `readiness: ${response.readiness_state}`,
+    `trust: ${response.trust_level}`,
+    `confidence: ${response.confidence}`,
+  ]);
+  if (stateSection.length > 0) {
+    sections.push(stateSection.join('\n'));
+  }
+
   const findingsSection = renderSection(
     'Findings',
     response.findings.map((finding) => {
@@ -54,12 +63,7 @@ export function renderRuntimeResponse(response: RenderableRuntimeResponse, comma
 
   const signalsSection = renderSection(
     'Signals',
-    [
-      `readiness: ${response.readiness_state}`,
-      `trust: ${response.trust_level}`,
-      `confidence: ${response.confidence}`,
-      ...response.signals.map((signal) => `${signal.name}: ${formatSignalValue(signal.value)}`),
-    ],
+    response.signals.map((signal) => `${signal.name}: ${formatSignalValue(signal.value)}`),
   );
   if (signalsSection.length > 0) {
     sections.push(signalsSection.join('\n'));

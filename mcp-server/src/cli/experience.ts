@@ -32,6 +32,14 @@ function commandForHealth(command: CliCommand): string {
   return 'gojo health';
 }
 
+function appendUnique(target: string[], value: string | undefined): void {
+  if (!value || target.includes(value)) {
+    return;
+  }
+
+  target.push(value);
+}
+
 function commandForRetryExplore(command: CliCommand): string | undefined {
   if (command.capability !== 'ExploreComponent') {
     return undefined;
@@ -175,13 +183,18 @@ export function deriveSuggestedCommands(response: RuntimeResponse<unknown>, comm
       recommendedAction?: string;
     };
 
-    if (payload.generationStatus === 'missing' || payload.readinessState === 'stale' || payload.readinessState === 'inconsistent') {
-      suggestions.push(commandForIndex(command));
+    if (
+      payload.generationStatus === 'missing' ||
+      payload.readinessState === 'stale' ||
+      payload.readinessState === 'inconsistent' ||
+      response.readiness_state === 'unknown'
+    ) {
+      appendUnique(suggestions, commandForIndex(command));
     }
   }
 
   if (response.capability === 'ExploreComponent' && response.readiness_state !== 'ready') {
-    suggestions.push(commandForHealth(command));
+    appendUnique(suggestions, commandForHealth(command));
   }
 
   return suggestions;

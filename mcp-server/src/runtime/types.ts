@@ -107,6 +107,9 @@ export interface IndexRepoRequest {
 export interface IndexRepoMachinePayload {
   reposRoot: string;
   generationId: string;
+  readinessState?: RuntimeReadinessState;
+  stateExplanation?: string;
+  recommendedAction?: string;
   counts: {
     symbols: number;
     patterns: number;
@@ -126,6 +129,9 @@ export interface RefreshRepoMachinePayload {
   reposRoot: string;
   generationId: string;
   status: string;
+  readinessState?: RuntimeReadinessState;
+  stateExplanation?: string;
+  recommendedAction?: string;
   delta: {
     added: number;
     modified: number;
@@ -152,6 +158,7 @@ export interface ExploreComponentMachinePayload {
   relatedFileCount: number;
   readinessState?: RuntimeReadinessState;
   lastIndexedAt?: string;
+  stateExplanation?: string;
 }
 
 export type ExploreComponentResponse = RuntimeResponse<ExploreComponentMachinePayload>;
