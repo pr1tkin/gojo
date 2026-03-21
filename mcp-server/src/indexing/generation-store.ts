@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 
+import { getProductEnvironment } from '../product/environment.js';
 import type {
   CoordinationMarkerParseResult,
   CurrentGenerationPointer,
@@ -30,7 +31,7 @@ export const REQUIRED_GENERATION_ARTIFACT_FILES = [
 ] as const;
 
 export function getDataDirectory(): string {
-  return path.resolve(process.cwd(), '.data');
+  return getProductEnvironment().paths.dataDir;
 }
 
 export function getCoordinationDirectory(): string {

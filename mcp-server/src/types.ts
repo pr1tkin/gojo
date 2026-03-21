@@ -1,11 +1,35 @@
 export type NodeEnv = 'development' | 'test' | 'production';
 
+export type GojoPackagingModel = 'single_surface_with_packaged_runtime';
+
+export interface ProductIdentity {
+  name: string;
+  version: string;
+  packagingModel: GojoPackagingModel;
+}
+
+export interface ProductPaths {
+  packageRoot: string;
+  homeDir: string;
+  configDir: string;
+  dataDir: string;
+  indexesDir: string;
+  cacheDir: string;
+  logDir: string;
+  runtimeDir: string;
+  tempDir: string;
+}
+
 export interface AppConfig {
   nodeEnv: NodeEnv;
   port: number;
   reposRoot: string;
   zoektBaseUrl: string;
   includeInternalTools: boolean;
+  product: {
+    identity: ProductIdentity;
+    paths: ProductPaths;
+  };
 }
 
 export type ToolVisibility = 'public' | 'internal';

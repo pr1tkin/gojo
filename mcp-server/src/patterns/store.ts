@@ -7,6 +7,7 @@ import {
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
 import type { CoordinationMarkerParseStatus } from '../indexing/types.js';
+import { getProductEnvironment } from '../product/environment.js';
 import {
   PATTERN_INDEX_SCHEMA_VERSION,
   type PatternCandidate,
@@ -25,7 +26,7 @@ export interface PatternIndexLoadResult {
 }
 
 function getPatternDirectory(): string {
-  return path.resolve(process.cwd(), '.data');
+  return getProductEnvironment().paths.dataDir;
 }
 
 function getPatternTempFilePath(): string {

@@ -6,10 +6,11 @@ import {
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
+import { getProductEnvironment } from '../product/environment.js';
 import { CODE_GRAPH_SCHEMA_VERSION, type CodeGraphSnapshot, type GraphEdge, type GraphEdgeType } from './types.js';
 
 function getCodeGraphDirectory(): string {
-  return path.resolve(process.cwd(), '.data');
+  return getProductEnvironment().paths.dataDir;
 }
 
 function getCodeGraphTempFilePath(): string {

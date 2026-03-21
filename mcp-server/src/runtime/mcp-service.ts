@@ -18,12 +18,13 @@ export async function serveMcpRuntime(
   const config = context.dependencies.config;
   const logger = context.dependencies.logger;
   const shouldBuildSymbolIndex = process.env.BUILD_SYMBOL_INDEX_ON_STARTUP === 'true';
+  const productIdentity = config.product.identity;
 
   await cleanupGenerationDebris({ logger, applyDeletes: true });
 
   const server = new McpServer({
-    name: 'local-code-search',
-    version: '0.1.0',
+    name: productIdentity.name,
+    version: productIdentity.version,
   });
 
   const registrations = registerGojoTools(server, config);
@@ -54,6 +55,11 @@ export async function serveMcpRuntime(
         id: 'mcp-tools',
         title: 'Tools registered',
         summary: `${registrations.length} MCP tools are available through the runtime-owned server.`,
+      },
+      {
+        id: 'product-identity',
+        title: 'Product identity',
+        summary: `${productIdentity.name} ${productIdentity.version} is serving with packaging model ${productIdentity.packagingModel}.`,
       },
     ],
     relatedEntities: [
@@ -89,6 +95,7 @@ export async function serveMcpRuntime(
     details: {
       startupPhase: 'startup_complete',
       lifecycle: 'serving',
+      productIdentity,
       toolNames: registrations.map((registration) => registration.definition.name),
     },
     machinePayload: {

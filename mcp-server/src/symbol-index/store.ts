@@ -6,11 +6,12 @@ import {
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
+import { getProductEnvironment } from '../product/environment.js';
 import { createDeclarationFingerprint, createFileId, createSymbolId } from './ids.js';
 import type { FileRelation, IndexedSymbol, SymbolFrequencyStats, SymbolIndex } from './types.js';
 
 function getSymbolIndexDirectory(): string {
-  return path.resolve(process.cwd(), '.data');
+  return getProductEnvironment().paths.dataDir;
 }
 
 function getSymbolIndexTempFilePath(): string {

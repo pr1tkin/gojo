@@ -6,6 +6,7 @@ import {
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
+import { getProductEnvironment } from '../product/environment.js';
 import {
   UI_COMPOSITION_SCHEMA_VERSION,
   type UiComponentResolution,
@@ -15,7 +16,7 @@ import {
 } from './types.js';
 
 function getUiCompositionDirectory(): string {
-  return path.resolve(process.cwd(), '.data');
+  return getProductEnvironment().paths.dataDir;
 }
 
 function getUiCompositionTempFilePath(): string {

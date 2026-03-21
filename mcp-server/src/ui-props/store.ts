@@ -6,6 +6,7 @@ import {
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
+import { getProductEnvironment } from '../product/environment.js';
 import {
   UI_PROP_SURFACE_SCHEMA_VERSION,
   type UiPropSurfaceIndex,
@@ -13,7 +14,7 @@ import {
 } from './types.js';
 
 function getUiPropsDirectory(): string {
-  return path.resolve(process.cwd(), '.data');
+  return getProductEnvironment().paths.dataDir;
 }
 
 function getUiPropsTempFilePath(): string {

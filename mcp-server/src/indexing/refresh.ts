@@ -57,6 +57,7 @@ import {
 } from './search-freshness.js';
 import { buildSearchRepoFingerprints } from './search-fingerprint.js';
 import { runSingleFlightRefresh, type RefreshCoordinatorTestHooks } from './refresh-coordinator.js';
+import { getCoordinationDirectory } from './generation-store.js';
 import type {
   FileFingerprintManifestEntry,
   IndexGenerationCleanupSummary,
@@ -837,7 +838,7 @@ async function refreshIndexesUnlocked(
         target: faultInjection?.target,
         onPartialWrite: async () => {
           await writeMalformedJson(
-            path.join(process.cwd(), '.data', 'coordination', 'search-refresh-request.json'),
+      path.join(getCoordinationDirectory(), 'search-refresh-request.json'),
             '{"fault":"partial-write"',
           );
         },
