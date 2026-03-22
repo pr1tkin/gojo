@@ -113,7 +113,7 @@ describe('find_precedents tool', () => {
   it('accepts the public input shape', () => {
     const parsed = z.object(findPrecedentsToolDefinition.inputSchema).parse({
       name: 'ContractDetailPage',
-      repo: 'ifdt-gui',
+      repo: 'web-app',
       mode: 'component',
       limit: 3,
       detail: 'agent',
@@ -124,7 +124,7 @@ describe('find_precedents tool', () => {
 
     expect(parsed).toEqual({
       name: 'ContractDetailPage',
-      repo: 'ifdt-gui',
+      repo: 'web-app',
       mode: 'component',
       limit: 3,
       detail: 'agent',
@@ -138,17 +138,17 @@ describe('find_precedents tool', () => {
     getPatternMatchesForComponentMock.mockResolvedValue({
       query: 'ContractDetailPage',
       mode: 'component',
-      repo: 'ifdt-gui',
+      repo: 'web-app',
       primaryTarget: {
         file: {
-          fileId: 'ifdt-gui:app/contracts/[contractId]/ContractDetailPage.tsx',
-          repoId: 'ifdt-gui',
+          fileId: 'web-app:app/contracts/[contractId]/ContractDetailPage.tsx',
+          repoId: 'web-app',
           filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
         },
         symbol: {
           symbolId: 'contract-detail-symbol',
-          fileId: 'ifdt-gui:app/contracts/[contractId]/ContractDetailPage.tsx',
-          repo: 'ifdt-gui',
+          fileId: 'web-app:app/contracts/[contractId]/ContractDetailPage.tsx',
+          repo: 'web-app',
           filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
           name: 'ContractDetailPage',
         },
@@ -167,8 +167,8 @@ describe('find_precedents tool', () => {
         ambiguityDetected: false,
         selectedCandidate: {
           symbolId: 'contract-detail-symbol',
-          fileId: 'ifdt-gui:app/contracts/[contractId]/ContractDetailPage.tsx',
-          repo: 'ifdt-gui',
+          fileId: 'web-app:app/contracts/[contractId]/ContractDetailPage.tsx',
+          repo: 'web-app',
           filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
           name: 'ContractDetailPage',
           kind: 'function',
@@ -187,9 +187,9 @@ describe('find_precedents tool', () => {
     findPrecedentsForSymbolMock.mockReturnValue({
       target: {
         symbolId: 'contract-detail-symbol',
-        fileId: 'ifdt-gui:app/contracts/[contractId]/ContractDetailPage.tsx',
+        fileId: 'web-app:app/contracts/[contractId]/ContractDetailPage.tsx',
         filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
-        repoId: 'ifdt-gui',
+        repoId: 'web-app',
         symbolName: 'ContractDetailPage',
         patternKind: 'component',
       },
@@ -197,9 +197,9 @@ describe('find_precedents tool', () => {
         {
           symbolId: 'contract-edit-symbol',
           patternId: 'pattern:contract-edit',
-          fileId: 'ifdt-gui:app/contracts/[contractId]/edit/ContractEditPage.tsx',
+          fileId: 'web-app:app/contracts/[contractId]/edit/ContractEditPage.tsx',
           filePath: 'app/contracts/[contractId]/edit/ContractEditPage.tsx',
-          repoId: 'ifdt-gui',
+          repoId: 'web-app',
           symbolName: 'ContractEditPage',
           patternKind: 'component',
           similarityScore: 0.91,
@@ -217,16 +217,16 @@ describe('find_precedents tool', () => {
 
     const result = await runFindPrecedentsTool({
       name: 'ContractDetailPage',
-      repo: 'ifdt-gui',
+      repo: 'web-app',
       includeFamilyContext: true,
     });
     const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
 
     expect(getPatternMatchesForComponentMock).toHaveBeenCalledWith('ContractDetailPage', {
-      repo: 'ifdt-gui',
+      repo: 'web-app',
       limit: 3,
     });
-    expect(findPrecedentsForSymbolMock).toHaveBeenCalledWith('contract-detail-symbol', 3, 'ifdt-gui');
+    expect(findPrecedentsForSymbolMock).toHaveBeenCalledWith('contract-detail-symbol', 3, 'web-app');
     expect(parsed).toEqual(
       expect.objectContaining({
         tool: 'find_precedents',
@@ -234,7 +234,7 @@ describe('find_precedents tool', () => {
         mode: 'agent',
         query: expect.objectContaining({
           target: 'ContractDetailPage',
-          repo: 'ifdt-gui',
+          repo: 'web-app',
           mode: 'component',
           filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
           symbolName: 'ContractDetailPage',
@@ -252,7 +252,7 @@ describe('find_precedents tool', () => {
     );
     expect(parsed.results.primary).toEqual([
         expect.objectContaining({
-          id: 'ifdt-gui:app/contracts/[contractId]/edit/ContractEditPage.tsx:ContractEditPage',
+          id: 'web-app:app/contracts/[contractId]/edit/ContractEditPage.tsx:ContractEditPage',
           kind: 'precedent',
           title: 'ContractEditPage',
           filePath: 'app/contracts/[contractId]/edit/ContractEditPage.tsx',
@@ -294,14 +294,14 @@ describe('find_precedents tool', () => {
           reason: 'inspect the strongest precedent',
           query: expect.objectContaining({
             name: 'app/contracts/[contractId]/edit/ContractEditPage.tsx',
-            repo: 'ifdt-gui',
+            repo: 'web-app',
           }),
         }),
         expect.objectContaining({
           tool: 'collect_refactor_context',
           query: expect.objectContaining({
             name: 'app/contracts/[contractId]/ContractDetailPage.tsx',
-            repo: 'ifdt-gui',
+            repo: 'web-app',
           }),
         }),
       ]),
@@ -521,11 +521,11 @@ describe('find_precedents tool', () => {
     getPatternMatchesForFileMock.mockResolvedValue({
       query: 'components/common/modal-state-manager.tsx',
       mode: 'file',
-      repo: 'ibm-strings',
+      repo: 'translation-system',
       primaryTarget: {
         file: {
-          fileId: 'ibm-strings:components/common/modal-state-manager.tsx',
-          repoId: 'ibm-strings',
+          fileId: 'translation-system:components/common/modal-state-manager.tsx',
+          repoId: 'translation-system',
           filePath: 'components/common/modal-state-manager.tsx',
         },
         symbol: null,
@@ -562,17 +562,17 @@ describe('find_precedents tool', () => {
     });
     findPrecedentsForFileMock.mockReturnValue({
       target: {
-        fileId: 'ibm-strings:components/common/modal-state-manager.tsx',
+        fileId: 'translation-system:components/common/modal-state-manager.tsx',
         filePath: 'components/common/modal-state-manager.tsx',
-        repoId: 'ibm-strings',
+        repoId: 'translation-system',
         patternKind: 'component',
       },
       candidates: [
         {
           patternId: 'pattern:error-state',
-          fileId: 'ibm-strings:components/common/error-state.tsx',
+          fileId: 'translation-system:components/common/error-state.tsx',
           filePath: 'components/common/error-state.tsx',
-          repoId: 'ibm-strings',
+          repoId: 'translation-system',
           symbolName: 'ErrorState',
           patternKind: 'component',
           similarityScore: 0.72,
@@ -590,13 +590,13 @@ describe('find_precedents tool', () => {
 
     const result = await runFindPrecedentsTool({
       name: 'components/common/modal-state-manager.tsx',
-      repo: 'ibm-strings',
+      repo: 'translation-system',
       mode: 'file',
     });
     const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
 
     expect(parsed.results.primary).toHaveLength(1);
-    expect(parsed.results.primary[0].repoId).toBe('ibm-strings');
+    expect(parsed.results.primary[0].repoId).toBe('translation-system');
     expect(parsed.results).not.toHaveProperty('secondary');
     expect(parsed.nextActions).toEqual([
       expect.objectContaining({
@@ -622,17 +622,17 @@ describe('find_precedents tool', () => {
     getPatternMatchesForComponentMock.mockResolvedValue({
       query: 'ContractDetailPage',
       mode: 'component',
-      repo: 'ifdt-gui',
+      repo: 'web-app',
       primaryTarget: {
         file: {
-          fileId: 'ifdt-gui:app/contracts/[contractId]/ContractDetailPage.tsx',
-          repoId: 'ifdt-gui',
+          fileId: 'web-app:app/contracts/[contractId]/ContractDetailPage.tsx',
+          repoId: 'web-app',
           filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
         },
         symbol: {
           symbolId: 'contract-detail-symbol',
-          fileId: 'ifdt-gui:app/contracts/[contractId]/ContractDetailPage.tsx',
-          repo: 'ifdt-gui',
+          fileId: 'web-app:app/contracts/[contractId]/ContractDetailPage.tsx',
+          repo: 'web-app',
           filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
           name: 'ContractDetailPage',
         },
@@ -651,8 +651,8 @@ describe('find_precedents tool', () => {
         ambiguityDetected: false,
         selectedCandidate: {
           symbolId: 'contract-detail-symbol',
-          fileId: 'ifdt-gui:app/contracts/[contractId]/ContractDetailPage.tsx',
-          repo: 'ifdt-gui',
+          fileId: 'web-app:app/contracts/[contractId]/ContractDetailPage.tsx',
+          repo: 'web-app',
           filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
           name: 'ContractDetailPage',
           kind: 'function',
@@ -671,9 +671,9 @@ describe('find_precedents tool', () => {
     findPrecedentsForSymbolMock.mockReturnValue({
       target: {
         symbolId: 'contract-detail-symbol',
-        fileId: 'ifdt-gui:app/contracts/[contractId]/ContractDetailPage.tsx',
+        fileId: 'web-app:app/contracts/[contractId]/ContractDetailPage.tsx',
         filePath: 'app/contracts/[contractId]/ContractDetailPage.tsx',
-        repoId: 'ifdt-gui',
+        repoId: 'web-app',
         symbolName: 'ContractDetailPage',
         patternKind: 'component',
       },
@@ -681,9 +681,9 @@ describe('find_precedents tool', () => {
         {
           symbolId: 'contract-edit-symbol',
           patternId: 'pattern:contract-edit',
-          fileId: 'ifdt-gui:app/contracts/[contractId]/edit/ContractEditPage.tsx',
+          fileId: 'web-app:app/contracts/[contractId]/edit/ContractEditPage.tsx',
           filePath: 'app/contracts/[contractId]/edit/ContractEditPage.tsx',
-          repoId: 'ifdt-gui',
+          repoId: 'web-app',
           symbolName: 'ContractEditPage',
           patternKind: 'component',
           similarityScore: 0.91,
@@ -697,9 +697,9 @@ describe('find_precedents tool', () => {
         {
           symbolId: 'customer-detail-symbol',
           patternId: 'pattern:customer-detail',
-          fileId: 'ifdt-gui:app/customers/[id]/CustomerDetailPage.tsx',
+          fileId: 'web-app:app/customers/[id]/CustomerDetailPage.tsx',
           filePath: 'app/customers/[id]/CustomerDetailPage.tsx',
-          repoId: 'ifdt-gui',
+          repoId: 'web-app',
           symbolName: 'CustomerDetailPage',
           patternKind: 'component',
           similarityScore: 0.9,
@@ -713,9 +713,9 @@ describe('find_precedents tool', () => {
         {
           symbolId: 'case-detail-symbol',
           patternId: 'pattern:case-detail',
-          fileId: 'ifdt-gui:app/cases/[id]/CaseDetailPage.tsx',
+          fileId: 'web-app:app/cases/[id]/CaseDetailPage.tsx',
           filePath: 'app/cases/[id]/CaseDetailPage.tsx',
-          repoId: 'ifdt-gui',
+          repoId: 'web-app',
           symbolName: 'CaseDetailPage',
           patternKind: 'component',
           similarityScore: 0.89,
@@ -733,7 +733,7 @@ describe('find_precedents tool', () => {
 
     const result = await runFindPrecedentsTool({
       name: 'ContractDetailPage',
-      repo: 'ifdt-gui',
+      repo: 'web-app',
     });
     const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
 

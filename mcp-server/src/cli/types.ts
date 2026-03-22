@@ -37,6 +37,7 @@ export interface ResolvedRepoTarget {
 export type CliErrorCode =
   | 'invalid_usage'
   | 'invalid_repo_target'
+  | 'legacy_storage'
   | 'missing_index'
   | 'missing_search_helper'
   | 'runtime_failure'

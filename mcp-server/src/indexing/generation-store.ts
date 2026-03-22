@@ -50,10 +50,6 @@ export function getCoordinationDirectory(): string {
   return path.join(getRuntimeDirectory(), 'coordination');
 }
 
-function getLegacyCoordinationDirectory(): string {
-  return path.join(getDataDirectory(), 'coordination');
-}
-
 function getSearchRefreshRequestFilePath(): string {
   return path.join(getCoordinationDirectory(), 'search-refresh-request.json');
 }
@@ -62,29 +58,14 @@ function getSearchRefreshSnapshotFilePath(): string {
   return path.join(getCoordinationDirectory(), 'zoekt-refresh-state.json');
 }
 
-function getLegacyArtifactFilePath(fileName: string): string {
-  return path.join(getIndexesDirectory(), fileName);
-}
-
-function getLegacyRootArtifactFilePath(fileName: string): string {
-  return path.join(getDataDirectory(), fileName);
-}
-
 export function getGenerationsDirectory(): string {
   return path.join(getIndexesDirectory(), 'generations');
-}
-
-function getLegacyGenerationsDirectory(): string {
-  return path.join(getDataDirectory(), 'generations');
 }
 
 function getCurrentGenerationPointerFilePath(): string {
   return path.join(getIndexesDirectory(), 'current-generation.json');
 }
 
-function getLegacyCurrentGenerationPointerFilePath(): string {
-  return path.join(getDataDirectory(), 'current-generation.json');
-}
 
 function getCurrentGenerationPointerTempFilePath(): string {
   return path.join(getTempDirectory(), 'current-generation.tmp.json');
@@ -94,9 +75,6 @@ export function getGenerationDirectory(generationId: string): string {
   return path.join(getGenerationsDirectory(), generationId);
 }
 
-function getLegacyGenerationDirectory(generationId: string): string {
-  return path.join(getLegacyGenerationsDirectory(), generationId);
-}
 
 export function getGenerationArtifactFilePath(generationId: string, fileName: string): string {
   return path.join(getGenerationDirectory(generationId), fileName);
@@ -227,24 +205,7 @@ export async function loadCurrentGenerationPointer(): Promise<CurrentGenerationP
         : '';
 
     if (code === 'ENOENT') {
-      try {
-        const legacyContent = await fsPromises.readFile(
-          getLegacyCurrentGenerationPointerFilePath(),
-          'utf8',
-        );
-        return normalizeCurrentGenerationPointer(JSON.parse(legacyContent) as unknown);
-      } catch (legacyError) {
-        const legacyCode =
-          typeof legacyError === 'object' && legacyError !== null && 'code' in legacyError
-            ? String((legacyError as { code?: string }).code)
-            : '';
-
-        if (legacyCode === 'ENOENT') {
-          return null;
-        }
-
-        throw legacyError;
-      }
+      return null;
     }
 
     throw error;
@@ -262,21 +223,7 @@ export function loadCurrentGenerationPointerSync(): CurrentGenerationPointer | n
         : '';
 
     if (code === 'ENOENT') {
-      try {
-        const legacyContent = fs.readFileSync(getLegacyCurrentGenerationPointerFilePath(), 'utf8');
-        return normalizeCurrentGenerationPointer(JSON.parse(legacyContent) as unknown);
-      } catch (legacyError) {
-        const legacyCode =
-          typeof legacyError === 'object' && legacyError !== null && 'code' in legacyError
-            ? String((legacyError as { code?: string }).code)
-            : '';
-
-        if (legacyCode === 'ENOENT') {
-          return null;
-        }
-
-        throw legacyError;
-      }
+      return null;
     }
 
     throw error;
@@ -300,24 +247,7 @@ export async function loadCurrentGenerationState(): Promise<IndexGenerationState
         : '';
 
     if (code === 'ENOENT') {
-      try {
-        const legacyContent = await fsPromises.readFile(
-          path.join(getLegacyGenerationDirectory(pointer.generationId), 'index-generation.json'),
-          'utf8',
-        );
-        return normalizeGenerationState(JSON.parse(legacyContent) as unknown);
-      } catch (legacyError) {
-        const legacyCode =
-          typeof legacyError === 'object' && legacyError !== null && 'code' in legacyError
-            ? String((legacyError as { code?: string }).code)
-            : '';
-
-        if (legacyCode === 'ENOENT') {
-          return null;
-        }
-
-        throw legacyError;
-      }
+      return null;
     }
 
     throw error;
@@ -370,24 +300,7 @@ export async function loadGenerationLifecycleMarker(
         : '';
 
     if (code === 'ENOENT') {
-      try {
-        const legacyContent = await fsPromises.readFile(
-          path.join(getLegacyGenerationDirectory(generationId), 'generation-lifecycle.json'),
-          'utf8',
-        );
-        return normalizeGenerationLifecycleMarker(JSON.parse(legacyContent) as unknown);
-      } catch (legacyError) {
-        const legacyCode =
-          typeof legacyError === 'object' && legacyError !== null && 'code' in legacyError
-            ? String((legacyError as { code?: string }).code)
-            : '';
-
-        if (legacyCode === 'ENOENT') {
-          return null;
-        }
-
-        throw legacyError;
-      }
+      return null;
     }
 
     throw error;
@@ -489,30 +402,20 @@ export async function resolveArtifactFilePath(fileName: string): Promise<string>
   const pointer = await loadCurrentGenerationPointer();
 
   if (!pointer) {
-    return fs.existsSync(getLegacyArtifactFilePath(fileName))
-      ? getLegacyArtifactFilePath(fileName)
-      : getLegacyRootArtifactFilePath(fileName);
+    return path.join(getIndexesDirectory(), fileName);
   }
 
-  const primaryPath = getGenerationArtifactFilePath(pointer.generationId, fileName);
-  return fs.existsSync(primaryPath)
-    ? primaryPath
-    : path.join(getLegacyGenerationDirectory(pointer.generationId), fileName);
+  return getGenerationArtifactFilePath(pointer.generationId, fileName);
 }
 
 export function resolveArtifactFilePathSync(fileName: string): string {
   const pointer = loadCurrentGenerationPointerSync();
 
   if (!pointer) {
-    return fs.existsSync(getLegacyArtifactFilePath(fileName))
-      ? getLegacyArtifactFilePath(fileName)
-      : getLegacyRootArtifactFilePath(fileName);
+    return path.join(getIndexesDirectory(), fileName);
   }
 
-  const primaryPath = getGenerationArtifactFilePath(pointer.generationId, fileName);
-  return fs.existsSync(primaryPath)
-    ? primaryPath
-    : path.join(getLegacyGenerationDirectory(pointer.generationId), fileName);
+  return getGenerationArtifactFilePath(pointer.generationId, fileName);
 }
 
 function normalizeSearchRefreshRequest(value: unknown): SearchRefreshRequest | null {
@@ -689,7 +592,6 @@ async function loadCoordinationMarker<T>(
   filePath: string,
   normalizer: (value: unknown) => T | null,
   expectedSchemaVersion: number,
-  fallbackFilePath?: string,
 ): Promise<CoordinationMarkerParseResult<T>> {
   try {
     const content = await fsPromises.readFile(filePath, 'utf8');
@@ -736,14 +638,6 @@ async function loadCoordinationMarker<T>(
         : '';
 
     if (code === 'ENOENT') {
-      if (fallbackFilePath && fallbackFilePath !== filePath) {
-        return loadCoordinationMarker(
-          fallbackFilePath,
-          normalizer,
-          expectedSchemaVersion,
-        );
-      }
-
       return {
         status: 'missing',
         path: filePath,
@@ -788,7 +682,6 @@ export async function loadSearchRefreshRequestResult(): Promise<CoordinationMark
     getSearchRefreshRequestFilePath(),
     normalizeSearchRefreshRequest,
     1,
-    path.join(getLegacyCoordinationDirectory(), 'search-refresh-request.json'),
   );
 }
 
@@ -802,7 +695,6 @@ export async function loadSearchRefreshSnapshotResult(): Promise<CoordinationMar
     getSearchRefreshSnapshotFilePath(),
     normalizeSearchRefreshSnapshot,
     1,
-    path.join(getLegacyCoordinationDirectory(), 'zoekt-refresh-state.json'),
   );
 }
 

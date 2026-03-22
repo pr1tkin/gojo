@@ -3,7 +3,7 @@ import path from 'node:path';
 import { spawn, type ChildProcess } from 'node:child_process';
 
 import { getCurrentSearchFreshness, reconcileCurrentGenerationSearchFreshness } from '../indexing/search-freshness.js';
-import { saveSearchRefreshSnapshot } from '../indexing/generation-store.js';
+import { getRuntimeDirectory, saveSearchRefreshSnapshot } from '../indexing/generation-store.js';
 import { buildSearchRepoFingerprints } from '../indexing/search-fingerprint.js';
 import { listRepositories } from '../repositories.js';
 import type { SearchRefreshSnapshot } from '../indexing/types.js';
@@ -172,16 +172,24 @@ export async function synchronizeSearchIndexes(
       validation,
     };
   } catch (error) {
-    const snapshot = buildFailedSnapshot(
-      error instanceof Error ? error.message : String(error),
-    );
-    await saveSearchRefreshSnapshot(snapshot).catch(() => undefined);
-    await reconcileCurrentGenerationSearchFreshness(logger).catch(() => undefined);
-
     if (config.search.mode === 'development' && isMissingHelperError(error)) {
+      const snapshotPath = path.join(getRuntimeDirectory(), 'coordination', 'zoekt-refresh-state.json');
+
+      await fs.rm(snapshotPath, { force: true }).catch(() => undefined);
+      await reconcileCurrentGenerationSearchFreshness(logger).catch(() => undefined);
       logger?.warn(`[search-helper] ${error.message}`);
+
       return {
-        snapshot,
+        snapshot: {
+          schemaVersion: 1,
+          fingerprintContractVersion: 1,
+          snapshotId: buildSnapshotId(),
+          status: 'failed',
+          refreshedAt: new Date().toISOString(),
+          repoFingerprints: [],
+          details: 'Gojo runtime is running without managed Zoekt helpers in development mode.',
+          error: error.message,
+        },
         validation: {
           helper: {
             kind: 'indexer',
@@ -196,6 +204,12 @@ export async function synchronizeSearchIndexes(
         },
       };
     }
+
+    const snapshot = buildFailedSnapshot(
+      error instanceof Error ? error.message : String(error),
+    );
+    await saveSearchRefreshSnapshot(snapshot).catch(() => undefined);
+    await reconcileCurrentGenerationSearchFreshness(logger).catch(() => undefined);
 
     throw error;
   }

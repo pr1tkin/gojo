@@ -1,31 +1,28 @@
 # Gojo Packaging Model
 
 ## Current packaging model
-Gojo targets a single product-facing command with packaged runtime dependencies.
+Gojo ships as a single product surface: `gojo`.
 
-Current model:
-- one official user-facing command: `gojo`
-- runtime-owned capability execution behind that surface
-- packaged runtime state directories for config, data, cache, logs, and runtime files
-- bundled helper binaries for search where Gojo still depends on Zoekt processes
+The runtime owns packaged dependencies and state resolution behind that surface:
+- one official user-facing command family: `gojo`
+- runtime-owned capability execution behind the CLI
+- packaged runtime state directories for config, data, indexes, cache, logs, and runtime files
+- bundled helper binaries for search while Zoekt remains process-based
 
-This is still a transitional model. It is a single product surface, not strict single-executable purity.
+This is packaging-ready, not single-executable purity.
 
-## What "single binary" means today
-For Gojo today, the product promise is:
-- the user installs one Gojo distribution
-- the user runs one primary command: `gojo`
-- required runtime helpers are bundled inside that distribution when they are still necessary
-- the runtime, not the CLI, owns helper discovery and startup
+## Product surface
+Official entrypoints:
+- `gojo`
+- `gojo mcp serve`
 
-Known transitional compromises:
-- Zoekt remains process-based rather than embedded as a TypeScript library
-- MCP lifecycle is still startup-snapshot based
-- `server.ts` still exists as a compatibility shim
-- there is not yet a general supervisor layer for multiple long-running helpers
+Removed from the product surface:
+- `server.ts`
+- direct Node startup guidance
+- Docker-first startup guidance
 
 ## Helper packaging model
-Gojo now formalizes search helper packaging as `bundled_helper_binaries`.
+Gojo formalizes search helper packaging as `bundled_helper_binaries`.
 
 Expected distribution layout:
 ```text
@@ -42,7 +39,7 @@ Expected distribution layout:
   logs/
 ```
 
-Current repository-backed layout for local validation:
+Repository-backed layout for local validation:
 ```text
 mcp-server/
   dist/
@@ -50,12 +47,6 @@ mcp-server/
     search/
       manifest.json
 ```
-
-The helper manifest records:
-- schema version
-- packaging strategy
-- pinned Zoekt ref
-- expected helper names
 
 ## Helper resolution logic
 Search helper resolution is centralized in `src/search/helpers.ts`.
@@ -71,72 +62,37 @@ Resolution order:
 
 The CLI does not participate in helper discovery.
 
-## Dev vs packaged behavior
-Search runtime mode is controlled by:
-- `GOJO_RUNTIME_MODE=packaged|development`
-- otherwise defaults to `development` unless `GOJO_PACKAGED=true` is set
-
-### Packaged mode
-Packaged mode is strict.
-
-Behavior:
-- helper discovery must succeed from the packaged layout or explicit override
-- helper startup failures are treated as product errors
-- `gojo mcp serve` fails fast with an incomplete-installation error if bundled helpers are missing
-- `index` and `refresh` treat search sync failures as command failures rather than silent degradation
-
-### Development mode
-Development mode remains permissive.
-
-Behavior:
-- Gojo may use an already-running external Zoekt endpoint
-- missing helpers do not block MCP startup if the user is intentionally working without managed search helpers
-- search sync may remain stale when helper binaries are unavailable, preserving current local workflows without claiming packaged completeness
-
-## Runtime ownership
-Runtime-owned search logic now lives in:
-- `src/runtime/search-service.ts`
-- `src/search/helpers.ts`
-
-Responsibilities:
-- resolve helper binaries
-- validate helper executability
-- probe helper version when possible
-- build Zoekt search indexes during refresh/index flows
-- start the Zoekt webserver for runtime-owned MCP serving when appropriate
-- write refreshed search snapshot markers for readiness reconciliation
-
-This keeps helper lifecycle out of the CLI layer.
-
-## Product path and state layout
-Gojo resolves product paths through the product environment layer.
+## Product state layout
+Gojo resolves product paths through `src/product/environment.ts`.
 
 Relevant directories:
-- `configDir`: user or install configuration
+- `configDir`: product configuration
 - `dataDir`: persistent runtime data root
-- `indexesDir`: Gojo generation artifacts and search index directory
+- `indexesDir`: published generations and index-backed artifacts
 - `cacheDir`: regenerable caches
 - `logDir`: persisted logs
 - `runtimeDir`: transient runtime state and coordination markers
 - `tempDir`: temporary files for atomic writes
 - `searchHelpersDir`: packaged helper binary directory
 
+There is no legacy workspace-local storage fallback.
+A workspace-local `.data` directory now causes a product error that instructs the user to migrate or re-index.
+
 Search-specific locations:
 - `config.search.indexDirectory` -> `indexesDir/search`
 - search coordination marker -> `runtimeDir/coordination/zoekt-refresh-state.json`
 
-## Version compatibility
-Compatibility is currently ensured through a pragmatic contract:
-- packaged helper manifest pins a Zoekt ref
-- runtime probes helper executability with `-version` when possible
-- if version output is unavailable, runtime degrades to executable validation plus manifest expectation
+## Dev containers
+Repository Docker artifacts are development-only:
+- `docker-compose.yml` is for local stack debugging
+- `mcp-server/Dockerfile` exists for dev/container compatibility
+- container startup still uses the official command: `gojo mcp serve`
 
-This is enough for release preparation, but not yet a full helper compatibility policy.
+They are not the primary product path.
 
-## What remains for release-pipeline work
+## Release-pipeline work that remains
 Still deferred:
-- assembling real release archives with helper binaries included
+- assembling release archives with helper binaries included
 - signing or checksumming helper artifacts
 - verifying helper version compatibility during release builds
 - helper supervision beyond the current managed webserver process
-- removing the legacy `server.ts` compatibility entrypoint

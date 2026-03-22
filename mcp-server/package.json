@@ -9,7 +9,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/gojo.js",
+    "start": "gojo",
     "dev": "tsx src/gojo.ts",
     "test": "vitest run",
     "test:watch": "vitest",

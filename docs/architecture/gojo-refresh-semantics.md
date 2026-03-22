@@ -26,8 +26,8 @@ Mental model:
 
 Examples:
 
-- `gojo index ../repos/dlf-web`
-- `gojo index --repo dlf-web`
+- `gojo index ../repos/media-web`
+- `gojo index --repo media-web`
 
 ## `gojo refresh`
 
@@ -45,8 +45,8 @@ Mental model:
 
 Examples:
 
-- `gojo refresh --repo dlf-web`
-- `gojo refresh --repo ../repos/dlf-web`
+- `gojo refresh --repo media-web`
+- `gojo refresh --repo ../repos/media-web`
 
 ## Mapping to readiness states
 

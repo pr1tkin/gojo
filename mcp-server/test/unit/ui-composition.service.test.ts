@@ -161,7 +161,7 @@ describe('ui composition indexing', () => {
       symbolName: 'ButtonGroup',
     });
 
-    expect(getUiCompositionFilePath()).toBe(path.join(tempRoot, '.data', 'ui-composition.json'));
+    expect(getUiCompositionFilePath()).toBe(path.join(tempRoot, 'gojo', 'data', 'indexes', 'ui-composition.json'));
     expect(loadedIndex.schemaVersion).toBe(3);
     expect(loadedIndex.sourceSymbolIndexSchemaVersion).toBe(symbolIndex.schemaVersion);
     expect(loadedIndex.edges).toEqual(expect.arrayContaining([

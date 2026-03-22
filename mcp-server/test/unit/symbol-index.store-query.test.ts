@@ -109,10 +109,10 @@ describe('symbol-index store and query', () => {
     const tempRoot = await createTempDirectory();
     tempDirectories.push(tempRoot);
     process.chdir(tempRoot);
-    await fs.mkdir(path.join(tempRoot, '.data'), { recursive: true });
+    await fs.mkdir(path.join(tempRoot, 'gojo', 'data', 'indexes'), { recursive: true });
 
     await fs.writeFile(
-      path.join(tempRoot, '.data', 'symbol-index.json'),
+      path.join(tempRoot, 'gojo', 'data', 'indexes', 'symbol-index.json'),
       JSON.stringify(
         {
           symbols: [

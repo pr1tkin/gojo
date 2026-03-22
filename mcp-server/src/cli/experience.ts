@@ -1,4 +1,5 @@
 import type { RuntimeResponse } from '../runtime/index.js';
+import { LegacyStorageError } from '../product/environment.js';
 import { SearchHelperError } from '../search/helpers.js';
 import type { CliCommand, CliStructuredError } from './types.js';
 
@@ -102,6 +103,10 @@ function isSearchHelperError(error: unknown): error is SearchHelperError {
   return error instanceof SearchHelperError;
 }
 
+function isLegacyStorageError(error: unknown): error is LegacyStorageError {
+  return error instanceof LegacyStorageError;
+}
+
 export function getCliExitCode(error: unknown): number {
   return isUsageError(error) ? 2 : 1;
 }
@@ -165,6 +170,22 @@ export function buildCliStructuredError(error: unknown, command?: CliCommand): C
           'If the repo has already been indexed, use its repo id. Otherwise use the filesystem path.',
         ],
         suggested_commands: ['gojo health'],
+      },
+    };
+  }
+
+  if (isLegacyStorageError(error)) {
+    return {
+      ok: false,
+      error: {
+        code: 'legacy_storage',
+        title: 'Legacy storage is no longer supported',
+        reason: error.message,
+        how_to_fix: [
+          'Move or remove the legacy .data directory before running Gojo.',
+          'Then rebuild state with gojo index for the repos you want to use.',
+        ],
+        suggested_commands: command ? [commandForHealth(command), commandForIndex(command)] : ['gojo health', 'gojo index'],
       },
     };
   }

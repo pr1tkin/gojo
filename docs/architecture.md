@@ -33,10 +33,13 @@ Includes:
 - UI structure (composition + props)
 - generation health & freshness
 
-Artifacts live under:
+Artifacts live under product-owned runtime directories:
 
 ```text
-/app/.data
+<gojo-home>/data
+<gojo-home>/data/indexes
+<gojo-home>/runtime
+<gojo-home>/cache
 ```
 
 Design principle:

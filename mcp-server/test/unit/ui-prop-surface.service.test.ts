@@ -110,7 +110,7 @@ describe('ui prop surface indexing', () => {
       filePath: 'src/components/Button.tsx',
     });
 
-    expect(getUiPropSurfaceFilePath()).toBe(path.join(tempRoot, '.data', 'ui-props.json'));
+    expect(getUiPropSurfaceFilePath()).toBe(path.join(tempRoot, 'gojo', 'data', 'indexes', 'ui-props.json'));
     expect(loadedIndex.schemaVersion).toBe(1);
     expect(loadedIndex.sourceSymbolIndexSchemaVersion).toBe(symbolIndex.schemaVersion);
     expect(loadedIndex.propUsages).toEqual(expect.arrayContaining([

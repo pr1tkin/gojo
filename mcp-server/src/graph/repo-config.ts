@@ -4,7 +4,6 @@ import path from 'node:path';
 import ts from 'typescript';
 
 const IGNORED_DIRECTORIES = new Set([
-  '.data',
   '.git',
   'build',
   'coverage',
@@ -242,7 +241,7 @@ async function collectRepoConfigPaths(
     const entryPath = path.join(currentDirectory, entry.name);
 
     if (entry.isDirectory()) {
-      if (IGNORED_DIRECTORIES.has(entry.name)) {
+      if (entry.name.startsWith('.') || IGNORED_DIRECTORIES.has(entry.name)) {
         continue;
       }
 

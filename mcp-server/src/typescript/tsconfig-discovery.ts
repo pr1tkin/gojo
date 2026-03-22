@@ -3,7 +3,6 @@ import path from 'node:path';
 
 const IGNORED_DIRECTORIES = new Set([
   '.git',
-  '.data',
   'build',
   'coverage',
   'dist',
@@ -69,7 +68,7 @@ async function collectTsconfigPaths(
     const entryPath = path.join(currentDirectory, entry.name);
 
     if (entry.isDirectory()) {
-      if (IGNORED_DIRECTORIES.has(entry.name)) {
+      if (entry.name.startsWith('.') || IGNORED_DIRECTORIES.has(entry.name)) {
         continue;
       }
 

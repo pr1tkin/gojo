@@ -24,6 +24,7 @@ import {
   getGenerationArtifactFilePath,
   getGenerationsDirectory,
   getGenerationStateFilePath,
+  getTempDirectory,
   loadCurrentGenerationPointer,
   loadCurrentGenerationState,
   loadSearchRefreshRequestResult,
@@ -900,8 +901,8 @@ export async function runCurrentGenerationConsistencyMaintenance(
   const rootTempFilePaths = await Promise.all(
     ROOT_TEMP_FILES.map(async (fileName) => ({
       fileName,
-      filePath: path.join(getDataDirectory(), fileName),
-      exists: await fileExists(path.join(getDataDirectory(), fileName)),
+      filePath: path.join(getTempDirectory(), fileName),
+      exists: await fileExists(path.join(getTempDirectory(), fileName)),
     })),
   );
   const debrisReport = await cleanupGenerationDebris({

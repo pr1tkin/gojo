@@ -87,7 +87,7 @@ describe.sequential('generation debris cleanup', () => {
       }),
     ).rejects.toThrow('Simulated refresh failure before publish.');
 
-    const generationEntries = await fs.readdir(path.join(tempRoot, '.data', 'generations'));
+    const generationEntries = await fs.readdir(path.join(tempRoot, 'gojo', 'data', 'indexes', 'generations'));
     failedGenerationId = generationEntries.find((entry) => entry !== first.diagnostics.generationId) ?? '';
     expect(failedGenerationId).not.toBe('');
     expect((await loadGenerationLifecycleMarker(failedGenerationId))?.status).toBe('abandoned');

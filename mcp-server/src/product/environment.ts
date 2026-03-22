@@ -15,6 +15,15 @@ const PRODUCT_NAME = 'gojo';
 const PRODUCT_VERSION_FALLBACK = '1.0.0';
 const PACKAGING_MODEL: GojoPackagingModel = 'single_surface_with_packaged_runtime';
 
+export class LegacyStorageError extends Error {
+  constructor(legacyPath: string) {
+    super(
+      `Legacy .data directory detected at ${legacyPath}. This Gojo version no longer supports legacy storage. Please migrate or re-index.`,
+    );
+    this.name = 'LegacyStorageError';
+  }
+}
+
 function resolvePackageRoot(env: NodeJS.ProcessEnv): string {
   if (env.GOJO_PACKAGE_ROOT?.trim()) {
     return path.resolve(env.GOJO_PACKAGE_ROOT.trim());
@@ -70,14 +79,24 @@ function resolveDefaultHomeDir(env: NodeJS.ProcessEnv): string {
   );
 }
 
+function detectLegacyWorkspaceDataDir(): string | null {
+  const legacyWorkspaceDataDir = path.resolve(process.cwd(), '.data');
+
+  if (fs.existsSync(legacyWorkspaceDataDir) && fs.statSync(legacyWorkspaceDataDir).isDirectory()) {
+    return legacyWorkspaceDataDir;
+  }
+
+  return null;
+}
+
 function resolveDefaultDataDir(env: NodeJS.ProcessEnv, homeDir: string): string {
   if (env.GOJO_DATA_DIR?.trim()) {
     return path.resolve(env.GOJO_DATA_DIR.trim());
   }
 
-  const legacyWorkspaceDataDir = path.resolve(process.cwd(), '.data');
-  if (fs.existsSync(legacyWorkspaceDataDir) && fs.statSync(legacyWorkspaceDataDir).isDirectory()) {
-    return legacyWorkspaceDataDir;
+  const legacyWorkspaceDataDir = detectLegacyWorkspaceDataDir();
+  if (legacyWorkspaceDataDir) {
+    throw new LegacyStorageError(legacyWorkspaceDataDir);
   }
 
   return path.join(homeDir, 'data');
@@ -177,7 +196,16 @@ export function resolveSearchRuntimeConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): SearchRuntimeConfig {
   const paths = resolveProductPathsForEnvironment(env);
-  const baseUrl = env.ZOEKT_BASE_URL?.trim() || 'http://127.0.0.1:6070';
+  const configuredBaseUrl = env.ZOEKT_BASE_URL?.trim();
+  let baseUrl = 'http://127.0.0.1:6070';
+
+  if (configuredBaseUrl) {
+    try {
+      baseUrl = new URL(configuredBaseUrl).toString().replace(/\/$/, '');
+    } catch {
+      baseUrl = 'http://127.0.0.1:6070';
+    }
+  }
   const configuredMode = env.GOJO_RUNTIME_MODE?.trim();
   const mode: SearchRuntimeMode =
     configuredMode === 'packaged' || configuredMode === 'development'
@@ -187,7 +215,7 @@ export function resolveSearchRuntimeConfig(
         : 'development';
 
   return {
-    baseUrl: new URL(baseUrl).toString().replace(/\/$/, ''),
+    baseUrl,
     mode,
     packagingStrategy: 'bundled_helper_binaries',
     helperBinaryDir: paths.searchHelpersDir,
@@ -202,19 +230,46 @@ export function resolveSearchRuntimeConfig(
 
 let cachedEnvironment:
   | {
+      cacheKey: string;
       identity: ProductIdentity;
       paths: ProductPaths;
     }
   | undefined;
 
+function createEnvironmentCacheKey(env: NodeJS.ProcessEnv): string {
+  return JSON.stringify({
+    cwd: process.cwd(),
+    GOJO_PACKAGE_ROOT: env.GOJO_PACKAGE_ROOT ?? '',
+    GOJO_VERSION: env.GOJO_VERSION ?? '',
+    GOJO_HOME: env.GOJO_HOME ?? '',
+    GOJO_CONFIG_DIR: env.GOJO_CONFIG_DIR ?? '',
+    GOJO_DATA_DIR: env.GOJO_DATA_DIR ?? '',
+    GOJO_INDEXES_DIR: env.GOJO_INDEXES_DIR ?? '',
+    GOJO_CACHE_DIR: env.GOJO_CACHE_DIR ?? '',
+    GOJO_LOG_DIR: env.GOJO_LOG_DIR ?? '',
+    GOJO_RUNTIME_DIR: env.GOJO_RUNTIME_DIR ?? '',
+    GOJO_TEMP_DIR: env.GOJO_TEMP_DIR ?? '',
+    GOJO_SEARCH_HELPERS_DIR: env.GOJO_SEARCH_HELPERS_DIR ?? '',
+    XDG_CONFIG_HOME: env.XDG_CONFIG_HOME ?? '',
+    XDG_DATA_HOME: env.XDG_DATA_HOME ?? '',
+    XDG_CACHE_HOME: env.XDG_CACHE_HOME ?? '',
+    XDG_STATE_HOME: env.XDG_STATE_HOME ?? '',
+    LOCALAPPDATA: env.LOCALAPPDATA ?? '',
+    APPDATA: env.APPDATA ?? '',
+  });
+}
+
 export function getProductEnvironment(): {
   identity: ProductIdentity;
   paths: ProductPaths;
 } {
-  if (!cachedEnvironment) {
+  const cacheKey = createEnvironmentCacheKey(process.env);
+
+  if (!cachedEnvironment || cachedEnvironment.cacheKey !== cacheKey) {
     const paths = resolveProductPathsForEnvironment(process.env);
     ensureProductDirectories(paths);
     cachedEnvironment = {
+      cacheKey,
       identity: resolveProductIdentity(process.env),
       paths,
     };

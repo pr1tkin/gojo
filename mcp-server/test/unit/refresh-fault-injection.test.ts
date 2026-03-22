@@ -38,7 +38,7 @@ async function writeRepositoryFile(
 
 async function listGenerationDirectories(tempRoot: string): Promise<string[]> {
   try {
-    const entries = await fs.readdir(path.join(tempRoot, '.data', 'generations'), { withFileTypes: true });
+  const entries = await fs.readdir(path.join(tempRoot, 'gojo', 'data', 'indexes', 'generations'), { withFileTypes: true });
     return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
   } catch {
     return [];

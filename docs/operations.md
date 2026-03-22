@@ -16,8 +16,8 @@ Repository-local example:
 ```bash
 cd mcp-server
 npm run build
-node dist/gojo.js health
-node dist/gojo.js mcp serve
+npm exec gojo -- health
+npm exec gojo -- mcp serve
 ```
 
 ## 🧰 Dev Stack
@@ -58,8 +58,8 @@ There are **two independent pipelines**:
 Outputs:
 
 ```
-<gojo-data>/current-generation.json
-<gojo-data>/current-health.json
+<gojo-home>/data/indexes/current-generation.json
+<gojo-home>/data/current-health.json
 ```
 
 ---
@@ -70,7 +70,6 @@ Volumes:
 
 - mcp-server-data
 - zoekt-index
-- refresh-coordination
 
 ---
 
