@@ -108,10 +108,24 @@ Gojo shows you what it can see — not what it guesses perfectly.
 - some connections are exact
 - some are inferred from structure
 - some are best-effort heuristics
+- some surrounding files are exploratory context, not exact dependency truth
 
 Use trust and readiness signals as part of the answer.
 When Gojo is certain, it should look certain.
 When it is not, it should say so.
+
+Gojo now makes that explicit with:
+
+- `Confidence`: how strongly Gojo trusts the current answer
+- `Kind`: whether the main result is exact, inferred, heuristic, or exploratory
+- `Coverage`: whether the supporting evidence is complete, partial, or stale
+
+Read it literally:
+
+- `Kind: exact` means the focal result is grounded directly in indexed structure
+- `Kind: inferred` means Gojo chose between plausible candidates or proxy evidence
+- `Kind: heuristic` means Gojo found a useful lead, not a guaranteed truth
+- `Coverage: partial` means some surrounding context is intentionally bounded or broadened
 
 ---
 

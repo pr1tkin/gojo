@@ -21,6 +21,11 @@ import {
   type UpgradeProductResponse,
 } from './types.js';
 import { createRuntimeResponse } from './response.js';
+import {
+  assessExploreTransparency,
+  assessHealthTransparency,
+  assessIndexTransparency,
+} from './transparency.js';
 import { assessRuntimeStateFromHealth, detectRepositoryDrift } from './trust.js';
 import { serveMcpRuntime } from './mcp-service.js';
 import { inspectSearchRuntime } from './search-service.js';
@@ -277,6 +282,10 @@ export const indexRepoHandler: RuntimeCapabilityHandler<IndexRepoRequest, IndexR
       additionalWarnings: drift.warning ? [drift.warning] : [],
       repoPath,
     });
+    const transparency = assessIndexTransparency({
+      readinessState: runtimeState.readinessState,
+      hasWarnings: result.diagnostics.warnings.length > 0 || runtimeState.warnings.length > 0,
+    });
 
     return createRuntimeResponse({
       capability: 'IndexRepo',
@@ -356,6 +365,11 @@ export const indexRepoHandler: RuntimeCapabilityHandler<IndexRepoRequest, IndexR
       readinessState: runtimeState.readinessState,
       confidence: runtimeState.confidence,
       trust: runtimeState.trustLevel,
+      resultKind: transparency.resultKind,
+      coverage: transparency.coverage,
+      coverageSignals: transparency.coverageSignals,
+      evidenceTypes: transparency.evidenceTypes,
+      note: transparency.note,
     });
   },
 };
@@ -383,6 +397,10 @@ export const refreshRepoHandler: RuntimeCapabilityHandler<RefreshRepoRequest, Re
     const runtimeState = assessRuntimeStateFromHealth(health, {
       additionalWarnings: drift.warning ? [drift.warning] : [],
       repoPath,
+    });
+    const transparency = assessIndexTransparency({
+      readinessState: runtimeState.readinessState,
+      hasWarnings: result.diagnostics.warnings.length > 0 || runtimeState.warnings.length > 0,
     });
 
     return createRuntimeResponse({
@@ -450,6 +468,11 @@ export const refreshRepoHandler: RuntimeCapabilityHandler<RefreshRepoRequest, Re
       readinessState: runtimeState.readinessState,
       confidence: runtimeState.confidence,
       trust: runtimeState.trustLevel,
+      resultKind: transparency.resultKind,
+      coverage: transparency.coverage,
+      coverageSignals: transparency.coverageSignals,
+      evidenceTypes: transparency.evidenceTypes,
+      note: transparency.note,
     });
   },
 };
@@ -507,6 +530,16 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
           : primarySymbol
             ? runtimeState.confidence
             : 'low';
+    const transparency = assessExploreTransparency({
+      readinessState: runtimeState.readinessState,
+      primarySymbolResolved: Boolean(primarySymbol),
+      ambiguityDetected,
+      candidateCount: result.summary.totalCandidateCount,
+      relatedFileCount: result.summary.totalRelatedFileCount,
+      health: {
+        suitableForAgentWorkflows: health.suitableForAgentWorkflows,
+      },
+    });
 
     return createRuntimeResponse({
       capability: 'ExploreComponent',
@@ -585,6 +618,11 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
       readinessState: runtimeState.readinessState,
       confidence: finalConfidence,
       trust: primarySymbol ? finalTrustLevel : runtimeState.trustLevel,
+      resultKind: transparency.resultKind,
+      coverage: transparency.coverage,
+      coverageSignals: transparency.coverageSignals,
+      evidenceTypes: transparency.evidenceTypes,
+      note: transparency.note,
     });
   },
 };
@@ -626,6 +664,11 @@ export const runHealthChecksHandler: RuntimeCapabilityHandler<
       [...result.warnings, ...result.errors, ...runtimeState.warnings, ...searchWarnings],
       repoPath,
     );
+    const transparency = assessHealthTransparency({
+      readinessState: runtimeState.readinessState,
+      suitableForAgentWorkflows: result.suitableForAgentWorkflows,
+      searchHelpersAvailable: searchRuntime.webserverHelperAvailable && searchRuntime.indexerHelperAvailable,
+    });
 
     return createRuntimeResponse({
       capability: 'RunHealthChecks',
@@ -704,6 +747,11 @@ export const runHealthChecksHandler: RuntimeCapabilityHandler<
       readinessState: runtimeState.readinessState,
       confidence: runtimeState.confidence,
       trust: runtimeState.trustLevel,
+      resultKind: transparency.resultKind,
+      coverage: transparency.coverage,
+      coverageSignals: transparency.coverageSignals,
+      evidenceTypes: transparency.evidenceTypes,
+      note: transparency.note,
     });
   },
 };

@@ -13,8 +13,71 @@ Runtime responses now carry:
 - `trust_level`: `high`, `medium`, `low`, or `degraded`
 - `confidence`: the current result confidence using the same qualitative scale
 - `readiness_state`: `ready`, `stale`, `inconsistent`, or `unknown`
+- `result_kind`: `exact`, `inferred`, `heuristic`, or `exploratory`
+- `coverage`: `complete`, `partial`, or `stale`
+- `coverage_signals`: concise qualifiers such as `ambiguous_match`, `name_collision_risk`, or `missing_graph_evidence`
+- `evidence_types`: the main evidence families used for the answer, such as `symbol_index`, `related_files`, or `runtime_health`
 
 These fields are emitted in both human output and `--json` output.
+
+## Result kinds
+
+### `exact`
+
+The primary result is grounded directly in indexed structure.
+
+Examples:
+
+- resolved symbol definition with one clear primary match
+- authoritative runtime health state
+- published generation state after index or refresh
+
+### `inferred`
+
+The result is useful and grounded, but Gojo had to choose between plausible candidates or rely on proxy structure.
+
+Examples:
+
+- same-name wrapper and service candidates remain
+- a ranked primary target was selected from multiple viable symbol matches
+
+### `heuristic`
+
+The result is a useful lead, but Gojo cannot present it as exact truth.
+
+Examples:
+
+- no clean primary symbol match
+- only weak structural or name-based grounding is available
+
+### `exploratory`
+
+The output is intentionally broad context rather than a bounded truth claim.
+
+Examples:
+
+- nearby implementation context
+- broader precedent or navigation surfaces
+
+## Coverage
+
+### `complete`
+
+The answer is backed by the currently published runtime state without a known coverage downgrade.
+
+### `partial`
+
+The answer is still usable, but part of the evidence is bounded, broadened, ambiguous, or incomplete.
+
+Typical causes:
+
+- related-file navigation is not the same as exact dependency truth
+- same-name candidates remain
+- graph-safe workflow coverage is degraded
+
+### `stale`
+
+The answer is grounded in a valid published generation, but freshness is behind current repo or search state.
 
 ## Readiness states
 
@@ -91,6 +154,8 @@ That means:
 - ambiguity still lowers trust
 - stale search or repo drift adds warnings and reduces trust
 - inconsistent health prevents `explore` from presenting a strong trust signal
+- related files are surfaced as navigation context, not silently presented as exact direct consumers
+- same-name candidate collisions now surface as `result_kind=inferred` with explicit coverage signals
 
 ## Health behavior
 
@@ -99,6 +164,8 @@ That means:
 It now uses the same trust/readiness fields as other runtime responses and can include repo-scoped drift warnings when a repo target is supplied.
 
 `health`, `explore`, `index`, and `refresh` all read from the same health-derived readiness/trust contract. They may differ in warnings or result-specific confidence, but not in the underlying readiness truth.
+
+Health, index, and refresh use `result_kind=exact` because they are reporting product state, not ranking a target. Their coverage can still degrade to `partial` or `stale` when runtime conditions warrant it.
 
 ## Repo drift handling
 

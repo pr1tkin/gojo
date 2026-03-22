@@ -31,6 +31,11 @@ export function renderRuntimeResponse(response: RenderableRuntimeResponse, comma
     `readiness: ${response.readiness_state}`,
     `trust: ${response.trust_level}`,
     `confidence: ${response.confidence}`,
+    `kind: ${response.result_kind}`,
+    `coverage: ${response.coverage}`,
+    ...(response.coverage_signals.length > 0 ? [`coverage signals: ${response.coverage_signals.join(', ')}`] : []),
+    ...(response.evidence_types.length > 0 ? [`evidence: ${response.evidence_types.join(', ')}`] : []),
+    ...(response.note ? [`note: ${response.note}`] : []),
   ]);
   if (stateSection.length > 0) {
     sections.push(stateSection.join('\n'));

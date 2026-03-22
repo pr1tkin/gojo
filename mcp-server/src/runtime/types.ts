@@ -12,6 +12,18 @@ export type RuntimeReadinessState = 'ready' | 'stale' | 'inconsistent' | 'unknow
 
 export type RuntimeExecutionMode = 'one_shot' | 'long_running';
 
+export type RuntimeResultKind = 'exact' | 'inferred' | 'heuristic' | 'exploratory';
+
+export type RuntimeCoverage = 'complete' | 'partial' | 'stale';
+
+export type RuntimeCoverageSignal =
+  | 'complete'
+  | 'partial'
+  | 'stale'
+  | 'missing_graph_evidence'
+  | 'ambiguous_match'
+  | 'name_collision_risk';
+
 export interface RepoTarget {
   repoId?: string;
   repoPath?: string;
@@ -63,6 +75,11 @@ export interface RuntimeResponse<TMachinePayload = unknown> {
   readiness_state: RuntimeReadinessState;
   confidence: RuntimeTrustLevel;
   trust: RuntimeTrustLevel;
+  result_kind: RuntimeResultKind;
+  coverage: RuntimeCoverage;
+  coverage_signals: RuntimeCoverageSignal[];
+  evidence_types: string[];
+  note?: string;
 }
 
 export interface RuntimeLogger {
