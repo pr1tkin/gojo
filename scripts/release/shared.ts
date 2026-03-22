@@ -36,6 +36,14 @@ export interface ReleaseValidationResult {
   observations: string[];
 }
 
+export interface ReleaseArtifactDetails {
+  artifactPath: string;
+  filename: string;
+  size: number;
+  metadata: BuildMetadata;
+  helperFiles: string[];
+}
+
 export function getRepoRoot(): string {
   if (process.env.GOJO_REPO_ROOT?.trim()) {
     return path.resolve(process.env.GOJO_REPO_ROOT.trim());
@@ -84,6 +92,18 @@ export function getArtifactPath(metadata: BuildMetadata): string {
     getReleaseVersionDirectory(metadata),
     getReleaseArtifactName(metadata.version, metadata.platform, metadata.arch),
   );
+}
+
+export function getChecksumsPath(versionDirectory: string): string {
+  return path.join(versionDirectory, 'checksums.txt');
+}
+
+export function getReleaseManifestPath(versionDirectory: string): string {
+  return path.join(versionDirectory, 'release-manifest.json');
+}
+
+export function getReleaseNotesPath(versionDirectory: string): string {
+  return path.join(versionDirectory, 'release-notes.md');
 }
 
 export function getTempExtractionDirectory(): string {
@@ -233,4 +253,16 @@ export async function copyProductionNodeModules(sourceRoot: string, destinationR
 
 export function loadVersionFile(versionFilePath: string): BuildMetadata {
   return JSON.parse(fs.readFileSync(versionFilePath, 'utf8')) as BuildMetadata;
+}
+
+export function getReleaseArtifactPaths(versionDirectory: string): string[] {
+  if (!fs.existsSync(versionDirectory)) {
+    return [];
+  }
+
+  return fs
+    .readdirSync(versionDirectory)
+    .filter((entry) => entry.endsWith('.tar.gz'))
+    .map((entry) => path.join(versionDirectory, entry))
+    .sort((left, right) => path.basename(left).localeCompare(path.basename(right)));
 }

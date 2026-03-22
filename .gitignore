@@ -47,3 +47,4 @@ mcp-server/.data/*
 #evaluations
 docs/evaluations/*
 .ai/*
+docs/release/*

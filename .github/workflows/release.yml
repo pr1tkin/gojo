@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.0'
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: mcp-server
+
+      - name: Build bundled search helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZOEKT_REF=$(node -e "const fs=require('node:fs'); const manifest=JSON.parse(fs.readFileSync('mcp-server/bin/search/manifest.json','utf8')); process.stdout.write(manifest.zoektRef);")
+          mkdir -p "$RUNNER_TEMP/gojo-helpers"
+          GOBIN="$RUNNER_TEMP/gojo-helpers" go install "github.com/sourcegraph/zoekt/cmd/zoekt-webserver@${ZOEKT_REF}"
+          GOBIN="$RUNNER_TEMP/gojo-helpers" go install "github.com/sourcegraph/zoekt/cmd/zoekt-git-index@${ZOEKT_REF}"
+          echo "GOJO_ZOEKT_WEBSERVER_PATH=$RUNNER_TEMP/gojo-helpers/zoekt-webserver" >> "$GITHUB_ENV"
+          echo "GOJO_ZOEKT_GIT_INDEX_PATH=$RUNNER_TEMP/gojo-helpers/zoekt-git-index" >> "$GITHUB_ENV"
+
+      - name: Run release candidate flow
+        env:
+          GOJO_REPO_ROOT: ${{ github.workspace }}
+          GOJO_RELEASE_STAGING_ROOT: ${{ runner.temp }}/gojo-release-stage
+          GOJO_HOME: ${{ runner.temp }}/gojo-home
+        run: ./mcp-server/node_modules/.bin/tsx scripts/release/run-release-candidate.ts
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gojo-release-assets
+          path: |
+            dist/release/**
+            docs/release/release-artifact-report.md
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_DIR="dist/release/${GITHUB_REF_NAME}"
+          gh release create "$GITHUB_REF_NAME" \
+            "$RELEASE_DIR"/*.tar.gz \
+            "$RELEASE_DIR"/checksums.txt \
+            "$RELEASE_DIR"/release-manifest.json \
+            "$RELEASE_DIR"/release-notes.md \
+            --title "Gojo ${GITHUB_REF_NAME}" \
+            --notes-file "$RELEASE_DIR/release-notes.md"
