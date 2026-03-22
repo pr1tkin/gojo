@@ -367,7 +367,7 @@ describe.sequential('refreshIndexes', () => {
         "import { Other } from './Other';",
         '',
         'export function Parent() {',
-        '  return <Child label=\"before\" />;',
+        '  return <Child label="before" />;',
         '}',
       ].join('\n'),
     );
@@ -382,7 +382,7 @@ describe.sequential('refreshIndexes', () => {
         "import { Other } from './Other';",
         '',
         'export function Parent() {',
-        '  return <Other><Child tone=\"primary\" /></Other>;',
+        '  return <Other><Child tone="primary" /></Other>;',
         '}',
       ].join('\n'),
     );

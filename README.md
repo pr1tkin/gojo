@@ -1,11 +1,12 @@
 # 👁️ Gojo
-
-> Throughout heaven and earth, I alone see everything.
-
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Local-first](https://img.shields.io/badge/local--first-yes-green)
 ![Agent-first](https://img.shields.io/badge/agent--first-yes-purple)
 ![MCP](https://img.shields.io/badge/MCP-ready-black)
+![Build](https://github.com/pr1tkin/gojo/actions/workflows/release-candidate.yml/badge.svg)
+![Release](https://github.com/pr1tkin/gojo/actions/workflows/release.yml/badge.svg)
+
+> Throughout heaven and earth, I alone see everything.
 
 Gojo is a **local-first, agent-first code intelligence engine** that gives developers and AI agents **real visibility into complex codebases**.
 
@@ -18,6 +19,38 @@ It shows you:
 - what will break if you change something
 
 > You’re not debugging anymore — you’re seeing.
+
+---
+
+## 🚀 Get started
+
+Install Gojo in one command. No setup. No guessing.
+
+```bash
+curl -sSL https://raw.githubusercontent.com/pr1tkin/gojo/main/scripts/install/install.sh | bash
+```
+
+That installs the `gojo` CLI plus its bundled search helper. No manual extraction.
+
+First check:
+
+```bash
+gojo version
+```
+
+Upgrade:
+
+```bash
+gojo upgrade
+```
+
+Uninstall:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/pr1tkin/gojo/main/scripts/install/uninstall.sh | sh
+```
+
+If `~/.gojo/bin` is not already on your `PATH`, the installer tells you exactly what to add.
 
 ---
 
@@ -275,14 +308,11 @@ Artifacts are generated under the product runtime directories:
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Repository development
 
-Current official product surface:
+The shipped product surface is `gojo` and `gojo mcp serve`.
 
-- `gojo`
-- `gojo mcp serve`
-
-From this repository today, the quickest path is:
+From this repository, the quickest development path is:
 
 ```bash
 cd mcp-server

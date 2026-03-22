@@ -142,7 +142,7 @@ export interface GetProductVersionMachinePayload {
 
 export type GetProductVersionResponse = RuntimeResponse<GetProductVersionMachinePayload>;
 
-export interface UpgradeProductRequest {}
+export type UpgradeProductRequest = Record<string, never>;
 
 export interface UpgradeProductMachinePayload {
   current_version: string;

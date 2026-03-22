@@ -22,10 +22,38 @@ jobs:
         run: npm ci
         working-directory: mcp-server
 
+      - name: Lint
+        run: npm run lint
+        working-directory: mcp-server
+
       - name: Build
         run: npm run build
         working-directory: mcp-server
 
-      - name: Run unit tests
-        run: npm test
+      - name: Run unit tests with coverage
+        run: npm run test:coverage
         working-directory: mcp-server
+
+      - name: Print coverage summary
+        shell: bash
+        working-directory: mcp-server
+        run: |
+          set -euo pipefail
+          node -e 'const fs=require("node:fs"); const summary=JSON.parse(fs.readFileSync("coverage/coverage-summary.json","utf8")).total; for (const key of ["lines","statements","functions","branches"]) { const metric=summary[key]; console.log(key + ": " + metric.pct + "% (" + metric.covered + "/" + metric.total + ")"); }'
+          {
+            echo "## Coverage"
+            echo
+            echo "- Artifact: \`gojo-coverage\`"
+            echo "- Open the workflow run artifacts to download the full HTML and LCOV reports."
+            echo
+            echo "| Metric | Coverage |"
+            echo "|---|---:|"
+            node -e 'const fs=require("node:fs"); const summary=JSON.parse(fs.readFileSync("coverage/coverage-summary.json","utf8")).total; for (const key of ["lines","statements","functions","branches"]) { const metric=summary[key]; console.log("| " + key + " | " + metric.pct + "% |"); }'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gojo-coverage
+          path: mcp-server/coverage/**
+          if-no-files-found: error

@@ -804,7 +804,7 @@ export async function runCurrentGenerationConsistencyMaintenance(
     snapshotResult,
     patternIndexResult: patternIndexLoadResult,
   });
-  let nextSearch = deriveSearchFreshness(generationState, requestResult.value, snapshotResult.value, {
+  const nextSearch = deriveSearchFreshness(generationState, requestResult.value, snapshotResult.value, {
     requestResult,
     snapshotResult,
   });

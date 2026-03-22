@@ -33,6 +33,18 @@ jobs:
         run: npm ci
         working-directory: mcp-server
 
+      - name: Lint
+        run: npm run lint
+        working-directory: mcp-server
+
+      - name: Build
+        run: npm run build
+        working-directory: mcp-server
+
+      - name: Run unit tests
+        run: npm test
+        working-directory: mcp-server
+
       - name: Build bundled search helpers
         shell: bash
         run: |
