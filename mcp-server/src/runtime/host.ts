@@ -6,6 +6,7 @@ import {
   refreshRepoHandler,
   runHealthChecksHandler,
   serveMcpHandler,
+  upgradeProductHandler,
 } from './handlers.js';
 import type {
   ExecutionContext,
@@ -30,6 +31,7 @@ export class RuntimeHost {
 
   public constructor(private readonly dependencies: RuntimeDependencies) {
     this.register(getProductVersionHandler);
+    this.register(upgradeProductHandler);
     this.register(indexRepoHandler);
     this.register(refreshRepoHandler);
     this.register(exploreComponentHandler);

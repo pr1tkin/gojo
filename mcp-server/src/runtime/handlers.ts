@@ -2,6 +2,7 @@ import { getCurrentIndexHealth } from '../indexing/health.js';
 import { loadCurrentGenerationState } from '../indexing/generation-store.js';
 import { refreshIndexes } from '../indexing/refresh.js';
 import { getSymbolExplorationContext } from '../orchestrator/index.js';
+import { fetchLatestReleaseInfo, upgradeInstalledGojo } from '../product/release-channel.js';
 import type { RuntimeCapabilityHandler } from './types.js';
 import {
   type ExploreComponentRequest,
@@ -16,6 +17,8 @@ import {
   type RunHealthChecksResponse,
   type ServeMCPRequest,
   type ServeMCPResponse,
+  type UpgradeProductRequest,
+  type UpgradeProductResponse,
 } from './types.js';
 import { createRuntimeResponse } from './response.js';
 import { assessRuntimeStateFromHealth, detectRepositoryDrift } from './trust.js';
@@ -32,9 +35,43 @@ export const getProductVersionHandler: RuntimeCapabilityHandler<
 > = {
   capability: 'GetProductVersion',
   executionMode: 'one_shot',
-  async execute(_request, context) {
+  async execute(request, context) {
     const identity = context.dependencies.config.product.identity;
     const build = context.dependencies.config.product.buildMetadata;
+    let latestVersion: string | undefined;
+    let updateAvailable: boolean | undefined;
+    const warnings: string[] = [];
+    const findings = [
+      {
+        id: 'product-version',
+        title: 'Product version',
+        summary: `${identity.name} ${identity.version} using packaging model ${identity.packagingModel}.`,
+      },
+      {
+        id: 'build-metadata',
+        title: 'Build metadata',
+        summary: `${build.platform}/${build.arch} ${build.packagingMode} build at ${build.buildTimestamp}.`,
+      },
+    ];
+
+    if (request.checkLatest) {
+      try {
+        const latest = await fetchLatestReleaseInfo();
+        latestVersion = latest.version;
+        updateAvailable = latest.version !== identity.version;
+        findings.push({
+          id: 'latest-release',
+          title: 'Latest release',
+          summary: updateAvailable
+            ? `A newer release is available: ${latest.version}.`
+            : `${identity.version} is the latest published release.`,
+        });
+      } catch (error) {
+        warnings.push(
+          `Latest release check failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
 
     return createRuntimeResponse({
       capability: 'GetProductVersion',
@@ -43,18 +80,7 @@ export const getProductVersionHandler: RuntimeCapabilityHandler<
         title: identity.name,
         text: `${identity.name} ${formatProductVersion(identity.version)}`,
       },
-      findings: [
-        {
-          id: 'product-version',
-          title: 'Product version',
-          summary: `${identity.name} ${identity.version} using packaging model ${identity.packagingModel}.`,
-        },
-        {
-          id: 'build-metadata',
-          title: 'Build metadata',
-          summary: `${build.platform}/${build.arch} ${build.packagingMode} build at ${build.buildTimestamp}.`,
-        },
-      ],
+      findings,
       relatedEntities: [
         {
           kind: 'artifact',
@@ -67,7 +93,14 @@ export const getProductVersionHandler: RuntimeCapabilityHandler<
         { name: 'packaging_model', value: identity.packagingModel, importance: 'medium' },
         { name: 'git_sha', value: build.gitSha, importance: 'medium' },
         { name: 'packaging_mode', value: build.packagingMode, importance: 'medium' },
+        ...(latestVersion
+          ? [
+              { name: 'latest_version', value: latestVersion, importance: 'medium' as const },
+              { name: 'update_available', value: Boolean(updateAvailable), importance: 'high' as const },
+            ]
+          : []),
       ],
+      warnings,
       machinePayload: {
         product: identity.name,
         version: identity.version,
@@ -82,6 +115,67 @@ export const getProductVersionHandler: RuntimeCapabilityHandler<
           detected: build.helperPaths.length > 0,
         },
         is_dev: build.isDev,
+        ...(latestVersion ? { latest_version: latestVersion, update_available: Boolean(updateAvailable) } : {}),
+      },
+      trustLevel: 'high',
+      readinessState: 'ready',
+      confidence: 'high',
+      trust: 'high',
+    });
+  },
+};
+
+export const upgradeProductHandler: RuntimeCapabilityHandler<
+  UpgradeProductRequest,
+  UpgradeProductResponse
+> = {
+  capability: 'UpgradeProduct',
+  executionMode: 'one_shot',
+  async execute(_request, context) {
+    const currentVersion = context.dependencies.config.product.identity.version;
+    const installDir = context.dependencies.config.product.paths.packageRoot;
+    const result = await upgradeInstalledGojo(currentVersion, installDir);
+
+    return createRuntimeResponse({
+      capability: 'UpgradeProduct',
+      executionMode: 'one_shot',
+      summary: {
+        title: result.updated ? 'Upgrade completed' : 'Already up to date',
+        text: result.updated
+          ? `Upgraded Gojo from ${result.currentVersion} to ${result.latestVersion}.`
+          : `Gojo ${result.currentVersion} is already the latest published release.`,
+      },
+      findings: [
+        {
+          id: 'current-version',
+          title: 'Current version',
+          summary: result.currentVersion,
+        },
+        {
+          id: 'latest-version',
+          title: 'Latest release',
+          summary: result.latestVersion,
+        },
+      ],
+      relatedEntities: [
+        {
+          kind: 'artifact',
+          name: 'install-root',
+          path: result.installDir,
+        },
+      ],
+      signals: [
+        { name: 'updated', value: result.updated, importance: 'high' },
+        { name: 'current_version', value: result.currentVersion, importance: 'medium' },
+        { name: 'latest_version', value: result.latestVersion, importance: 'high' },
+      ],
+      warnings: [],
+      details: result.installerOutput ? { installerOutput: result.installerOutput } : undefined,
+      machinePayload: {
+        current_version: result.currentVersion,
+        latest_version: result.latestVersion,
+        install_dir: result.installDir,
+        updated: result.updated,
       },
       trustLevel: 'high',
       readinessState: 'ready',

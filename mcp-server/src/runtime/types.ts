@@ -89,6 +89,7 @@ export interface RuntimeCapabilityHandler<TRequest, TResponse extends RuntimeRes
 
 export type RuntimeCapabilityName =
   | 'GetProductVersion'
+  | 'UpgradeProduct'
   | 'IndexRepo'
   | 'RefreshRepo'
   | 'ExploreComponent'
@@ -100,7 +101,9 @@ export type RuntimeCapabilityName =
   | 'RunDoctor'
   | 'TraceFlow';
 
-export interface GetProductVersionRequest {}
+export interface GetProductVersionRequest {
+  checkLatest?: boolean;
+}
 
 export interface GetProductVersionMachinePayload {
   product: string;
@@ -116,9 +119,22 @@ export interface GetProductVersionMachinePayload {
     detected: boolean;
   };
   is_dev: boolean;
+  latest_version?: string;
+  update_available?: boolean;
 }
 
 export type GetProductVersionResponse = RuntimeResponse<GetProductVersionMachinePayload>;
+
+export interface UpgradeProductRequest {}
+
+export interface UpgradeProductMachinePayload {
+  current_version: string;
+  latest_version: string;
+  install_dir: string;
+  updated: boolean;
+}
+
+export type UpgradeProductResponse = RuntimeResponse<UpgradeProductMachinePayload>;
 
 export interface IndexRepoRequest {
   repo?: RepoTarget;
@@ -248,6 +264,7 @@ export type TraceFlowResponse = RuntimeResponse;
 
 export interface RuntimeCapabilityRequestMap {
   GetProductVersion: GetProductVersionRequest;
+  UpgradeProduct: UpgradeProductRequest;
   IndexRepo: IndexRepoRequest;
   RefreshRepo: RefreshRepoRequest;
   ExploreComponent: ExploreComponentRequest;
@@ -262,6 +279,7 @@ export interface RuntimeCapabilityRequestMap {
 
 export interface RuntimeCapabilityResponseMap {
   GetProductVersion: GetProductVersionResponse;
+  UpgradeProduct: UpgradeProductResponse;
   IndexRepo: IndexRepoResponse;
   RefreshRepo: RefreshRepoResponse;
   ExploreComponent: ExploreComponentResponse;

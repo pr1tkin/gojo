@@ -8,6 +8,12 @@ export const runtimeCapabilityDefinitions: RuntimeCapabilityDefinition[] = [
     implemented: true,
   },
   {
+    name: 'UpgradeProduct',
+    executionMode: 'one_shot',
+    description: 'Download and install the latest published Gojo release into the current install root.',
+    implemented: true,
+  },
+  {
     name: 'IndexRepo',
     executionMode: 'one_shot',
     description: 'Build or refresh repository index artifacts required for Gojo runtime flows.',

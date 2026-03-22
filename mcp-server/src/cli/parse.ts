@@ -1,7 +1,8 @@
 import type { ParsedCliResult } from './types.js';
 
 const usageText = `Usage:
-  gojo [--json] version
+  gojo [--json] version [--check-latest]
+  gojo [--json] upgrade
   gojo [--repo <repo-id-or-path>] [--json] [--debug] index [repo-path]
   gojo [--repo <repo-id-or-path>] [--json] [--debug] refresh [repo-path]
   gojo [--repo <repo-id-or-path>] [--json] [--debug] explore <target>
@@ -14,13 +15,14 @@ function isFlag(value: string): boolean {
 }
 
 function parseGlobalOptions(argv: string[]): {
-  options: { repo?: string; json: boolean; debug: boolean };
+  options: { repo?: string; json: boolean; debug: boolean; checkLatest: boolean };
   rest: string[];
 } {
   const options = {
     json: false,
     debug: false,
-  } as { repo?: string; json: boolean; debug: boolean };
+    checkLatest: false,
+  } as { repo?: string; json: boolean; debug: boolean; checkLatest: boolean };
   const rest: string[] = [];
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -33,6 +35,11 @@ function parseGlobalOptions(argv: string[]): {
 
     if (token === '--debug') {
       options.debug = true;
+      continue;
+    }
+
+    if (token === '--check-latest') {
+      options.checkLatest = true;
       continue;
     }
 
@@ -88,6 +95,20 @@ export function parseCliArgs(argv: string[]): ParsedCliResult {
       command: {
         name: 'version',
         capability: 'GetProductVersion',
+        request: {
+          ...(options.checkLatest ? { checkLatest: true } : {}),
+        },
+        executionContext,
+        renderResult: true,
+      },
+    };
+  }
+
+  if (command === 'upgrade') {
+    return {
+      command: {
+        name: 'upgrade',
+        capability: 'UpgradeProduct',
         request: {},
         executionContext,
         renderResult: true,
