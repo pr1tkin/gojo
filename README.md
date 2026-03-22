@@ -61,6 +61,60 @@ when an agent or developer needs grounded context, not guesses.
 
 ---
 
+## What Gojo is (and is not)
+
+### What Gojo is designed for
+
+Gojo is designed for:
+
+- TypeScript and JavaScript codebases
+- modern component-driven applications
+- React and Next.js style ecosystems
+- symbol-aware exploration before code changes
+- seeing how files, symbols, and precedents connect
+
+Gojo works best when the question is:
+
+- what is this thing
+- where does it connect
+- what similar implementation already exists
+- what else moves if I change it
+
+### What Gojo is not
+
+Gojo is not:
+
+- a full multi-language code intelligence engine
+- a compiler or type-checker
+- a guarantee that every reference will resolve perfectly
+- a replacement for language servers
+
+It is built for grounded visibility, not total semantic omniscience.
+
+### Where to be careful
+
+- dynamic imports may not resolve completely
+- alias resolution can be partial
+- pattern detection is heuristic
+- similarity ranking is approximate
+
+That does not make the output useless.
+It means you should read it the way Gojo intends: as grounded structure with explicit edges, not magic.
+
+### How to interpret results
+
+Gojo shows you what it can see — not what it guesses perfectly.
+
+- some connections are exact
+- some are inferred from structure
+- some are best-effort heuristics
+
+Use trust and readiness signals as part of the answer.
+When Gojo is certain, it should look certain.
+When it is not, it should say so.
+
+---
+
 ## 🛠️ Core Capabilities
 
 Gojo helps agents:
