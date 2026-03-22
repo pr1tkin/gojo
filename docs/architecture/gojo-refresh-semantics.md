@@ -55,6 +55,12 @@ Examples:
 - `stale` -> prefer `gojo refresh`
 - `ready` -> no corrective command required
 
+Search freshness rule:
+
+- published generation + required artifacts + search freshness missing/late -> `stale`
+- missing published generation or unreadable generation metadata -> `unknown`
+- missing required artifacts or contradictory generation data -> `inconsistent`
+
 ## Command loop
 
 The intended product loop is now:

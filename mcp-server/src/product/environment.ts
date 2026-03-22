@@ -105,23 +105,33 @@ function resolveDefaultDataDir(env: NodeJS.ProcessEnv, homeDir: string): string 
 function resolveProductPaths(env: NodeJS.ProcessEnv, packageRoot: string): ProductPaths {
   const homeDir = resolveDefaultHomeDir(env);
   const stateBaseDir = resolveStateBaseDir(env);
+  const usesExplicitHome = Boolean(env.GOJO_HOME?.trim());
 
   const configDir = path.resolve(
     env.GOJO_CONFIG_DIR?.trim() ||
-      (process.platform === 'win32'
+      (usesExplicitHome
         ? path.join(homeDir, 'config')
-        : path.join(env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), PRODUCT_NAME)),
+        : process.platform === 'win32'
+          ? path.join(homeDir, 'config')
+          : path.join(env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), PRODUCT_NAME)),
   );
   const dataDir = path.resolve(resolveDefaultDataDir(env, homeDir));
   const indexesDir = path.resolve(env.GOJO_INDEXES_DIR?.trim() || path.join(dataDir, 'indexes'));
   const cacheDir = path.resolve(
     env.GOJO_CACHE_DIR?.trim() ||
-      (process.platform === 'win32'
+      (usesExplicitHome
         ? path.join(homeDir, 'cache')
-        : path.join(env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), PRODUCT_NAME)),
+        : process.platform === 'win32'
+          ? path.join(homeDir, 'cache')
+          : path.join(env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), PRODUCT_NAME)),
   );
-  const logDir = path.resolve(env.GOJO_LOG_DIR?.trim() || path.join(stateBaseDir, 'logs'));
-  const runtimeDir = path.resolve(env.GOJO_RUNTIME_DIR?.trim() || path.join(stateBaseDir, 'runtime'));
+  const logDir = path.resolve(
+    env.GOJO_LOG_DIR?.trim() || (usesExplicitHome ? path.join(homeDir, 'logs') : path.join(stateBaseDir, 'logs')),
+  );
+  const runtimeDir = path.resolve(
+    env.GOJO_RUNTIME_DIR?.trim() ||
+      (usesExplicitHome ? path.join(homeDir, 'runtime') : path.join(stateBaseDir, 'runtime')),
+  );
   const tempDir = path.resolve(env.GOJO_TEMP_DIR?.trim() || path.join(runtimeDir, 'tmp'));
   const searchHelpersDir = path.resolve(
     env.GOJO_SEARCH_HELPERS_DIR?.trim() || path.join(packageRoot, 'bin', 'search'),

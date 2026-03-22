@@ -76,4 +76,34 @@ describe('product environment', () => {
     expect(paths.runtimeDir).toBe(path.join(tempRoot, 'state-root', 'gojo', 'runtime'));
     expect(paths.tempDir).toBe(path.join(tempRoot, 'state-root', 'gojo', 'runtime', 'tmp'));
   });
+
+  it('uses GOJO_HOME as the default base for runtime state on Linux when no per-dir overrides are set', async () => {
+    const tempRoot = await createTempDirectory();
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    const paths = resolveProductPathsForEnvironment({
+      ...process.env,
+      GOJO_HOME: path.join(tempRoot, 'isolated-home'),
+      GOJO_PACKAGE_ROOT: path.join(tempRoot, 'package-root'),
+      GOJO_DATA_DIR: undefined,
+      GOJO_INDEXES_DIR: undefined,
+      GOJO_CONFIG_DIR: undefined,
+      GOJO_CACHE_DIR: undefined,
+      GOJO_LOG_DIR: undefined,
+      GOJO_RUNTIME_DIR: undefined,
+      GOJO_TEMP_DIR: undefined,
+      XDG_CONFIG_HOME: path.join(tempRoot, 'xdg-config'),
+      XDG_DATA_HOME: path.join(tempRoot, 'xdg-data'),
+      XDG_CACHE_HOME: path.join(tempRoot, 'xdg-cache'),
+      XDG_STATE_HOME: path.join(tempRoot, 'xdg-state'),
+    });
+
+    expect(paths.configDir).toBe(path.join(tempRoot, 'isolated-home', 'config'));
+    expect(paths.dataDir).toBe(path.join(tempRoot, 'isolated-home', 'data'));
+    expect(paths.cacheDir).toBe(path.join(tempRoot, 'isolated-home', 'cache'));
+    expect(paths.logDir).toBe(path.join(tempRoot, 'isolated-home', 'logs'));
+    expect(paths.runtimeDir).toBe(path.join(tempRoot, 'isolated-home', 'runtime'));
+    expect(paths.tempDir).toBe(path.join(tempRoot, 'isolated-home', 'runtime', 'tmp'));
+  });
 });

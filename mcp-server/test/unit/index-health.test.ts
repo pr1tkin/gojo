@@ -8,6 +8,7 @@ import {
   getCurrentHealthSnapshotFilePath,
   getGenerationArtifactFilePath,
   loadCurrentGenerationState,
+  updateGenerationState,
 } from '../../src/indexing/generation-store.js';
 import { runCurrentGenerationConsistencyMaintenance } from '../../src/indexing/consistency.js';
 import { getCurrentIndexHealth, loadCurrentIndexHealthSnapshot } from '../../src/indexing/health.js';
@@ -142,6 +143,64 @@ describe.sequential('index health', () => {
     expect(health.trustState).toBe('stale-search');
     expect(health.search?.status).toBe('pending');
     expect(health.reasons.join(' ')).toContain('coordination markers are not trustworthy');
+  });
+
+  it('keeps a valid published generation stale instead of unknown when search freshness inputs are absent', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export function alpha() { return "a"; }');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+
+    const state = await loadCurrentGenerationState();
+    if (!state) {
+      throw new Error('expected a current generation');
+    }
+
+    await updateGenerationState(state.generationId, {
+      ...state,
+      search: {
+        ...state.search,
+        status: 'unknown',
+        requestedAt: undefined,
+        refreshedAt: undefined,
+        details: 'search freshness metadata not available in this generation',
+        snapshotId: undefined,
+      },
+    });
+
+    await fs.rm(path.join(tempRoot, 'gojo', 'runtime', 'coordination', 'search-refresh-request.json'), {
+      force: true,
+    });
+    await fs.rm(path.join(tempRoot, 'gojo', 'runtime', 'coordination', 'zoekt-refresh-state.json'), {
+      force: true,
+    });
+
+    const health = await getCurrentIndexHealth();
+    const snapshot = await loadCurrentIndexHealthSnapshot();
+
+    expect(health.generationStatus).toBe('ready');
+    expect(health.search?.status).toBe('unknown');
+    expect(health.trustState).toBe('stale-search');
+    expect(health.suitableForAgentWorkflows).toBe(true);
+    expect(snapshot?.trustState).toBe('stale-search');
+    expect(snapshot?.generationStatus).toBe('ready');
+  });
+
+  it('reports unknown only when no published generation exists', async () => {
+    const tempRoot = await createTempDirectory();
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    const health = await getCurrentIndexHealth();
+    const snapshot = await loadCurrentIndexHealthSnapshot();
+
+    expect(health.trustState).toBe('unknown');
+    expect(health.generationStatus).toBe('missing');
+    expect(snapshot?.trustState).toBe('unknown');
   });
 
   it('downgrades trust to inconsistent when the published symbol index is missing', async () => {

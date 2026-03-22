@@ -24,7 +24,7 @@ Gojo is stale when artifacts exist, but freshness is behind current state.
 
 Typical causes:
 
-- search freshness is pending, stale, or otherwise not synchronized
+- search freshness is pending, stale, unknown, failed, or otherwise not synchronized
 - maintenance recommends rebuild work before relying on results
 - repo files changed after the last published generation
 
@@ -46,11 +46,28 @@ Typical causes:
 
 - no published generation exists
 - generation metadata is unreadable
-- the runtime cannot establish conservative freshness information
+- required state inputs for the published generation are absent before a trustworthy generation can be established
 
 ## How state is computed
 
 Runtime state is derived from the health subsystem and optional repo-scoped drift detection.
+
+`current-health.json` is the authoritative persisted product state snapshot.
+
+Canonical facts come from:
+
+- current generation pointer
+- published generation metadata
+- required artifact presence and consistency checks
+- search freshness attached to the published generation
+
+Secondary/advisory signals are:
+
+- search coordination markers
+- repo-scoped filesystem drift
+- maintenance warnings
+
+Advisory signals may degrade `ready` to `stale`, but they must not erase the existence of a valid published generation and turn the system into `unknown`.
 
 Inputs:
 
@@ -93,6 +110,8 @@ When a repo target is supplied, health output should:
 `explore` inherits the same readiness model.
 
 Exact symbol resolution does not override stale or inconsistent runtime state.
+
+If `explore` resolves a symbol from a valid published generation, the reported readiness may still be `stale`, but it must not collapse to `unknown`.
 
 ## State vs trust
 

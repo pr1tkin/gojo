@@ -37,6 +37,7 @@ The runtime can answer, but the answer may be based on older or partially refres
 Typical conditions:
 
 - search freshness is `stale-search`
+- search freshness is unknown or delayed for an otherwise valid published generation
 - repair is recommended
 - degraded health state
 - repo-scoped filesystem drift is detected after indexing
@@ -59,7 +60,7 @@ Typical conditions:
 
 - no published generation exists
 - generation metadata is unreadable
-- the runtime cannot determine freshness conservatively
+- required state inputs are absent before a trustworthy published generation can be established
 
 ## Trust level mapping
 
@@ -69,6 +70,11 @@ The current mapping is intentionally simple.
 - `degraded`, `repair-recommended`, `stale-search` -> `readiness_state=stale`, `trust_level=medium`, `confidence=medium`
 - `inconsistent` -> `readiness_state=inconsistent`, `trust_level=degraded`, `confidence=low`
 - `unknown` -> `readiness_state=unknown`, `trust_level=low`, `confidence=low`
+
+Important invariant:
+
+- once a valid published generation exists, search freshness problems degrade trust to `stale`
+- they do not erase published-generation truth and turn the runtime into `unknown`
 
 Additional downgrade rules:
 
@@ -91,6 +97,8 @@ That means:
 `RunHealthChecks` remains the source of readiness truth.
 
 It now uses the same trust/readiness fields as other runtime responses and can include repo-scoped drift warnings when a repo target is supplied.
+
+`health`, `explore`, `index`, and `refresh` all read from the same health-derived readiness/trust contract. They may differ in warnings or result-specific confidence, but not in the underlying readiness truth.
 
 ## Repo drift handling
 

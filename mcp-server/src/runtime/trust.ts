@@ -9,7 +9,7 @@ import type { RuntimeReadinessState, RuntimeTrustLevel } from './types.js';
 // - ready: published artifacts exist, search is synchronized, and no known drift exists
 // - stale: artifacts exist, but freshness or synchronization is behind current repo state
 // - inconsistent: required runtime data is missing or contradictory
-// - unknown: Gojo cannot determine a trustworthy state yet
+// - unknown: Gojo does not have a trustworthy published generation yet
 //
 // Trust and confidence are derived from the same readiness inputs so that
 // index, health, and explore cannot describe different system states.
@@ -86,7 +86,7 @@ function explanationFromHealth(health: IndexHealthSummary): string {
     case 'healthy':
       return 'Gojo indexes and search data are synchronized.';
     case 'stale-search':
-      return 'Search index is not yet synchronized with the latest Gojo generation.';
+      return 'Gojo has a valid published generation, but search freshness is not yet fully synchronized or confirmed.';
     case 'repair-recommended':
       return 'Gojo data is available, but maintenance recommends rebuilding before relying on it.';
     case 'degraded':
