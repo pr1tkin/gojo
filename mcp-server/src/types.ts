@@ -1,6 +1,10 @@
 export type NodeEnv = 'development' | 'test' | 'production';
 
 export type GojoPackagingModel = 'single_surface_with_packaged_runtime';
+export type PackagingMode = 'dev' | 'release';
+export type HelperPackagingMode = 'bundled' | 'external' | 'unknown';
+export type BuildPlatform = 'linux' | 'darwin' | 'windows' | 'unknown';
+export type BuildArch = 'x64' | 'arm64' | 'unknown';
 
 export type SearchPackagingStrategy = 'bundled_helper_binaries';
 export type SearchRuntimeMode = 'development' | 'packaged';
@@ -9,6 +13,19 @@ export interface ProductIdentity {
   name: string;
   version: string;
   packagingModel: GojoPackagingModel;
+}
+
+export interface BuildMetadata {
+  productName: string;
+  version: string;
+  gitSha: string;
+  buildTimestamp: string;
+  platform: BuildPlatform;
+  arch: BuildArch;
+  packagingMode: PackagingMode;
+  helperPackaging: HelperPackagingMode;
+  helperPaths: string[];
+  isDev: boolean;
 }
 
 export interface ProductPaths {
@@ -46,6 +63,7 @@ export interface AppConfig {
   includeInternalTools: boolean;
   product: {
     identity: ProductIdentity;
+    buildMetadata: BuildMetadata;
     paths: ProductPaths;
   };
 }

@@ -1,19 +1,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-import type {
-  GojoPackagingModel,
-  ProductIdentity,
-  ProductPaths,
-  SearchRuntimeConfig,
-  SearchRuntimeMode,
-} from '../types.js';
-
-const PRODUCT_NAME = 'gojo';
-const PRODUCT_VERSION_FALLBACK = '1.0.0';
-const PACKAGING_MODEL: GojoPackagingModel = 'single_surface_with_packaged_runtime';
+import type { ProductIdentity, ProductPaths, SearchRuntimeConfig, SearchRuntimeMode } from '../types.js';
+import { PRODUCT_NAME } from '../internal/product/constants.js';
+import { resolvePackageRootFromEnv } from '../internal/product/packageRootResolver.js';
+import { resolveProductIdentity as resolveResolvedProductIdentity } from '../internal/product/productIdentityResolver.js';
 
 export class LegacyStorageError extends Error {
   constructor(legacyPath: string) {
@@ -21,30 +13,6 @@ export class LegacyStorageError extends Error {
       `Legacy .data directory detected at ${legacyPath}. This Gojo version no longer supports legacy storage. Please migrate or re-index.`,
     );
     this.name = 'LegacyStorageError';
-  }
-}
-
-function resolvePackageRoot(env: NodeJS.ProcessEnv): string {
-  if (env.GOJO_PACKAGE_ROOT?.trim()) {
-    return path.resolve(env.GOJO_PACKAGE_ROOT.trim());
-  }
-
-  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(moduleDirectory, '../..');
-}
-
-function readPackageVersion(packageRoot: string, env: NodeJS.ProcessEnv): string {
-  if (env.GOJO_VERSION?.trim()) {
-    return env.GOJO_VERSION.trim();
-  }
-
-  try {
-    const packageJson = JSON.parse(
-      fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'),
-    ) as { version?: string };
-    return packageJson.version?.trim() || PRODUCT_VERSION_FALLBACK;
-  } catch {
-    return PRODUCT_VERSION_FALLBACK;
   }
 }
 
@@ -169,18 +137,13 @@ export function ensureProductDirectories(paths: ProductPaths): void {
 }
 
 export function resolveProductIdentity(env: NodeJS.ProcessEnv = process.env): ProductIdentity {
-  const packageRoot = resolvePackageRoot(env);
-  return {
-    name: PRODUCT_NAME,
-    version: readPackageVersion(packageRoot, env),
-    packagingModel: PACKAGING_MODEL,
-  };
+  return resolveResolvedProductIdentity(env).identity;
 }
 
 export function resolveProductPathsForEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ): ProductPaths {
-  const packageRoot = resolvePackageRoot(env);
+  const packageRoot = resolvePackageRootFromEnv(env);
   return resolveProductPaths(env, packageRoot);
 }
 
@@ -193,7 +156,7 @@ export function resolveDefaultReposRoot(
     return cwdRepos;
   }
 
-  const packageRoot = resolvePackageRoot(env);
+  const packageRoot = resolvePackageRootFromEnv(env);
   const packageSiblingRepos = path.resolve(packageRoot, '..', 'repos');
   if (fs.existsSync(packageSiblingRepos) && fs.statSync(packageSiblingRepos).isDirectory()) {
     return packageSiblingRepos;

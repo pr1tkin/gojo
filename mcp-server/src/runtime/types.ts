@@ -103,8 +103,19 @@ export type RuntimeCapabilityName =
 export interface GetProductVersionRequest {}
 
 export interface GetProductVersionMachinePayload {
-  name: string;
+  product: string;
   version: string;
+  git_sha: string;
+  build_timestamp: string;
+  platform: string;
+  arch: string;
+  packaging_mode: string;
+  helper: {
+    mode: string;
+    paths: string[];
+    detected: boolean;
+  };
+  is_dev: boolean;
 }
 
 export type GetProductVersionResponse = RuntimeResponse<GetProductVersionMachinePayload>;

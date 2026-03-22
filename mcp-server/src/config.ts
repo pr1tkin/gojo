@@ -3,10 +3,10 @@ import path from 'node:path';
 import {
   ensureProductDirectories,
   resolveDefaultReposRoot,
-  resolveProductIdentity,
   resolveProductPathsForEnvironment,
   resolveSearchRuntimeConfig,
 } from './product/environment.js';
+import { resolveProductIdentity } from './internal/product/productIdentityResolver.js';
 import type { AppConfig, NodeEnv } from './types.js';
 
 const DEFAULT_NODE_ENV: NodeEnv = 'development';
@@ -68,7 +68,7 @@ function parseBooleanFlag(value: string | undefined, fallback: boolean): boolean
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const productIdentity = resolveProductIdentity(env);
+  const product = resolveProductIdentity(env);
   const productPaths = resolveProductPathsForEnvironment(env);
   ensureProductDirectories(productPaths);
   const search = resolveSearchRuntimeConfig(env);
@@ -80,7 +80,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     search,
     includeInternalTools: parseBooleanFlag(env.GOJO_INCLUDE_INTERNAL_TOOLS, DEFAULT_INCLUDE_INTERNAL_TOOLS),
     product: {
-      identity: productIdentity,
+      identity: product.identity,
+      buildMetadata: product.buildMetadata,
       paths: productPaths,
     },
   };

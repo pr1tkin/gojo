@@ -22,6 +22,10 @@ import { assessRuntimeStateFromHealth, detectRepositoryDrift } from './trust.js'
 import { serveMcpRuntime } from './mcp-service.js';
 import { inspectSearchRuntime } from './search-service.js';
 
+function formatProductVersion(version: string): string {
+  return version.startsWith('v') ? version : `v${version}`;
+}
+
 export const getProductVersionHandler: RuntimeCapabilityHandler<
   GetProductVersionRequest,
   GetProductVersionResponse
@@ -30,19 +34,25 @@ export const getProductVersionHandler: RuntimeCapabilityHandler<
   executionMode: 'one_shot',
   async execute(_request, context) {
     const identity = context.dependencies.config.product.identity;
+    const build = context.dependencies.config.product.buildMetadata;
 
     return createRuntimeResponse({
       capability: 'GetProductVersion',
       executionMode: 'one_shot',
       summary: {
         title: identity.name,
-        text: `${identity.name} v${identity.version}`,
+        text: `${identity.name} ${formatProductVersion(identity.version)}`,
       },
       findings: [
         {
           id: 'product-version',
           title: 'Product version',
           summary: `${identity.name} ${identity.version} using packaging model ${identity.packagingModel}.`,
+        },
+        {
+          id: 'build-metadata',
+          title: 'Build metadata',
+          summary: `${build.platform}/${build.arch} ${build.packagingMode} build at ${build.buildTimestamp}.`,
         },
       ],
       relatedEntities: [
@@ -55,10 +65,23 @@ export const getProductVersionHandler: RuntimeCapabilityHandler<
       signals: [
         { name: 'version', value: identity.version, importance: 'high' },
         { name: 'packaging_model', value: identity.packagingModel, importance: 'medium' },
+        { name: 'git_sha', value: build.gitSha, importance: 'medium' },
+        { name: 'packaging_mode', value: build.packagingMode, importance: 'medium' },
       ],
       machinePayload: {
-        name: identity.name,
+        product: identity.name,
         version: identity.version,
+        git_sha: build.gitSha,
+        build_timestamp: build.buildTimestamp,
+        platform: build.platform,
+        arch: build.arch,
+        packaging_mode: build.packagingMode,
+        helper: {
+          mode: build.helperPackaging,
+          paths: build.helperPaths,
+          detected: build.helperPaths.length > 0,
+        },
+        is_dev: build.isDev,
       },
       trustLevel: 'high',
       readinessState: 'ready',
