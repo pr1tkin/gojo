@@ -42,7 +42,7 @@ function createDeferred(): {
 }
 
 async function listGenerationDirectories(tempRoot: string): Promise<string[]> {
-  const directory = path.join(tempRoot, '.data', 'generations');
+  const directory = path.join(tempRoot, 'gojo', 'data', 'indexes', 'generations');
 
   try {
     const entries = await fs.readdir(directory, { withFileTypes: true });

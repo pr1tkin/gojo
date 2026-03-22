@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getIndexesDirectory,
+  getTempDirectory,
   getGenerationArtifactFilePath,
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
@@ -25,11 +27,11 @@ export interface PatternIndexLoadResult {
 }
 
 function getPatternDirectory(): string {
-  return path.resolve(process.cwd(), '.data');
+  return getIndexesDirectory();
 }
 
 function getPatternTempFilePath(): string {
-  return path.join(getPatternDirectory(), 'pattern-candidates.tmp.json');
+  return path.join(getTempDirectory(), 'pattern-candidates.tmp.json');
 }
 
 function getPatternFilePathInternal(): string {

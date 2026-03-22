@@ -4,15 +4,28 @@
 
 ---
 
-## 🚀 Start
+## 🚀 Product Start
+
+Official product entrypoints:
+
+- `gojo`
+- `gojo mcp serve`
+
+Repository-local example:
+
+```bash
+cd mcp-server
+npm run build
+npm exec gojo -- health
+npm exec gojo -- mcp serve
+```
+
+## 🧰 Dev Stack
+
+Docker Compose is retained for development and infrastructure debugging only.
 
 ```bash
 docker compose up -d --build
-```
-
-Logs:
-
-```bash
 docker compose logs zoekt
 docker compose logs zoekt-indexer
 docker compose logs mcp-server
@@ -45,8 +58,8 @@ There are **two independent pipelines**:
 Outputs:
 
 ```
-/app/.data/current-generation.json
-/app/.data/current-health.json
+<gojo-home>/data/indexes/current-generation.json
+<gojo-home>/data/current-health.json
 ```
 
 ---
@@ -57,7 +70,6 @@ Volumes:
 
 - mcp-server-data
 - zoekt-index
-- refresh-coordination
 
 ---
 
@@ -88,7 +100,7 @@ GOJO_INCLUDE_INTERNAL_TOOLS=true
 Check:
 
 ```
-/app/.data/current-health.json
+<gojo-data>/current-health.json
 ```
 
 States:
@@ -104,8 +116,9 @@ States:
 
 ### Search outdated
 
-- run indexer once
-- check logs
+- run `gojo refresh --repo <repo>`
+- check health
+- check dev-stack logs only if you are debugging the Compose environment
 
 ### MCP weak output
 

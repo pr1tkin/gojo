@@ -33,7 +33,7 @@ async function writeRepositoryFile(
 }
 
 async function writeSearchSnapshot(cwd: string, snapshot: Record<string, unknown>): Promise<void> {
-  const filePath = path.join(cwd, '.data', 'coordination', 'zoekt-refresh-state.json');
+  const filePath = path.join(cwd, 'gojo', 'runtime', 'coordination', 'zoekt-refresh-state.json');
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, JSON.stringify(snapshot, null, 2), 'utf8');
 }

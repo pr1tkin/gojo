@@ -1,11 +1,53 @@
 export type NodeEnv = 'development' | 'test' | 'production';
 
+export type GojoPackagingModel = 'single_surface_with_packaged_runtime';
+
+export type SearchPackagingStrategy = 'bundled_helper_binaries';
+export type SearchRuntimeMode = 'development' | 'packaged';
+
+export interface ProductIdentity {
+  name: string;
+  version: string;
+  packagingModel: GojoPackagingModel;
+}
+
+export interface ProductPaths {
+  packageRoot: string;
+  homeDir: string;
+  configDir: string;
+  dataDir: string;
+  indexesDir: string;
+  cacheDir: string;
+  logDir: string;
+  runtimeDir: string;
+  tempDir: string;
+  searchHelpersDir: string;
+}
+
+export interface SearchRuntimeConfig {
+  baseUrl: string;
+  mode: SearchRuntimeMode;
+  packagingStrategy: SearchPackagingStrategy;
+  helperBinaryDir: string;
+  helperManifestPath: string;
+  indexDirectory: string;
+  helperBinaries: {
+    webserver: string;
+    indexer: string;
+  };
+}
+
 export interface AppConfig {
   nodeEnv: NodeEnv;
   port: number;
   reposRoot: string;
   zoektBaseUrl: string;
+  search: SearchRuntimeConfig;
   includeInternalTools: boolean;
+  product: {
+    identity: ProductIdentity;
+    paths: ProductPaths;
+  };
 }
 
 export type ToolVisibility = 'public' | 'internal';

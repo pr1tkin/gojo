@@ -120,7 +120,7 @@ export function getToolRegistrations(): ToolRegistration[] {
     {
       definition: searchCodeToolDefinition,
       register: (server, config) =>
-        registerTool(server, searchCodeToolDefinition, async (input) => runSearchCodeTool(config.zoektBaseUrl, input)),
+        registerTool(server, searchCodeToolDefinition, async (input) => runSearchCodeTool(config.search.baseUrl, input)),
     },
     {
       definition: openFileToolDefinition,
@@ -141,7 +141,7 @@ export function getToolRegistrations(): ToolRegistration[] {
       definition: findReferencesToolDefinition,
       register: (server, config) =>
         registerTool(server, findReferencesToolDefinition, async (input) =>
-          runFindReferencesTool(config.reposRoot, config.zoektBaseUrl, input),
+          runFindReferencesTool(config.reposRoot, config.search.baseUrl, input),
         ),
     },
     {

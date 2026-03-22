@@ -1,3 +1,6 @@
+# Development-only local stack.
+# This file is not the primary product entrypoint. Official product usage should
+# go through the `gojo` CLI, especially `gojo mcp serve` for MCP serving.
 services:
   zoekt:
     build:
@@ -18,19 +21,19 @@ services:
     volumes:
       - ./repos:/repos:ro
       - zoekt-index:/data/index
-      - refresh-coordination:/data/coordination
 
   mcp-server:
     build:
       context: ./mcp-server
     depends_on:
       - zoekt
+    environment:
+      GOJO_HOME: /app/gojo
+    command: ["gojo", "mcp", "serve"]
     volumes:
       - ./repos:/repos:ro
-      - mcp-server-data:/app/.data
-      - refresh-coordination:/app/.data/coordination
+      - mcp-server-data:/app/gojo
 
 volumes:
   zoekt-index:
-  refresh-coordination:
   mcp-server-data:

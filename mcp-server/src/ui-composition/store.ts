@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getIndexesDirectory,
+  getTempDirectory,
   getGenerationArtifactFilePath,
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
@@ -15,11 +17,11 @@ import {
 } from './types.js';
 
 function getUiCompositionDirectory(): string {
-  return path.resolve(process.cwd(), '.data');
+  return getIndexesDirectory();
 }
 
 function getUiCompositionTempFilePath(): string {
-  return path.join(getUiCompositionDirectory(), 'ui-composition.tmp.json');
+  return path.join(getTempDirectory(), 'ui-composition.tmp.json');
 }
 
 function getUiCompositionFilePathInternal(): string {

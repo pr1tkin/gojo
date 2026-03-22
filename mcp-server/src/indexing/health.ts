@@ -179,6 +179,10 @@ function determineTrustState(input: {
   errors: string[];
   reasons: string[];
 }): IndexHealthTrustState {
+  // Canonical contract:
+  // - unknown: no trustworthy published generation exists yet, or generation metadata is absent
+  // - inconsistent: published generation exists, but required facts/artifacts are broken
+  // - stale-search/degraded/repair-recommended: published generation exists, but freshness or maintenance is behind
   if (!input.hasGeneration) {
     return 'unknown';
   }
@@ -208,15 +212,10 @@ function determineTrustState(input: {
   }
 
   if (input.search && input.search.status !== 'ready') {
-    if (
-      input.search.status === 'pending' ||
-      input.search.status === 'stale' ||
-      input.search.status === 'failed'
-    ) {
-      return 'stale-search';
-    }
-
-    return 'unknown';
+    // Search freshness is advisory about synchronization, not existence. Once a
+    // published generation exists, non-ready search must degrade to stale rather
+    // than erasing that ground truth.
+    return 'stale-search';
   }
 
   if (
@@ -545,7 +544,8 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     lastRefreshFailure: activeRefreshFailure,
     trustState,
     suitableForAgentWorkflows:
-      (trustState === 'healthy' || trustState === 'degraded') &&
+      trustState !== 'unknown' &&
+      trustState !== 'inconsistent' &&
       criticalData.strongestTrustImpact === 'none' &&
       !(
         state.highRiskRefreshValidation?.status === 'degraded' ||

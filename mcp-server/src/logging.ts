@@ -26,3 +26,9 @@ export const stderrLogger: Logger = {
   error: (message?: unknown, ...optionalParams: unknown[]) =>
     writeToStderr('error', [message, ...optionalParams]),
 };
+
+export const silentLogger: Logger = {
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+};

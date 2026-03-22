@@ -8,6 +8,7 @@ import {
   getCurrentHealthSnapshotFilePath,
   getGenerationArtifactFilePath,
   loadCurrentGenerationState,
+  updateGenerationState,
 } from '../../src/indexing/generation-store.js';
 import { runCurrentGenerationConsistencyMaintenance } from '../../src/indexing/consistency.js';
 import { getCurrentIndexHealth, loadCurrentIndexHealthSnapshot } from '../../src/indexing/health.js';
@@ -33,7 +34,7 @@ async function writeRepositoryFile(
 }
 
 async function writeSearchSnapshot(cwd: string, snapshot: Record<string, unknown>): Promise<void> {
-  const filePath = path.join(cwd, '.data', 'coordination', 'zoekt-refresh-state.json');
+  const filePath = path.join(cwd, 'gojo', 'runtime', 'coordination', 'zoekt-refresh-state.json');
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, JSON.stringify(snapshot, null, 2), 'utf8');
 }
@@ -45,7 +46,10 @@ async function readCurrentArtifact<T>(cwd: string, fileName: string): Promise<T>
     throw new Error('expected a current generation');
   }
 
-  const content = await fs.readFile(path.join(cwd, '.data', 'generations', state.generationId, fileName), 'utf8');
+  const content = await fs.readFile(
+    path.join(cwd, 'gojo', 'data', 'indexes', 'generations', state.generationId, fileName),
+    'utf8',
+  );
   return JSON.parse(content) as T;
 }
 
@@ -56,7 +60,11 @@ async function overwriteCurrentArtifact(cwd: string, fileName: string, value: un
     throw new Error('expected a current generation');
   }
 
-  await fs.writeFile(path.join(cwd, '.data', 'generations', state.generationId, fileName), JSON.stringify(value, null, 2), 'utf8');
+  await fs.writeFile(
+    path.join(cwd, 'gojo', 'data', 'indexes', 'generations', state.generationId, fileName),
+    JSON.stringify(value, null, 2),
+    'utf8',
+  );
 }
 
 async function removeCurrentArtifact(fileName: string): Promise<void> {
@@ -137,6 +145,64 @@ describe.sequential('index health', () => {
     expect(health.reasons.join(' ')).toContain('coordination markers are not trustworthy');
   });
 
+  it('keeps a valid published generation stale instead of unknown when search freshness inputs are absent', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export function alpha() { return "a"; }');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+
+    const state = await loadCurrentGenerationState();
+    if (!state) {
+      throw new Error('expected a current generation');
+    }
+
+    await updateGenerationState(state.generationId, {
+      ...state,
+      search: {
+        ...state.search,
+        status: 'unknown',
+        requestedAt: undefined,
+        refreshedAt: undefined,
+        details: 'search freshness metadata not available in this generation',
+        snapshotId: undefined,
+      },
+    });
+
+    await fs.rm(path.join(tempRoot, 'gojo', 'runtime', 'coordination', 'search-refresh-request.json'), {
+      force: true,
+    });
+    await fs.rm(path.join(tempRoot, 'gojo', 'runtime', 'coordination', 'zoekt-refresh-state.json'), {
+      force: true,
+    });
+
+    const health = await getCurrentIndexHealth();
+    const snapshot = await loadCurrentIndexHealthSnapshot();
+
+    expect(health.generationStatus).toBe('ready');
+    expect(health.search?.status).toBe('unknown');
+    expect(health.trustState).toBe('stale-search');
+    expect(health.suitableForAgentWorkflows).toBe(true);
+    expect(snapshot?.trustState).toBe('stale-search');
+    expect(snapshot?.generationStatus).toBe('ready');
+  });
+
+  it('reports unknown only when no published generation exists', async () => {
+    const tempRoot = await createTempDirectory();
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    const health = await getCurrentIndexHealth();
+    const snapshot = await loadCurrentIndexHealthSnapshot();
+
+    expect(health.trustState).toBe('unknown');
+    expect(health.generationStatus).toBe('missing');
+    expect(snapshot?.trustState).toBe('unknown');
+  });
+
   it('downgrades trust to inconsistent when the published symbol index is missing', async () => {
     const tempRoot = await createTempDirectory();
     const reposRoot = path.join(tempRoot, 'repos');
@@ -203,7 +269,7 @@ describe.sequential('index health', () => {
     await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export function alpha() { return "a"; }');
     await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
 
-    const snapshotPath = path.join(tempRoot, '.data', 'coordination', 'zoekt-refresh-state.json');
+    const snapshotPath = path.join(tempRoot, 'gojo', 'runtime', 'coordination', 'zoekt-refresh-state.json');
     await fs.rm(snapshotPath, { force: true });
     await fs.mkdir(snapshotPath, { recursive: true });
 
@@ -251,7 +317,7 @@ describe.sequential('index health', () => {
     await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export function alpha() { return "a"; }');
     await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
 
-    await fs.rm(path.join(tempRoot, '.data', 'generations', (await loadCurrentGenerationState())?.generationId ?? '', 'symbol-index.json'));
+    await fs.rm(path.join(tempRoot, 'gojo', 'data', 'indexes', 'generations', (await loadCurrentGenerationState())?.generationId ?? '', 'symbol-index.json'));
     await runCurrentGenerationConsistencyMaintenance({ logger: silentLogger, applyRepairs: false });
 
     const health = await getCurrentIndexHealth();

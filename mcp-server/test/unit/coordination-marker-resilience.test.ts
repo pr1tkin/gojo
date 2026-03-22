@@ -33,11 +33,11 @@ async function writeRepositoryFile(
 }
 
 function getSnapshotMarkerPath(root: string): string {
-  return path.join(root, '.data', 'coordination', 'zoekt-refresh-state.json');
+  return path.join(root, 'gojo', 'runtime', 'coordination', 'zoekt-refresh-state.json');
 }
 
 function getRequestMarkerPath(root: string): string {
-  return path.join(root, '.data', 'coordination', 'search-refresh-request.json');
+  return path.join(root, 'gojo', 'runtime', 'coordination', 'search-refresh-request.json');
 }
 
 async function writeSnapshotMarker(root: string, value: string | Record<string, unknown>): Promise<void> {

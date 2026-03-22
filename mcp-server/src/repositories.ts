@@ -12,6 +12,21 @@ async function isGitRepository(repositoryRoot: string): Promise<boolean> {
   }
 }
 
+async function isRepositoryLikeDirectory(repositoryRoot: string): Promise<boolean> {
+  const markers = ['.git', 'package.json', 'tsconfig.json', 'next.config.ts', 'next.config.js'];
+
+  for (const marker of markers) {
+    try {
+      await fs.stat(path.join(repositoryRoot, marker));
+      return true;
+    } catch {
+      continue;
+    }
+  }
+
+  return false;
+}
+
 async function resolveRepositoryRootPath(entryPath: string): Promise<string | null> {
   try {
     const stat = await fs.stat(entryPath);
@@ -27,6 +42,21 @@ async function resolveRepositoryRootPath(entryPath: string): Promise<string | nu
 }
 
 export async function listRepositories(reposRoot: string): Promise<RepositoryInfo[]> {
+  const resolvedReposRoot = await resolveRepositoryRootPath(reposRoot);
+
+  if (resolvedReposRoot && (await isRepositoryLikeDirectory(resolvedReposRoot))) {
+    const repositoryName = path.basename(resolvedReposRoot);
+
+    return [
+      {
+        id: repositoryName,
+        name: repositoryName,
+        rootPath: resolvedReposRoot,
+        isGitRepository: await isGitRepository(resolvedReposRoot),
+      },
+    ];
+  }
+
   const entries = await fs.readdir(reposRoot, { withFileTypes: true });
   const repositories: RepositoryInfo[] = [];
 

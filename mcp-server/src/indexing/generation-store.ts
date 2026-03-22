@@ -1,7 +1,8 @@
-import fs from 'node:fs';
+﻿import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 
+import { getProductEnvironment } from '../product/environment.js';
 import type {
   CoordinationMarkerParseResult,
   CurrentGenerationPointer,
@@ -30,11 +31,23 @@ export const REQUIRED_GENERATION_ARTIFACT_FILES = [
 ] as const;
 
 export function getDataDirectory(): string {
-  return path.resolve(process.cwd(), '.data');
+  return getProductEnvironment().paths.dataDir;
+}
+
+export function getIndexesDirectory(): string {
+  return getProductEnvironment().paths.indexesDir;
+}
+
+export function getRuntimeDirectory(): string {
+  return getProductEnvironment().paths.runtimeDir;
+}
+
+export function getTempDirectory(): string {
+  return getProductEnvironment().paths.tempDir;
 }
 
 export function getCoordinationDirectory(): string {
-  return path.join(getDataDirectory(), 'coordination');
+  return path.join(getRuntimeDirectory(), 'coordination');
 }
 
 function getSearchRefreshRequestFilePath(): string {
@@ -45,25 +58,23 @@ function getSearchRefreshSnapshotFilePath(): string {
   return path.join(getCoordinationDirectory(), 'zoekt-refresh-state.json');
 }
 
-function getLegacyArtifactFilePath(fileName: string): string {
-  return path.join(getDataDirectory(), fileName);
-}
-
 export function getGenerationsDirectory(): string {
-  return path.join(getDataDirectory(), 'generations');
+  return path.join(getIndexesDirectory(), 'generations');
 }
 
 function getCurrentGenerationPointerFilePath(): string {
-  return path.join(getDataDirectory(), 'current-generation.json');
+  return path.join(getIndexesDirectory(), 'current-generation.json');
 }
 
+
 function getCurrentGenerationPointerTempFilePath(): string {
-  return path.join(getDataDirectory(), 'current-generation.tmp.json');
+  return path.join(getTempDirectory(), 'current-generation.tmp.json');
 }
 
 export function getGenerationDirectory(generationId: string): string {
   return path.join(getGenerationsDirectory(), generationId);
 }
+
 
 export function getGenerationArtifactFilePath(generationId: string, fileName: string): string {
   return path.join(getGenerationDirectory(generationId), fileName);
@@ -375,7 +386,7 @@ export async function publishGeneration(generationId: string, publishedAt: strin
     publishedAt,
   };
 
-  await fsPromises.mkdir(getDataDirectory(), { recursive: true });
+  await fsPromises.mkdir(path.dirname(getCurrentGenerationPointerFilePath()), { recursive: true });
   await fsPromises.writeFile(
     getCurrentGenerationPointerTempFilePath(),
     JSON.stringify(pointer, null, 2),
@@ -391,7 +402,7 @@ export async function resolveArtifactFilePath(fileName: string): Promise<string>
   const pointer = await loadCurrentGenerationPointer();
 
   if (!pointer) {
-    return getLegacyArtifactFilePath(fileName);
+    return path.join(getIndexesDirectory(), fileName);
   }
 
   return getGenerationArtifactFilePath(pointer.generationId, fileName);
@@ -401,7 +412,7 @@ export function resolveArtifactFilePathSync(fileName: string): string {
   const pointer = loadCurrentGenerationPointerSync();
 
   if (!pointer) {
-    return getLegacyArtifactFilePath(fileName);
+    return path.join(getIndexesDirectory(), fileName);
   }
 
   return getGenerationArtifactFilePath(pointer.generationId, fileName);
@@ -567,7 +578,7 @@ function summarizeRawMarkerValue(value: unknown): string | undefined {
 
   if (isObject(value)) {
     const keys = Object.keys(value).sort((left, right) => left.localeCompare(right));
-    return `json-object(keys=${keys.slice(0, 8).join(',')}${keys.length > 8 ? ',…' : ''})`;
+    return `json-object(keys=${keys.slice(0, 8).join(',')}${keys.length > 8 ? ',â€¦' : ''})`;
   }
 
   if (value === null) {
@@ -691,3 +702,4 @@ export async function loadSearchRefreshSnapshot(): Promise<SearchRefreshSnapshot
   const result = await loadSearchRefreshSnapshotResult();
   return result.status === 'ok' ? result.value : null;
 }
+

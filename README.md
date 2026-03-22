@@ -91,7 +91,7 @@ Example:
 ```text
 build_change_context({
   symbolName: "ContractDetailPage",
-  repo: "prototype-repo",
+  repo: "sample-repo",
   intent: "refactor"
 })
 ```
@@ -196,19 +196,35 @@ Gojo runs locally across three cooperating services:
 - `zoekt-indexer` → search indexing
 - `mcp-server` → agent-facing tool surface
 
-Artifacts are generated under:
+Artifacts are generated under the product runtime directories:
 
 ```text
-/app/.data
+<gojo-home>/data
+<gojo-home>/data/indexes
+<gojo-home>/runtime
+<gojo-home>/cache
 ```
 
 ---
 
 ## 🚀 Quick Start
 
+Current official product surface:
+
+- `gojo`
+- `gojo mcp serve`
+
+From this repository today, the quickest path is:
+
 ```bash
-docker compose up -d --build
+cd mcp-server
+npm install
+npm run build
+npm exec gojo -- health
+npm exec gojo -- mcp serve
 ```
+
+Docker Compose remains available for repository development only. It is not the primary product entrypoint.
 
 ---
 

@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { loadConfig } from '../config.js';
 import { buildCodeGraphFromSymbolIndex } from '../graph/build-graph.js';
 import { loadRepoResolutionConfigs } from '../graph/repo-config.js';
 import type { CodeGraphSnapshot } from '../graph/types.js';
@@ -57,6 +58,9 @@ import {
 } from './search-freshness.js';
 import { buildSearchRepoFingerprints } from './search-fingerprint.js';
 import { runSingleFlightRefresh, type RefreshCoordinatorTestHooks } from './refresh-coordinator.js';
+import { getCoordinationDirectory } from './generation-store.js';
+import { synchronizeSearchIndexes } from '../runtime/search-service.js';
+import { SearchHelperError } from '../search/helpers.js';
 import type {
   FileFingerprintManifestEntry,
   IndexGenerationCleanupSummary,
@@ -837,7 +841,7 @@ async function refreshIndexesUnlocked(
         target: faultInjection?.target,
         onPartialWrite: async () => {
           await writeMalformedJson(
-            path.join(process.cwd(), '.data', 'coordination', 'search-refresh-request.json'),
+      path.join(getCoordinationDirectory(), 'search-refresh-request.json'),
             '{"fault":"partial-write"',
           );
         },
@@ -861,6 +865,48 @@ async function refreshIndexesUnlocked(
     let consistency: IndexRefreshDiagnostics['consistency'];
     let finalCounts = counts;
     let finalSearch = generationState.search;
+
+    try {
+      const searchSync = await synchronizeSearchIndexes(loadConfig(), reposRoot, logger);
+      finalSearch = searchSync.snapshot.status === 'ready'
+        ? {
+            ...finalSearch,
+            status: 'ready',
+            refreshedAt: searchSync.snapshot.refreshedAt,
+            details: searchSync.snapshot.details,
+            error: undefined,
+            snapshotId: searchSync.snapshot.snapshotId,
+            aggregateFingerprint:
+              searchSync.snapshot.aggregateFingerprint ?? finalSearch.aggregateFingerprint,
+            repoFingerprints:
+              searchSync.snapshot.repoFingerprints.length > 0
+                ? searchSync.snapshot.repoFingerprints
+                : finalSearch.repoFingerprints,
+          }
+        : finalSearch;
+
+      if (searchSync.validation.expectedVersion && !searchSync.validation.version) {
+        warnings.push(
+          `search helper version could not be confirmed; expected Zoekt ref ${searchSync.validation.expectedVersion}`,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'search synchronization failed unexpectedly';
+      warnings.push(`search synchronization failed: ${message}`);
+      postCommitErrors.push(message);
+      await recordRefreshFailure({
+        failedAt: new Date().toISOString(),
+        generationId,
+        stage: 'coordination-update',
+        reason: message,
+        cleanupRequired: false,
+        trustImpact: 'degraded',
+      });
+
+      if (!(loadConfig().search.mode === 'development' && error instanceof SearchHelperError)) {
+        throw error;
+      }
+    }
 
     if (
       options.runConsistencyChecks === 'always' ||

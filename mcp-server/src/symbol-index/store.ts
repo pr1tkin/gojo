@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getIndexesDirectory,
+  getTempDirectory,
   getGenerationArtifactFilePath,
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
@@ -10,11 +12,11 @@ import { createDeclarationFingerprint, createFileId, createSymbolId } from './id
 import type { FileRelation, IndexedSymbol, SymbolFrequencyStats, SymbolIndex } from './types.js';
 
 function getSymbolIndexDirectory(): string {
-  return path.resolve(process.cwd(), '.data');
+  return getIndexesDirectory();
 }
 
 function getSymbolIndexTempFilePath(): string {
-  return path.join(getSymbolIndexDirectory(), 'symbol-index.tmp.json');
+  return path.join(getTempDirectory(), 'symbol-index.tmp.json');
 }
 
 function getSymbolIndexFilePathInternal(): string {

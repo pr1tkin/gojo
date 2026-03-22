@@ -243,7 +243,7 @@ describe.sequential('consistency maintenance', () => {
       },
     });
 
-    const snapshotPath = path.join(tempRoot, '.data', 'coordination', 'zoekt-refresh-state.json');
+    const snapshotPath = path.join(tempRoot, 'gojo', 'runtime', 'coordination', 'zoekt-refresh-state.json');
     await fs.mkdir(path.dirname(snapshotPath), { recursive: true });
     await fs.writeFile(snapshotPath, '{not valid json', 'utf8');
 
@@ -285,8 +285,8 @@ describe.sequential('consistency maintenance', () => {
     await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export function alpha() { return "a"; }');
     await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
 
-    const tmpPointerPath = path.join(tempRoot, '.data', 'current-generation.tmp.json');
-    const incompleteGenerationDir = path.join(tempRoot, '.data', 'generations', 'dangling-generation');
+    const tmpPointerPath = path.join(tempRoot, 'gojo', 'runtime', 'tmp', 'current-generation.tmp.json');
+    const incompleteGenerationDir = path.join(tempRoot, 'gojo', 'data', 'indexes', 'generations', 'dangling-generation');
     await fs.mkdir(incompleteGenerationDir, { recursive: true });
     await fs.writeFile(tmpPointerPath, '{}', 'utf8');
     await fs.writeFile(path.join(incompleteGenerationDir, 'symbol-index.json'), '{}', 'utf8');

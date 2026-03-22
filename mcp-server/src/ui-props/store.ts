@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import {
+  getIndexesDirectory,
+  getTempDirectory,
   getGenerationArtifactFilePath,
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
@@ -13,11 +15,11 @@ import {
 } from './types.js';
 
 function getUiPropsDirectory(): string {
-  return path.resolve(process.cwd(), '.data');
+  return getIndexesDirectory();
 }
 
 function getUiPropsTempFilePath(): string {
-  return path.join(getUiPropsDirectory(), 'ui-props.tmp.json');
+  return path.join(getTempDirectory(), 'ui-props.tmp.json');
 }
 
 function getUiPropsFilePathInternal(): string {
