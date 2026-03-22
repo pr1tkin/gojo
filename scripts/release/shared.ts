@@ -9,6 +9,18 @@ import { getBuildMetadata } from '../../mcp-server/src/internal/product/buildMet
 import { getReleaseArtifactName } from '../../mcp-server/src/internal/product/releaseContract.ts';
 import type { BuildMetadata } from '../../mcp-server/src/types.ts';
 
+export interface VersionSnapshot {
+  productName: string;
+  version: string;
+  gitSha: string;
+  buildTimestamp: string;
+  platform: BuildMetadata['platform'];
+  arch: BuildMetadata['arch'];
+  packagingMode: BuildMetadata['packagingMode'];
+  helperPackaging: BuildMetadata['helperPackaging'];
+  isDev: boolean;
+}
+
 export interface ReleaseAssemblyResult {
   artifactName: string;
   artifactPath: string;
@@ -251,8 +263,22 @@ export async function copyProductionNodeModules(sourceRoot: string, destinationR
   }
 }
 
-export function loadVersionFile(versionFilePath: string): BuildMetadata {
-  return JSON.parse(fs.readFileSync(versionFilePath, 'utf8')) as BuildMetadata;
+export function createVersionSnapshot(metadata: BuildMetadata): VersionSnapshot {
+  return {
+    productName: metadata.productName,
+    version: metadata.version,
+    gitSha: metadata.gitSha,
+    buildTimestamp: metadata.buildTimestamp,
+    platform: metadata.platform,
+    arch: metadata.arch,
+    packagingMode: metadata.packagingMode,
+    helperPackaging: metadata.helperPackaging,
+    isDev: metadata.isDev,
+  };
+}
+
+export function loadVersionSnapshot(versionFilePath: string): VersionSnapshot {
+  return JSON.parse(fs.readFileSync(versionFilePath, 'utf8')) as VersionSnapshot;
 }
 
 export function getReleaseArtifactPaths(versionDirectory: string): string[] {

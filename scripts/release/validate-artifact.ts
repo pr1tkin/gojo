@@ -6,10 +6,11 @@ import type { BuildMetadata } from '../../mcp-server/src/types.ts';
 import {
   getRepoRoot,
   getTempExtractionDirectory,
-  loadVersionFile,
+  loadVersionSnapshot,
   runCommand,
   stableStringify,
   type ReleaseValidationResult,
+  type VersionSnapshot,
 } from './shared.ts';
 
 function assertJsonVersionShape(payload: Record<string, unknown>): void {
@@ -53,7 +54,7 @@ function assertJsonVersionShape(payload: Record<string, unknown>): void {
   }
 }
 
-function validateVersionPayload(payload: Record<string, unknown>, metadata: BuildMetadata): void {
+function validateVersionPayload(payload: Record<string, unknown>, metadata: VersionSnapshot): void {
   assertJsonVersionShape(payload);
 
   if (payload.product !== metadata.productName) {
@@ -111,7 +112,7 @@ export async function validateReleaseArtifact(
     }
 
     const versionFilePath = path.join(extractionDirectory, 'VERSION');
-    const versionSnapshot = loadVersionFile(versionFilePath);
+    const versionSnapshot = loadVersionSnapshot(versionFilePath);
 
     const commandEnv = {
       ...env,

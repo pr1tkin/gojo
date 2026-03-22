@@ -2,13 +2,13 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-import type { BuildMetadata } from '../../mcp-server/src/types.ts';
 import {
   getReleaseManifestPath,
   getTempExtractionDirectory,
-  loadVersionFile,
+  loadVersionSnapshot,
   runCommand,
   stableStringify,
+  type VersionSnapshot,
 } from './shared.ts';
 
 export interface ReleaseManifestArtifact {
@@ -51,12 +51,12 @@ function parseChecksumsFile(checksumsPath: string): Map<string, string> {
 
 async function inspectArtifact(
   artifactPath: string,
-): Promise<{ metadata: BuildMetadata; helperFiles: string[]; size: number }> {
+): Promise<{ metadata: VersionSnapshot; helperFiles: string[]; size: number }> {
   const extractionDirectory = getTempExtractionDirectory();
 
   try {
     runCommand('tar', ['-xzf', artifactPath, '-C', extractionDirectory]);
-    const metadata = loadVersionFile(path.join(extractionDirectory, 'VERSION'));
+    const metadata = loadVersionSnapshot(path.join(extractionDirectory, 'VERSION'));
     const helperFiles = fs
       .readdirSync(path.join(extractionDirectory, 'helper'))
       .sort()

@@ -9,6 +9,7 @@ import {
   copyDirectory,
   copyFile,
   copyProductionNodeModules,
+  createVersionSnapshot,
   ensureCleanDirectory,
   getArtifactPath,
   getArtifactStagingRoot,
@@ -114,7 +115,7 @@ export async function assembleReleaseArtifact(
   assertBundledHelpers(artifactMetadata);
   await fsp.writeFile(
     path.join(artifactRoot, 'VERSION'),
-    stableStringify(artifactMetadata),
+    stableStringify(createVersionSnapshot(artifactMetadata)),
     'utf8',
   );
 
