@@ -73,16 +73,6 @@ export async function serveMcpRuntime(
             : `Zoekt is not currently reachable at ${config.search.baseUrl}; Gojo will continue in ${config.search.mode} mode.`,
       },
     ],
-    relatedEntities: [
-      {
-        kind: 'service',
-        name: 'mcp',
-      },
-      {
-        kind: 'process',
-        name: 'stdio-transport',
-      },
-    ],
     signals: [
       {
         name: 'transport',

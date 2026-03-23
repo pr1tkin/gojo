@@ -36,7 +36,6 @@ export type {
   RuntimeLogger,
   RuntimeOutputMode,
   RuntimeReadinessState,
-  RuntimeRelatedEntity,
   RuntimeResponse,
   RuntimeSignal,
   RuntimeSummary,

@@ -12,7 +12,6 @@ describe('cli render transparency', () => {
         text: 'Resolved createAutomation with 3 related files.',
       },
       findings: [],
-      related_entities: [],
       signals: [],
       warnings: [],
       machine_payload: {},
@@ -43,7 +42,6 @@ describe('cli render transparency', () => {
         text: 'Impact buckets are available.',
       },
       findings: [],
-      related_entities: [],
       signals: [],
       warnings: [],
       machine_payload: {

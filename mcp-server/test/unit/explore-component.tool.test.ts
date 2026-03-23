@@ -496,6 +496,8 @@ describe('explore_component tool', () => {
         }),
       ]),
     );
+    expect(parsed).not.toHaveProperty('related_entities');
+    expect(parsed).not.toHaveProperty('impact');
     expect(parsed.summary).toEqual(
       expect.objectContaining({
         resultCount: 2,

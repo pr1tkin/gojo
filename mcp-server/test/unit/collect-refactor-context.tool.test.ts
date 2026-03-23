@@ -322,6 +322,8 @@ describe('collect_refactor_context tool', () => {
     );
     expect(parsed.indirect_consumers).toEqual(expect.objectContaining({ total: 0, shown: 0 }));
     expect(parsed.related_context).toEqual(expect.objectContaining({ total: 0, shown: 0 }));
+    expect(parsed).not.toHaveProperty('related_entities');
+    expect(parsed).not.toHaveProperty('impact');
     expect(parsed.contextSummary).toEqual(
       expect.objectContaining({
         importingFileCount: 1,

@@ -120,18 +120,6 @@ export function renderRuntimeResponse(response: RenderableRuntimeResponse, comma
     sections.push(warningsSection.join('\n'));
   }
 
-  if (!bucketedPayload) {
-    const relatedSection = renderSection(
-      'Related',
-      response.related_entities.map((entity) =>
-        entity.path ? `${entity.kind}: ${entity.name} (${entity.path})` : `${entity.kind}: ${entity.name}`,
-      ),
-    );
-    if (relatedSection.length > 0) {
-      sections.push(relatedSection.join('\n'));
-    }
-  }
-
   const signalsSection = renderSection(
     'Signals',
     response.signals.map((signal) => `${signal.name}: ${formatSignalValue(signal.value)}`),

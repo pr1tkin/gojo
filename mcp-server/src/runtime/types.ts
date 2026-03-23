@@ -48,13 +48,6 @@ export interface RuntimeFinding {
   severity?: 'info' | 'warning' | 'error';
 }
 
-export interface RuntimeRelatedEntity {
-  kind: 'repo' | 'file' | 'symbol' | 'service' | 'artifact' | 'process';
-  id?: string;
-  name: string;
-  path?: string;
-}
-
 export interface RuntimeSignal {
   name: string;
   value: string | number | boolean | null;
@@ -66,12 +59,6 @@ export interface RuntimeResponse<TMachinePayload = unknown> {
   executionMode: RuntimeExecutionMode;
   summary: RuntimeSummary;
   findings: RuntimeFinding[];
-  /**
-   * @deprecated Compatibility surface only.
-   * Derived from canonical bucketed output for older runtime consumers and
-   * planned for removal after downstream migration.
-   */
-  related_entities: RuntimeRelatedEntity[];
   signals: RuntimeSignal[];
   warnings: string[];
   details?: Record<string, unknown>;

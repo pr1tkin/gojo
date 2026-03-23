@@ -87,13 +87,6 @@ export const getProductVersionHandler: RuntimeCapabilityHandler<
         text: `${identity.name} ${formatProductVersion(identity.version)}`,
       },
       findings,
-      relatedEntities: [
-        {
-          kind: 'artifact',
-          name: 'package-root',
-          path: context.dependencies.config.product.paths.packageRoot,
-        },
-      ],
       signals: [
         { name: 'version', value: identity.version, importance: 'high' },
         { name: 'packaging_model', value: identity.packagingModel, importance: 'medium' },
@@ -161,13 +154,6 @@ export const upgradeProductHandler: RuntimeCapabilityHandler<
           id: 'latest-version',
           title: 'Latest release',
           summary: result.latestVersion,
-        },
-      ],
-      relatedEntities: [
-        {
-          kind: 'artifact',
-          name: 'install-root',
-          path: result.installDir,
         },
       ],
       signals: [
@@ -241,50 +227,6 @@ function toBucketEntries(entries: RankedFileContextItem[]): Array<{ filePath: st
   return entries.map((entry) => ({
     filePath: entry.file.filePath,
   }));
-}
-
-function normalizePath(filePath: string): string {
-  return filePath.replace(/\\/g, '/');
-}
-
-function isCompanionArtifact(targetPath: string | undefined, candidatePath: string): boolean {
-  if (!targetPath) {
-    return false;
-  }
-
-  const normalizedTarget = normalizePath(targetPath);
-  const normalizedCandidate = normalizePath(candidatePath);
-  const extensionMatch = normalizedTarget.match(/\.[^.]+$/);
-  const targetWithoutExtension = extensionMatch
-    ? normalizedTarget.slice(0, -extensionMatch[0].length)
-    : normalizedTarget;
-
-  return (
-    normalizedCandidate.startsWith(`${targetWithoutExtension}.`) &&
-    /\.(stories|story|test|spec)\.(tsx?|jsx?)$/i.test(normalizedCandidate)
-  );
-}
-
-function selectLegacyRelatedEntities(
-  buckets: RelatedFileContextBuckets,
-  targetPath: string | undefined,
-): RankedFileContextItem[] {
-  // Deprecated compatibility surface for older runtime consumers.
-  // Keep this derived from canonical buckets so legacy flattening cannot
-  // influence selection, ranking, or bucket semantics.
-  if (buckets.directConsumers.entries.length > 0) {
-    const companionContextEntries = buckets.relatedContext.entries.filter((entry) =>
-      isCompanionArtifact(targetPath, entry.file.filePath),
-    );
-
-    return [...buckets.directConsumers.entries, ...companionContextEntries];
-  }
-
-  if (buckets.indirectConsumers.entries.length > 0) {
-    return buckets.indirectConsumers.entries;
-  }
-
-  return buckets.relatedContext.entries;
 }
 
 function createEmptyRelatedFileBuckets(): RelatedFileContextBuckets {
@@ -439,27 +381,6 @@ export const indexRepoHandler: RuntimeCapabilityHandler<IndexRepoRequest, IndexR
                 : 'warning',
         },
       ],
-      relatedEntities: [
-        ...(request.repo?.repoId || repoPath
-          ? [
-              {
-                kind: 'repo' as const,
-                id: request.repo?.repoId ?? context.executionContext.repoTarget?.repoId,
-                name:
-                  request.repo?.repoId ??
-                  context.executionContext.repoTarget?.repoId ??
-                  reposRoot.split(/[/\\]/).filter(Boolean).at(-1) ??
-                  reposRoot,
-                ...(repoPath ? { path: repoPath } : {}),
-              },
-            ]
-          : []),
-        {
-          kind: 'artifact',
-          name: 'repos-root',
-          path: reposRoot,
-        },
-      ],
       signals: [
         { name: 'symbols', value: result.diagnostics.counts.symbols, importance: 'high' },
         { name: 'patterns', value: result.diagnostics.counts.patterns, importance: 'medium' },
@@ -555,13 +476,6 @@ export const refreshRepoHandler: RuntimeCapabilityHandler<RefreshRepoRequest, Re
                 : 'warning',
         },
       ],
-      relatedEntities: [
-        {
-          kind: 'artifact',
-          name: 'repos-root',
-          path: reposRoot,
-        },
-      ],
       signals: [
         { name: 'added', value: result.diagnostics.delta.added.length, importance: 'medium' },
         { name: 'modified', value: result.diagnostics.delta.modified.length, importance: 'high' },
@@ -638,10 +552,6 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
     const primaryFile = result.primaryFile;
     const ambiguityDetected = result.summary.ambiguityDetected;
     const relatedBuckets = result.relatedFileBuckets ?? createEmptyRelatedFileBuckets();
-    const visibleRelatedEntities = selectLegacyRelatedEntities(
-      relatedBuckets,
-      primaryFile?.filePath ?? primarySymbol?.filePath,
-    );
     const warnings = [
       ...(ambiguityDetected
         ? ['Target resolution is ambiguous; runtime result is intentionally compact.']
@@ -698,14 +608,6 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
               severity: 'warning',
             },
           ],
-      relatedEntities: [
-        ...visibleRelatedEntities.map((entry) => ({
-          kind: 'file' as const,
-          id: entry.file.fileId,
-          name: entry.file.filePath,
-          path: entry.file.filePath,
-        })),
-      ],
       signals: [
         { name: 'candidate_count', value: result.summary.totalCandidateCount, importance: 'high' },
         { name: 'related_file_count', value: result.summary.totalRelatedFileCount, importance: 'medium' },
@@ -814,27 +716,6 @@ export const runHealthChecksHandler: RuntimeCapabilityHandler<
                 title: 'Repo scope',
                 summary: `${repoLabel ?? repoPath} (${repoPath})`,
                 severity: 'info' as const,
-              },
-            ]
-          : []),
-      ],
-      relatedEntities: [
-        ...(repoPath
-          ? [
-              {
-                kind: 'repo' as const,
-                id: request.repo?.repoId ?? context.executionContext.repoTarget?.repoId,
-                name: repoLabel ?? repoPath,
-                path: repoPath,
-              },
-            ]
-          : []),
-        ...(result.reposRoot
-          ? [
-              {
-                kind: 'artifact' as const,
-                name: 'repos-root',
-                path: result.reposRoot,
               },
             ]
           : []),

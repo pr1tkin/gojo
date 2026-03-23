@@ -459,6 +459,8 @@ describe('build_change_context tool', () => {
       confidence: 'low',
       coverage: 'exploratory',
     }));
+    expect(parsed).not.toHaveProperty('related_entities');
+    expect(parsed).not.toHaveProperty('impact');
     expect(parsed.results.primary.map((entry: Record<string, any>) => entry.kind)).toEqual([
       'component_summary',
       'precedent_cluster',

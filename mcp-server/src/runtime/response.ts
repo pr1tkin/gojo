@@ -6,7 +6,6 @@ import type {
   RuntimeFinding,
   RuntimeResultKind,
   RuntimeReadinessState,
-  RuntimeRelatedEntity,
   RuntimeResponse,
   RuntimeSignal,
   RuntimeSummary,
@@ -19,8 +18,6 @@ export interface CreateRuntimeResponseOptions<TMachinePayload> {
   summary: RuntimeSummary;
   machinePayload: TMachinePayload;
   findings?: RuntimeFinding[];
-  // Deprecated compatibility surface. Keep derived from canonical buckets only.
-  relatedEntities?: RuntimeRelatedEntity[];
   signals?: RuntimeSignal[];
   warnings?: string[];
   details?: Record<string, unknown>;
@@ -43,7 +40,6 @@ export function createRuntimeResponse<TMachinePayload>(
     executionMode: options.executionMode,
     summary: options.summary,
     findings: options.findings ?? [],
-    related_entities: options.relatedEntities ?? [],
     signals: options.signals ?? [],
     warnings: options.warnings ?? [],
     ...(options.details ? { details: options.details } : {}),

@@ -66,15 +66,6 @@ export interface NormalizedPlanImpactEntry {
   signals: string[];
 }
 
-export interface NormalizedPlanImpactBucket {
-  label: string;
-  explanation: string;
-  confidence: SymbolChangePlanResult['impactBuckets']['directConsumers']['confidence'];
-  coverage: SymbolChangePlanResult['impactBuckets']['directConsumers']['coverage'];
-  signals: string[];
-  entries: NormalizedPlanImpactEntry[];
-}
-
 function normalizeImpactBucket(
   bucket: SymbolChangePlanResult['impactBuckets']['directConsumers'],
 ): CanonicalBucket<NormalizedPlanImpactEntry> {
@@ -96,36 +87,12 @@ function normalizeImpactBucket(
   };
 }
 
-function toLegacyImpactBucket(
-  bucket: CanonicalBucket<NormalizedPlanImpactEntry>,
-  kind: 'direct_consumers' | 'indirect_consumers' | 'related_context',
-): NormalizedPlanImpactBucket & { kind: typeof kind } {
-  return {
-    kind,
-    label: bucket.label,
-    explanation: bucket.explanation,
-    confidence: bucket.confidence,
-    coverage: bucket.coverage,
-    signals: [],
-    entries: bucket.entries,
-  };
-}
-
 export interface PlanChangeNormalizedResponse extends NormalizedToolResponse<NormalizedPlanChangeStep> {
   target: NormalizedPlanChangeTarget;
   plan: NormalizedPlanOverview;
   direct_consumers: CanonicalBucket<NormalizedPlanImpactEntry>;
   indirect_consumers: CanonicalBucket<NormalizedPlanImpactEntry>;
   related_context: CanonicalBucket<NormalizedPlanImpactEntry>;
-  /**
-   * @deprecated Compatibility surface only.
-   * Derive from canonical top-level buckets only and remove after downstream migration.
-   */
-  impact: {
-    direct_consumers: NormalizedPlanImpactBucket;
-    indirect_consumers: NormalizedPlanImpactBucket;
-    related_context: NormalizedPlanImpactBucket;
-  };
 }
 
 export interface PlanChangeNormalizationInput {
@@ -377,10 +344,5 @@ export function normalizePlanChangeResponse(
     direct_consumers,
     indirect_consumers,
     related_context,
-    impact: {
-      direct_consumers: toLegacyImpactBucket(direct_consumers, 'direct_consumers'),
-      indirect_consumers: toLegacyImpactBucket(indirect_consumers, 'indirect_consumers'),
-      related_context: toLegacyImpactBucket(related_context, 'related_context'),
-    },
   };
 }

@@ -147,7 +147,7 @@ describe('runtime state consistency', () => {
     );
   });
 
-  it('prefers shown direct bucket entries for legacy related_entities when exact results exist', async () => {
+  it('returns canonical buckets without leaking removed legacy fields when exact results exist', async () => {
     getCurrentIndexHealthMock.mockResolvedValue({
       schemaVersion: 1,
       generatedAt: '2026-03-22T09:30:00.000Z',
@@ -300,18 +300,7 @@ describe('runtime state consistency', () => {
       },
     );
 
-    expect(response.related_entities).toEqual([
-      expect.objectContaining({ path: 'src/direct-a.ts' }),
-    ]);
-    expect(response.related_entities).toHaveLength(
-      response.machine_payload.direct_consumers?.shown ?? 0,
-    );
-    expect(response.related_entities).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ path: 'src/indirect-a.ts' })]),
-    );
-    expect(response.related_entities).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ path: 'src/context-a.ts' })]),
-    );
+    expect(response).not.toHaveProperty('related_entities');
     expect(response.machine_payload.direct_consumers).toEqual(
       expect.objectContaining({ total: 3, shown: 1, truncated: true, coverage: 'exact' }),
     );
@@ -323,7 +312,7 @@ describe('runtime state consistency', () => {
     );
   });
 
-  it('includes story and test companion artifacts after direct entries in legacy related_entities', async () => {
+  it('returns canonical buckets without companion flattening when direct consumers and exploratory companions coexist', async () => {
     getCurrentIndexHealthMock.mockResolvedValue({
       schemaVersion: 1,
       generatedAt: '2026-03-22T09:30:00.000Z',
@@ -490,21 +479,18 @@ describe('runtime state consistency', () => {
       },
     );
 
-    expect(response.related_entities).toEqual([
-      expect.objectContaining({ path: 'src/consumers/ArticleHeaderText.tsx' }),
-      expect.objectContaining({ path: 'src/components/ArticleHeaderBar.stories.tsx' }),
-      expect.objectContaining({ path: 'src/components/ArticleHeaderBar.test.tsx' }),
+    expect(response).not.toHaveProperty('related_entities');
+    expect(response.machine_payload.direct_consumers?.entries).toEqual([
+      expect.objectContaining({ filePath: 'src/consumers/ArticleHeaderText.tsx' }),
     ]);
-    expect(response.related_entities).toHaveLength(3);
-    expect(response.related_entities).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ path: 'src/indirect/Wrapper.tsx' })]),
-    );
-    expect(response.related_entities).not.toEqual(
-      expect.arrayContaining([expect.objectContaining({ path: 'src/components/ArticleHeaderBar.css.ts' })]),
-    );
+    expect(response.machine_payload.related_context?.entries).toEqual([
+      expect.objectContaining({ filePath: 'src/components/ArticleHeaderBar.stories.tsx' }),
+      expect.objectContaining({ filePath: 'src/components/ArticleHeaderBar.test.tsx' }),
+      expect.objectContaining({ filePath: 'src/components/ArticleHeaderBar.css.ts' }),
+    ]);
   });
 
-  it('falls back to related context in legacy related_entities when no direct or indirect buckets are shown', async () => {
+  it('returns related context without leaking removed legacy fields when no direct or indirect buckets are shown', async () => {
     getCurrentIndexHealthMock.mockResolvedValue({
       schemaVersion: 1,
       generatedAt: '2026-03-22T09:30:00.000Z',
@@ -641,11 +627,9 @@ describe('runtime state consistency', () => {
       },
     );
 
-    expect(response.related_entities).toEqual([
-      expect.objectContaining({ path: 'src/context-a.ts' }),
+    expect(response).not.toHaveProperty('related_entities');
+    expect(response.machine_payload.related_context?.entries).toEqual([
+      expect.objectContaining({ filePath: 'src/context-a.ts' }),
     ]);
-    expect(response.related_entities).toHaveLength(
-      response.machine_payload.related_context?.shown ?? 0,
-    );
   });
 });
