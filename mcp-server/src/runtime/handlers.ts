@@ -243,6 +243,44 @@ function toBucketEntries(entries: RankedFileContextItem[]): Array<{ filePath: st
   }));
 }
 
+function createEmptyRelatedFileBuckets(): RelatedFileContextBuckets {
+  return {
+    directConsumers: {
+      kind: 'direct_consumers',
+      label: 'Direct consumers (exact)',
+      explanation: 'confirmed symbol-level usage',
+      confidence: 'high',
+      coverage: 'exact',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+    indirectConsumers: {
+      kind: 'indirect_consumers',
+      label: 'Indirect consumers (inferred)',
+      explanation: 'likely usage via wrappers or re-exports',
+      confidence: 'medium',
+      coverage: 'inferred',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+    relatedContext: {
+      kind: 'related_context',
+      label: 'Related context (exploratory)',
+      explanation: 'nearby or dependent files, not guaranteed direct usage',
+      confidence: 'low',
+      coverage: 'exploratory',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+  };
+}
+
 function toMachinePayloadBuckets(buckets: RelatedFileContextBuckets): Pick<
   ExploreComponentResponse['machine_payload'],
   'direct_consumers' | 'indirect_consumers' | 'related_context'
@@ -555,7 +593,7 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
     const primarySymbol = result.primarySymbol;
     const primaryFile = result.primaryFile;
     const ambiguityDetected = result.summary.ambiguityDetected;
-    const relatedBuckets = result.relatedFileBuckets;
+    const relatedBuckets = result.relatedFileBuckets ?? createEmptyRelatedFileBuckets();
     const visibleRelatedEntities = [
       ...relatedBuckets.directConsumers.entries,
       ...relatedBuckets.indirectConsumers.entries,
