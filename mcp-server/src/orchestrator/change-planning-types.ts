@@ -79,6 +79,30 @@ export interface UiPlanningHints {
   confidence: 'low' | 'medium';
 }
 
+export type ChangeImpactBucketKind = 'direct_consumers' | 'indirect_consumers' | 'related_context';
+
+export type ChangeImpactBucketConfidence = 'high' | 'medium' | 'low';
+
+export type ChangeImpactBucketCoverage = 'exact' | 'inferred' | 'exploratory';
+
+export interface ChangeImpactBucketEntry {
+  filePath: string;
+  symbolName?: string;
+  confidence: ChangeImpactBucketConfidence;
+  coverage: ChangeImpactBucketCoverage;
+  signals: string[];
+}
+
+export interface ChangeImpactBucket {
+  kind: ChangeImpactBucketKind;
+  label: string;
+  explanation: string;
+  confidence: ChangeImpactBucketConfidence;
+  coverage: ChangeImpactBucketCoverage;
+  signals: string[];
+  entries: ChangeImpactBucketEntry[];
+}
+
 export interface SymbolChangePlanResult {
   target: {
     filePath: string;
@@ -94,6 +118,11 @@ export interface SymbolChangePlanResult {
   secondaryEditFiles: string[];
   reviewFiles: string[];
   orderedPlan: ChangePlanStep[];
+  impactBuckets: {
+    directConsumers: ChangeImpactBucket;
+    indirectConsumers: ChangeImpactBucket;
+    relatedContext: ChangeImpactBucket;
+  };
   uiPlanningHints?: UiPlanningHints;
   notes?: string[];
 }

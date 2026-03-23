@@ -11,6 +11,60 @@ vi.mock('../../src/orchestrator/index.js', () => ({
 
 import { planChangeToolDefinition, runPlanChangeTool } from '../../src/tools/plan-change.js';
 
+function makeImpactBuckets() {
+  return {
+    directConsumers: {
+      kind: 'direct_consumers',
+      label: 'Direct consumers (exact)',
+      explanation: 'confirmed symbol-level usage',
+      confidence: 'high',
+      coverage: 'exact',
+      signals: [],
+      entries: [
+        {
+          filePath: 'src/app/_components/button/index.ts',
+          confidence: 'high',
+          coverage: 'exact',
+          signals: [],
+        },
+      ],
+    },
+    indirectConsumers: {
+      kind: 'indirect_consumers',
+      label: 'Indirect consumers (inferred)',
+      explanation: 'likely usage via wrappers or re-exports',
+      confidence: 'medium',
+      coverage: 'inferred',
+      signals: ['proxy_only'],
+      entries: [
+        {
+          filePath: 'src/app/_components/button/useButton.ts',
+          symbolName: 'useButton',
+          confidence: 'medium',
+          coverage: 'inferred',
+          signals: ['proxy_only'],
+        },
+      ],
+    },
+    relatedContext: {
+      kind: 'related_context',
+      label: 'Related context (exploratory)',
+      explanation: 'nearby or related files, not guaranteed direct usage',
+      confidence: 'low',
+      coverage: 'exploratory',
+      signals: ['approximate_scope'],
+      entries: [
+        {
+          filePath: 'src/app/_components/button/Button.stories.tsx',
+          confidence: 'low',
+          coverage: 'exploratory',
+          signals: ['approximate_scope'],
+        },
+      ],
+    },
+  };
+}
+
 describe('plan_change tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -50,6 +104,7 @@ describe('plan_change tool', () => {
       primaryEditFiles: ['src/app/_components/button/Button.tsx'],
       secondaryEditFiles: ['src/app/_components/button/index.ts'],
       reviewFiles: ['src/app/_components/metadata/podcast/Podcast.tsx'],
+      impactBuckets: makeImpactBuckets(),
       orderedPlan: [
         {
           order: 1,
@@ -108,6 +163,28 @@ describe('plan_change tool', () => {
           primaryEditFiles: ['src/app/_components/button/Button.tsx'],
           secondaryEditFiles: ['src/app/_components/button/index.ts'],
           reviewFiles: ['src/app/_components/metadata/podcast/Podcast.tsx'],
+        }),
+      }),
+      impact: expect.objectContaining({
+        direct_consumers: expect.objectContaining({
+          label: 'Direct consumers (exact)',
+          explanation: 'confirmed symbol-level usage',
+          confidence: 'high',
+          coverage: 'exact',
+          entries: [
+            expect.objectContaining({
+              filePath: 'src/app/_components/button/index.ts',
+              coverage: 'exact',
+            }),
+          ],
+        }),
+        indirect_consumers: expect.objectContaining({
+          label: 'Indirect consumers (inferred)',
+          confidence: 'medium',
+        }),
+        related_context: expect.objectContaining({
+          label: 'Related context (exploratory)',
+          confidence: 'low',
         }),
       }),
     }));
@@ -176,6 +253,7 @@ describe('plan_change tool', () => {
       primaryEditFiles: ['components/admin/cleanup/store/admin-cleanup-context.ts'],
       secondaryEditFiles: ['components/admin/cleanup/table.tsx'],
       reviewFiles: ['pages/admin/cleanup.tsx'],
+      impactBuckets: makeImpactBuckets(),
       orderedPlan: [],
     });
 

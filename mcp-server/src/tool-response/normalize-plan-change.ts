@@ -57,9 +57,31 @@ export interface NormalizedPlanOverview {
   uiHintsExpansionId?: string;
 }
 
+export interface NormalizedPlanImpactEntry {
+  filePath: string;
+  symbolName?: string;
+  confidence: SymbolChangePlanResult['impactBuckets']['directConsumers']['confidence'];
+  coverage: SymbolChangePlanResult['impactBuckets']['directConsumers']['coverage'];
+  signals: string[];
+}
+
+export interface NormalizedPlanImpactBucket {
+  label: string;
+  explanation: string;
+  confidence: SymbolChangePlanResult['impactBuckets']['directConsumers']['confidence'];
+  coverage: SymbolChangePlanResult['impactBuckets']['directConsumers']['coverage'];
+  signals: string[];
+  entries: NormalizedPlanImpactEntry[];
+}
+
 export interface PlanChangeNormalizedResponse extends NormalizedToolResponse<NormalizedPlanChangeStep> {
   target: NormalizedPlanChangeTarget;
   plan: NormalizedPlanOverview;
+  impact: {
+    direct_consumers: NormalizedPlanImpactBucket;
+    indirect_consumers: NormalizedPlanImpactBucket;
+    related_context: NormalizedPlanImpactBucket;
+  };
 }
 
 export interface PlanChangeNormalizationInput {
@@ -303,6 +325,11 @@ export function normalizePlanChangeResponse(
       },
       ...(response.expansions['plan:signals'] ? { signalsExpansionId: 'plan:signals' } : {}),
       ...(response.expansions['plan:ui-hints'] ? { uiHintsExpansionId: 'plan:ui-hints' } : {}),
+    },
+    impact: {
+      direct_consumers: raw.impactBuckets.directConsumers,
+      indirect_consumers: raw.impactBuckets.indirectConsumers,
+      related_context: raw.impactBuckets.relatedContext,
     },
   };
 }

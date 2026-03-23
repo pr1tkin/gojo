@@ -18,6 +18,8 @@ import type {
 } from './symbol-ownership-types.js';
 import type {
   AnalyzeSymbolChangePlanInput,
+  ChangeImpactBucket,
+  ChangeImpactBucketEntry,
   ChangePlanStep,
   ChangePlanningSignal,
   ChangeRiskLevel,
@@ -917,6 +919,127 @@ function buildUiPlanningHints(impact: ImpactAnalysisResult): UiPlanningHints | u
   };
 }
 
+function mergeBucketSignals(...signalGroups: string[][]): string[] {
+  return [...new Set(signalGroups.flat())].sort((left, right) => left.localeCompare(right));
+}
+
+function toBucketEntryFromFile(
+  entry: ImpactedFile,
+  coverage: ChangeImpactBucket['coverage'],
+): ChangeImpactBucketEntry {
+  return {
+    filePath: entry.filePath,
+    confidence: entry.confidence,
+    coverage,
+    signals: entry.coverageSignals,
+  };
+}
+
+function toBucketEntryFromSymbol(
+  entry: ImpactedSymbol,
+  coverage: ChangeImpactBucket['coverage'],
+): ChangeImpactBucketEntry {
+  return {
+    filePath: entry.filePath,
+    symbolName: entry.symbolName,
+    confidence: entry.confidence,
+    coverage,
+    signals: entry.coverageSignals,
+  };
+}
+
+function dedupeBucketEntries(entries: ChangeImpactBucketEntry[]): ChangeImpactBucketEntry[] {
+  const deduped = new Map<string, ChangeImpactBucketEntry>();
+
+  for (const entry of entries) {
+    const key = `${entry.filePath}:${entry.symbolName ?? ''}`;
+    const existing = deduped.get(key);
+
+    if (!existing) {
+      deduped.set(key, entry);
+      continue;
+    }
+
+    deduped.set(key, {
+      ...existing,
+      confidence:
+        confidenceWeight(entry.confidence) > confidenceWeight(existing.confidence)
+          ? entry.confidence
+          : existing.confidence,
+      signals: mergeBucketSignals(existing.signals, entry.signals),
+    });
+  }
+
+  return [...deduped.values()].sort((left, right) => {
+    return left.filePath.localeCompare(right.filePath) || (left.symbolName ?? '').localeCompare(right.symbolName ?? '');
+  });
+}
+
+function buildImpactBuckets(impact: ImpactAnalysisResult): SymbolChangePlanResult['impactBuckets'] {
+  const directEntries = dedupeBucketEntries([
+    ...getDirectImpactFiles(impact).map((entry) => toBucketEntryFromFile(entry, 'exact')),
+    ...getDirectImpactSymbols(impact).map((entry) => toBucketEntryFromSymbol(entry, 'exact')),
+  ]);
+  const indirectEntries = dedupeBucketEntries([
+    ...getIndirectImpactFiles(impact).map((entry) => toBucketEntryFromFile(entry, 'inferred')),
+    ...getIndirectImpactSymbols(impact).map((entry) => toBucketEntryFromSymbol(entry, 'inferred')),
+    ...getTransitiveImpacts(impact).map((entry) => {
+      if (entry.symbol) {
+        return toBucketEntryFromSymbol(entry.symbol, 'inferred');
+      }
+
+      const fallbackFilePath = entry.file?.filePath ?? '';
+
+      return toBucketEntryFromFile(
+        entry.file ?? {
+          file: null,
+          filePath: fallbackFilePath,
+          impactScope: 'fallback',
+          tier: 'indirect',
+          confidence: entry.confidence,
+          coverageSignals: entry.coverageSignals,
+          evidence: entry.evidence,
+        },
+        'inferred',
+      );
+    }),
+  ].filter((entry) => Boolean(entry.filePath)));
+  const relatedEntries = dedupeBucketEntries([
+    ...impact.relatedContext.files.map((entry) => toBucketEntryFromFile(entry, 'exploratory')),
+    ...impact.relatedContext.symbols.map((entry) => toBucketEntryFromSymbol(entry, 'exploratory')),
+  ]);
+
+  return {
+    directConsumers: {
+      kind: 'direct_consumers',
+      label: 'Direct consumers (exact)',
+      explanation: 'confirmed symbol-level usage',
+      confidence: 'high',
+      coverage: 'exact',
+      signals: mergeBucketSignals(...directEntries.map((entry) => entry.signals)),
+      entries: directEntries,
+    },
+    indirectConsumers: {
+      kind: 'indirect_consumers',
+      label: 'Indirect consumers (inferred)',
+      explanation: 'likely usage via wrappers or re-exports',
+      confidence: 'medium',
+      coverage: 'inferred',
+      signals: mergeBucketSignals(...indirectEntries.map((entry) => entry.signals)),
+      entries: indirectEntries,
+    },
+    relatedContext: {
+      kind: 'related_context',
+      label: 'Related context (exploratory)',
+      explanation: 'nearby or related files, not guaranteed direct usage',
+      confidence: 'low',
+      coverage: 'exploratory',
+      signals: mergeBucketSignals(...relatedEntries.map((entry) => entry.signals)),
+      entries: relatedEntries,
+    },
+  };
+}
+
 function buildMissingResult(input: AnalyzeSymbolChangePlanInput): SymbolChangePlanResult {
   return {
     target: {
@@ -932,6 +1055,35 @@ function buildMissingResult(input: AnalyzeSymbolChangePlanInput): SymbolChangePl
     secondaryEditFiles: [],
     reviewFiles: [],
     orderedPlan: [],
+    impactBuckets: {
+      directConsumers: {
+        kind: 'direct_consumers',
+        label: 'Direct consumers (exact)',
+        explanation: 'confirmed symbol-level usage',
+        confidence: 'high',
+        coverage: 'exact',
+        signals: [],
+        entries: [],
+      },
+      indirectConsumers: {
+        kind: 'indirect_consumers',
+        label: 'Indirect consumers (inferred)',
+        explanation: 'likely usage via wrappers or re-exports',
+        confidence: 'medium',
+        coverage: 'inferred',
+        signals: [],
+        entries: [],
+      },
+      relatedContext: {
+        kind: 'related_context',
+        label: 'Related context (exploratory)',
+        explanation: 'nearby or related files, not guaranteed direct usage',
+        confidence: 'low',
+        coverage: 'exploratory',
+        signals: [],
+        entries: [],
+      },
+    },
     notes: ['target could not be resolved from the current symbol or graph snapshot'],
   };
 }
@@ -969,6 +1121,7 @@ export async function planSymbolChange(input: AnalyzeSymbolChangePlanInput): Pro
   const fileLists = classifyLists(orderedPlan);
   const uiPlanningHints = buildUiPlanningHints(impact);
   const notes = collectNotes(ownership, impact, scope);
+  const impactBuckets = buildImpactBuckets(impact);
 
   return {
     target: {
@@ -985,6 +1138,7 @@ export async function planSymbolChange(input: AnalyzeSymbolChangePlanInput): Pro
     secondaryEditFiles: fileLists.secondaryEditFiles,
     reviewFiles: fileLists.reviewFiles,
     orderedPlan,
+    impactBuckets,
     ...(uiPlanningHints ? { uiPlanningHints } : {}),
     notes: notes.length > 0 ? notes : undefined,
   };
