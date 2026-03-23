@@ -164,7 +164,7 @@ export async function runExploreComponentTool(
       };
     }),
   );
-  const ambiguityDetected = symbolContext.summary.totalCandidateCount > 1;
+  const ambiguityDetected = symbolContext.summary.ambiguityDetected;
   const uiHierarchy =
     symbolContext.primarySymbol && (fileContext?.primaryFile ?? symbolContext.primaryFile)
       ? await getUiHierarchySummary({

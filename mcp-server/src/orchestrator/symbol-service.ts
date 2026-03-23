@@ -25,6 +25,8 @@ export async function getSymbolExplorationContext(
     summary: {
       candidateCount: context.rankedSymbols.length,
       totalCandidateCount: context.totalRankedSymbols,
+      ambiguityDetected: context.ambiguityDetected,
+      viableAlternativeCount: context.viableAlternativeCount,
       relatedFileCount: context.relatedFiles.length,
       totalRelatedFileCount: context.totalRelatedFiles,
       exportedSymbolCount: context.exportedSymbols.length,

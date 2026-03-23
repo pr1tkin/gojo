@@ -46,6 +46,8 @@ export interface ReferenceRankingDependencies {
 
 export interface SymbolRankingDependencies {
   stats?: SymbolFrequencyStats;
+  relationsByFile?: Record<string, FileRelation>;
+  fileFanInById?: Record<string, number>;
 }
 
 export type RankedSymbolCandidate = RankedCandidate<IndexedSymbol>;

@@ -28,9 +28,23 @@ export async function runFindSymbolTool(
     },
     {
       stats: index.stats,
+      relationsByFile: index.byFile,
+      fileFanInById: Object.values(index.byFile).reduce<Record<string, number>>((acc, relation) => {
+        for (const entry of relation.imports) {
+          if (!entry.resolvedTargetFileId) {
+            continue;
+          }
+
+          acc[entry.resolvedTargetFileId] = (acc[entry.resolvedTargetFileId] ?? 0) + 1;
+        }
+
+        return acc;
+      }, Object.create(null) as Record<string, number>),
     },
-  ).map((entry) => entry.item);
+  );
   const metadata = await buildStructuralTrustMetadata();
+  const primary = rankedMatches[0]?.item ?? null;
+  const alternatives = rankedMatches.slice(1).map((entry) => entry.item);
 
   return {
     content: [
@@ -38,7 +52,9 @@ export async function runFindSymbolTool(
         type: 'text',
         text: JSON.stringify(
           {
-            matches: rankedMatches,
+            primary,
+            alternatives,
+            matches: rankedMatches.map((entry) => entry.item),
             metadata,
           },
           null,

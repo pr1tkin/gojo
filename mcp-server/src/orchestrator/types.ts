@@ -89,6 +89,8 @@ export interface SymbolExplorationContext {
   summary: {
     candidateCount: number;
     totalCandidateCount: number;
+    ambiguityDetected: boolean;
+    viableAlternativeCount: number;
     relatedFileCount: number;
     totalRelatedFileCount: number;
     exportedSymbolCount: number;

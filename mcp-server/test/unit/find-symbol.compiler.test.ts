@@ -91,6 +91,24 @@ describe('find_symbol compiler-aware integration', () => {
     const parsed = JSON.parse(result.content[0].text) as Record<string, unknown>;
 
     expect(parsed).toEqual({
+      primary: {
+        symbolId: createSymbolId(
+          createFileId('ts-project', 'src/models.ts'),
+          'class',
+          'UserService',
+          1,
+        ),
+        fileId: createFileId('ts-project', 'src/models.ts'),
+        name: 'UserService',
+        kind: 'class',
+        repo: 'ts-project',
+        filePath: 'src/models.ts',
+        startLine: 5,
+        endLine: 9,
+        exported: true,
+        declarationFingerprint: 'class:UserService:1',
+      },
+      alternatives: [],
       matches: [
         {
           symbolId: createSymbolId(
@@ -161,6 +179,24 @@ describe('find_symbol compiler-aware integration', () => {
     const parsed = JSON.parse(result.content[0].text) as Record<string, unknown>;
 
     expect(parsed).toEqual({
+      primary: {
+        symbolId: createSymbolId(
+          createFileId('missing-project', 'src/missing.ts'),
+          'class',
+          'MissingService',
+          1,
+        ),
+        fileId: createFileId('missing-project', 'src/missing.ts'),
+        name: 'MissingService',
+        kind: 'class',
+        repo: 'missing-project',
+        filePath: 'src/missing.ts',
+        startLine: 1,
+        endLine: 3,
+        exported: false,
+        declarationFingerprint: 'class:MissingService:1',
+      },
+      alternatives: [],
       matches: [
         {
           symbolId: createSymbolId(

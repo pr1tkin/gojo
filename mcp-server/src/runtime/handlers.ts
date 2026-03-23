@@ -509,7 +509,7 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
 
     const primarySymbol = result.primarySymbol;
     const primaryFile = result.primaryFile;
-    const ambiguityDetected = result.summary.totalCandidateCount > 1;
+    const ambiguityDetected = result.summary.ambiguityDetected;
     const warnings = [
       ...(ambiguityDetected
         ? ['Target resolution is ambiguous; runtime result is intentionally compact.']

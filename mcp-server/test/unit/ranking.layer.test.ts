@@ -86,6 +86,138 @@ describe('ranking layer', () => {
     );
   });
 
+  it('ranks canonical service definitions above same-name hook wrappers', () => {
+    const canonical = createSymbol({
+      symbolId: 'repo-a:lib/services/automationService.ts:function:createAutomation:1',
+      fileId: 'repo-a:lib/services/automationService.ts',
+      filePath: 'lib/services/automationService.ts',
+      name: 'createAutomation',
+      startLine: 10,
+      endLine: 28,
+      exported: true,
+    });
+    const wrapper = createSymbol({
+      symbolId: 'repo-a:lib/hooks/useAutomationsMutation.ts:function:createAutomation:1',
+      fileId: 'repo-a:lib/hooks/useAutomationsMutation.ts',
+      filePath: 'lib/hooks/useAutomationsMutation.ts',
+      name: 'createAutomation',
+      startLine: 4,
+      endLine: 6,
+      exported: true,
+    });
+
+    const ranked = rankSymbolCandidates(
+      [wrapper, canonical],
+      {
+        queryName: 'createAutomation',
+        kind: 'function',
+        repo: 'repo-a',
+      },
+      {
+        stats: createStats({
+          globalByName: { createAutomation: 2 },
+        }),
+        relationsByFile: {
+          [canonical.fileId]: createRelation({
+            fileId: canonical.fileId,
+            repo: canonical.repo,
+            filePath: canonical.filePath,
+            symbolIds: [canonical.symbolId],
+            symbolNames: [canonical.name],
+            exports: [{ fileId: canonical.fileId, kind: 'named', exportedName: canonical.name, localName: canonical.name, symbolId: canonical.symbolId }],
+          }),
+          [wrapper.fileId]: createRelation({
+            fileId: wrapper.fileId,
+            repo: wrapper.repo,
+            filePath: wrapper.filePath,
+            symbolIds: [wrapper.symbolId],
+            symbolNames: [wrapper.name],
+            imports: [{
+              fileId: wrapper.fileId,
+              source: '../services/automationService',
+              bindings: [{ importedName: 'createAutomation', localName: 'createAutomation', kind: 'named', isTypeOnly: false }],
+              resolvedKind: 'local-file',
+              resolvedTargetFileId: canonical.fileId,
+            }],
+            exports: [{ fileId: wrapper.fileId, kind: 'named', exportedName: wrapper.name, localName: wrapper.name, symbolId: wrapper.symbolId }],
+          }),
+        },
+        fileFanInById: {
+          [canonical.fileId]: 3,
+          [wrapper.fileId]: 0,
+        },
+      },
+    );
+
+    expect(ranked[0].item.filePath).toBe(canonical.filePath);
+    expect(ranked[0].reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ signal: 'canonical_definition' }),
+      expect.objectContaining({ signal: 'service_path' }),
+      expect.objectContaining({ signal: 'fan_in_bonus' }),
+    ]));
+    expect(ranked[1].reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ signal: 'hook_detected' }),
+    ]));
+  });
+
+  it('demotes re-export barrels below concrete definitions with the same name', () => {
+    const definition = createSymbol({
+      symbolId: 'repo-a:src/services/contracts.ts:function:getAutomations:1',
+      fileId: 'repo-a:src/services/contracts.ts',
+      filePath: 'src/services/contracts.ts',
+      name: 'getAutomations',
+      startLine: 5,
+      endLine: 16,
+      exported: true,
+    });
+    const barrel = createSymbol({
+      symbolId: 'repo-a:src/index.ts:function:getAutomations:1',
+      fileId: 'repo-a:src/index.ts',
+      filePath: 'src/index.ts',
+      name: 'getAutomations',
+      startLine: 1,
+      endLine: 1,
+      exported: true,
+    });
+
+    const ranked = rankSymbolCandidates(
+      [barrel, definition],
+      {
+        queryName: 'getAutomations',
+        kind: 'function',
+        repo: 'repo-a',
+      },
+      {
+        stats: createStats({
+          globalByName: { getAutomations: 2 },
+        }),
+        relationsByFile: {
+          [definition.fileId]: createRelation({
+            fileId: definition.fileId,
+            repo: definition.repo,
+            filePath: definition.filePath,
+            symbolIds: [definition.symbolId],
+            symbolNames: [definition.name],
+            exports: [{ fileId: definition.fileId, kind: 'named', exportedName: definition.name, localName: definition.name, symbolId: definition.symbolId }],
+          }),
+          [barrel.fileId]: createRelation({
+            fileId: barrel.fileId,
+            repo: barrel.repo,
+            filePath: barrel.filePath,
+            symbolIds: [],
+            symbolNames: [barrel.name],
+            exports: [{ fileId: barrel.fileId, kind: 'reexport-named', exportedName: barrel.name, localName: barrel.name, source: './services/contracts' }],
+          }),
+        },
+      },
+    );
+
+    expect(ranked[0].item.filePath).toBe(definition.filePath);
+    expect(ranked[1].reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ signal: 'reexport_penalty' }),
+    ]));
+  });
+
   it('lets lower-frequency exact symbols beat very common loose candidates when other signals are similar', () => {
     const candidates = [
       createSymbol({

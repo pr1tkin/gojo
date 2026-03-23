@@ -42,6 +42,8 @@ export interface SymbolContextBundle {
   kind?: SymbolKind;
   rankedSymbols: RankedSymbolCandidate[];
   totalRankedSymbols: number;
+  ambiguityDetected: boolean;
+  viableAlternativeCount: number;
   primarySymbol: IndexedSymbol | null;
   primaryFile: FileNode | null;
   relatedFiles: RankedFileContextItem[];

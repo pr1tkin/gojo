@@ -180,6 +180,22 @@ function inferRoleFromFile(filePath: string | null | undefined, symbolNames: str
 }
 
 function buildSymbolSelectionReason(reasons: RankingReason[]): string {
+  if (reasons.some((reason) => reason.signal === 'canonical_definition')) {
+    if (reasons.some((reason) => reason.signal === 'service_path')) {
+      return 'canonical service definition';
+    }
+
+    return 'canonical definition';
+  }
+
+  if (reasons.some((reason) => reason.signal === 'reexport_penalty')) {
+    return 'proxy or re-export candidate';
+  }
+
+  if (reasons.some((reason) => reason.signal === 'wrapper_detected' || reason.signal === 'hook_detected')) {
+    return 'wrapper or hook candidate';
+  }
+
   if (reasons.some((reason) => reason.signal === 'exact_name')) {
     return reasons.some((reason) => reason.signal === 'kind_match')
       ? 'exact name + kind match'
@@ -216,6 +232,13 @@ function buildSymbolSelectionReason(reasons: RankingReason[]): string {
 }
 
 function buildSymbolCandidateConfidence(candidate: SymbolCandidateLike): ExplainabilityConfidence {
+  if (
+    candidate.reasons.some((reason) => reason.signal === 'canonical_definition') &&
+    candidate.reasons.some((reason) => reason.signal === 'exact_name')
+  ) {
+    return 'high';
+  }
+
   if (
     candidate.reasons.some((reason) => reason.signal === 'exact_name') &&
     candidate.reasons.some((reason) => reason.signal === 'kind_match')

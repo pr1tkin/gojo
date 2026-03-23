@@ -129,6 +129,8 @@ describe('context assembly', () => {
       expect.objectContaining({ fileId: preferredFileId }),
     ]);
     expect(bundle.relatedFiles).toEqual([]);
+    expect(bundle.ambiguityDetected).toBe(false);
+    expect(bundle.viableAlternativeCount).toBe(0);
   });
 
   it('degrades safely for missing file and unresolved symbol context requests', async () => {
@@ -189,6 +191,8 @@ describe('context assembly', () => {
       primaryFile: null,
       relatedFiles: [],
       totalRankedSymbols: 0,
+      ambiguityDetected: false,
+      viableAlternativeCount: 0,
       totalRelatedFiles: 0,
       exportedSymbols: [],
     });
