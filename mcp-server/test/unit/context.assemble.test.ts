@@ -9,6 +9,8 @@ import { assembleFileContext, assembleRelatedFileContext, assembleSymbolContext 
 import { createFileId, createSymbolId } from '../../src/symbol-index/ids.js';
 import { buildIndexedSymbols } from '../../src/symbol-index/build-index.js';
 import { saveCodeGraph } from '../../src/graph/store.js';
+import { buildSemanticGraph } from '../../src/graph/build-semantic-graph.js';
+import { saveSemanticGraph } from '../../src/graph/semantic-store.js';
 import { saveSymbolIndex } from '../../src/symbol-index/store.js';
 
 async function createTempDirectory(): Promise<string> {
@@ -192,6 +194,14 @@ describe('context assembly', () => {
     const index = await buildIndexedSymbols(reposRoot);
     await saveSymbolIndex(index);
     await saveCodeGraph(await buildCodeGraph());
+    await saveSemanticGraph(await buildSemanticGraph(index, [
+      {
+        id: 'api-context-repo',
+        name: 'api-context-repo',
+        rootPath: repositoryRoot,
+        isGitRepository: true,
+      },
+    ]));
 
     const bundle = await assembleSymbolContext({
       name: 'getAutomations',

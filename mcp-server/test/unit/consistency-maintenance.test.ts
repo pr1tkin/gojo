@@ -9,6 +9,7 @@ import {
   loadCurrentConsistencyReport,
   runCurrentGenerationConsistencyMaintenance,
 } from '../../src/indexing/consistency.js';
+import { loadSemanticGraph } from '../../src/graph/semantic-store.js';
 import { refreshIndexes } from '../../src/indexing/refresh.js';
 import { loadPatternIndex } from '../../src/patterns/store.js';
 import { loadSymbolIndex } from '../../src/symbol-index/store.js';
@@ -169,11 +170,29 @@ describe.sequential('consistency maintenance', () => {
         },
       ],
     });
+    await overwriteCurrentArtifact('semantic-graph.json', {
+      schemaVersion: 1,
+      sourceSymbolIndexSchemaVersion: 4,
+      generatedAt: new Date().toISOString(),
+      edges: [
+        {
+          edgeId: 'ghost-edge',
+          kind: 'symbol_reference',
+          strength: 'strong',
+          confidence: 'high',
+          exactness: 'exact',
+          fromFileId: 'app-repo:src/Ghost.ts',
+          fromSymbolId: 'app-repo:src/Ghost.ts:function:ghost:1',
+          toFileId: 'app-repo:src/a.ts',
+        },
+      ],
+    });
 
     const report = await runCurrentGenerationConsistencyMaintenance({ logger: silentLogger, applyRepairs: true });
     const check = report?.checks.find((entry) => entry.checkId === 'orphaned-artifact-entries');
     const repairedSymbolIndex = await loadSymbolIndex();
     const repairedPatternIndex = await loadPatternIndex();
+    const repairedSemanticGraph = await loadSemanticGraph();
 
     expect(check?.status).toBe('repaired');
     expect(check?.repairsApplied).toEqual(
@@ -183,6 +202,8 @@ describe.sequential('consistency maintenance', () => {
     );
     expect(repairedSymbolIndex.symbols.some((symbol) => symbol.filePath === 'src/Ghost.ts')).toBe(false);
     expect(repairedPatternIndex.patterns.some((pattern) => pattern.fileId === 'app-repo:src/Ghost.ts')).toBe(false);
+    expect(repairedSemanticGraph.edges.some((edge) => edge.edgeId === 'ghost-edge')).toBe(false);
+    expect(repairedSemanticGraph.sourceSymbolIndexSchemaVersion).toBeGreaterThan(0);
   });
 
   it('flags cross-artifact mismatches without silently accepting them', async () => {

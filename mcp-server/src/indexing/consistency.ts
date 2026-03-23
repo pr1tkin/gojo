@@ -8,7 +8,10 @@ import {
 import { assessCriticalDataDependencies } from './critical-data.js';
 import { cleanupGenerationDebris } from './generation-debris.js';
 import { buildCodeGraphFromSymbolIndex } from '../graph/build-graph.js';
+import { buildSemanticGraph } from '../graph/build-semantic-graph.js';
 import { loadRepoResolutionConfigs } from '../graph/repo-config.js';
+import { loadSemanticGraph, saveSemanticGraph } from '../graph/semantic-store.js';
+import type { SemanticGraphSnapshot } from '../graph/semantic-types.js';
 import type { CodeGraphSnapshot } from '../graph/types.js';
 import { loadPatternIndexResult, savePatternIndex } from '../patterns/store.js';
 import type { PatternIndex } from '../patterns/types.js';
@@ -50,6 +53,7 @@ const CONSISTENCY_REPORT_SCHEMA_VERSION = 1;
 const REQUIRED_GENERATION_ARTIFACTS = [
   'symbol-index.json',
   'code-graph.json',
+  'semantic-graph.json',
   'ui-composition.json',
   'ui-props.json',
   'pattern-candidates.json',
@@ -148,6 +152,15 @@ function createCounts(
     uiCompositionEdges: uiComposition.edges.length,
     uiPropUsages: uiProps.propUsages.length,
     patterns: patternIndex.patterns.length,
+  };
+}
+
+function createEmptySemanticGraph(): SemanticGraphSnapshot {
+  return {
+    schemaVersion: 1,
+    sourceSymbolIndexSchemaVersion: 0,
+    generatedAt: '',
+    edges: [],
   };
 }
 
@@ -335,6 +348,7 @@ export async function runCurrentGenerationConsistencyMaintenance(
   );
   const currentSymbolIndex = await loadSymbolIndex();
   const currentGraph = await (await import('../graph/store.js')).loadCodeGraph();
+  let semanticGraph = await loadSemanticGraph();
   let symbolIndex = currentSymbolIndex;
   let graph = currentGraph;
   let uiComposition = await loadUiCompositionIndex();
@@ -347,6 +361,7 @@ export async function runCurrentGenerationConsistencyMaintenance(
   let uiCompositionChanged = false;
   let uiPropsChanged = false;
   let patternIndexChanged = false;
+  let semanticGraphChanged = false;
   let stateChanged = false;
   const checks: ConsistencyCheckResult[] = [];
 
@@ -490,6 +505,7 @@ export async function runCurrentGenerationConsistencyMaintenance(
     orphanCheck.targetArtifacts = [
       'symbol-index.json',
       'code-graph.json',
+      'semantic-graph.json',
       'ui-composition.json',
       'ui-props.json',
       'pattern-candidates.json',
@@ -565,6 +581,8 @@ export async function runCurrentGenerationConsistencyMaintenance(
         patterns: patternIndex.patterns.filter((pattern) => manifestFileIds.has(pattern.fileId)),
       };
       patternIndexChanged = true;
+      semanticGraph = createEmptySemanticGraph();
+      semanticGraphChanged = true;
 
       orphanCheck.repairsApplied.push(
         createRepairRecord(
@@ -957,8 +975,25 @@ export async function runCurrentGenerationConsistencyMaintenance(
     await saveSymbolIndex(symbolIndex, { generationId });
   }
 
+  if (symbolIndexChanged || graphChanged) {
+    semanticGraph = await buildSemanticGraph(
+      symbolIndex,
+      generationState.repositories.map((repository) => ({
+        id: repository.repoId,
+        name: repository.repoId,
+        rootPath: repository.repoRoot,
+        isGitRepository: true,
+      })),
+    );
+    semanticGraphChanged = true;
+  }
+
   if (graphChanged) {
     await (await import('../graph/store.js')).saveCodeGraph(graph, { generationId });
+  }
+
+  if (semanticGraphChanged) {
+    await saveSemanticGraph(semanticGraph, { generationId });
   }
 
   if (uiCompositionChanged) {
@@ -973,7 +1008,7 @@ export async function runCurrentGenerationConsistencyMaintenance(
     await savePatternIndex(patternIndex, { generationId });
   }
 
-  if (symbolIndexChanged || graphChanged || uiCompositionChanged || uiPropsChanged || patternIndexChanged) {
+  if (symbolIndexChanged || graphChanged || semanticGraphChanged || uiCompositionChanged || uiPropsChanged || patternIndexChanged) {
     generationState = {
       ...generationState,
       counts: createCounts(symbolIndex, graph, uiComposition, uiProps, patternIndex),

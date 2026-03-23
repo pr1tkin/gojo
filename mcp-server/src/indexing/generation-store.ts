@@ -22,6 +22,7 @@ const REFRESH_FAILURE_SCHEMA_VERSION = 1;
 export const REQUIRED_GENERATION_ARTIFACT_FILES = [
   'symbol-index.json',
   'code-graph.json',
+  'semantic-graph.json',
   'ui-composition.json',
   'ui-props.json',
   'ui-semantics.json',

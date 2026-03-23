@@ -4,7 +4,9 @@ const {
   getDefinedSymbolsMock,
   getFileNodeMock,
   getImportingFilesMock,
+  getIncomingSemanticEdgesForSymbolMock,
   getReexportingFilesMock,
+  getSemanticGraphMock,
   getFileRelationMock,
   getFileRelationByIdMock,
   loadRequiredSymbolIndexMock,
@@ -18,7 +20,9 @@ const {
   getDefinedSymbolsMock: vi.fn(),
   getFileNodeMock: vi.fn(),
   getImportingFilesMock: vi.fn(),
+  getIncomingSemanticEdgesForSymbolMock: vi.fn(),
   getReexportingFilesMock: vi.fn(),
+  getSemanticGraphMock: vi.fn(),
   getFileRelationMock: vi.fn(),
   getFileRelationByIdMock: vi.fn(),
   loadRequiredSymbolIndexMock: vi.fn(),
@@ -34,7 +38,9 @@ vi.mock('../../src/graph/query.js', () => ({
   getDefinedSymbols: getDefinedSymbolsMock,
   getFileNode: getFileNodeMock,
   getImportingFiles: getImportingFilesMock,
+  getIncomingSemanticEdgesForSymbol: getIncomingSemanticEdgesForSymbolMock,
   getReexportingFiles: getReexportingFilesMock,
+  getSemanticGraph: getSemanticGraphMock,
 }));
 
 vi.mock('../../src/symbol-index/query.js', () => ({
@@ -222,6 +228,13 @@ describe('impact analysis service', () => {
       return [];
     });
     getReexportingFilesMock.mockResolvedValue([barrelFile]);
+    getSemanticGraphMock.mockResolvedValue({
+      schemaVersion: 1,
+      sourceSymbolIndexSchemaVersion: 0,
+      generatedAt: '',
+      edges: [],
+    });
+    getIncomingSemanticEdgesForSymbolMock.mockResolvedValue([]);
     getFileRelationMock.mockResolvedValue({
       fileId: targetSymbol.fileId,
       repo: 'repo-a',
@@ -505,6 +518,131 @@ describe('impact analysis service', () => {
       featureClusters: [],
       transitiveGroups: [],
     });
+  });
+
+  it('prefers persisted semantic graph edges when available', async () => {
+    const routeFile = fileNode('repo-a:app/api/widget/route.ts', 'repo-a', 'app/api/widget/route.ts');
+    const hookFile = fileNode('repo-a:src/hooks/useWidget.ts', 'repo-a', 'src/hooks/useWidget.ts');
+    const routeSymbol = symbolNode('route-get', routeFile.fileId, 'repo-a', routeFile.filePath, 'GET', 1, 3);
+    const hookSymbol = symbolNode('use-widget', hookFile.fileId, 'repo-a', hookFile.filePath, 'useWidget', 1, 4);
+
+    getFileNodeMock.mockImplementation(async (fileId: string) => {
+      if (fileId === targetSymbol.fileId) {
+        return fileNode(targetSymbol.fileId, 'repo-a', targetSymbol.filePath);
+      }
+
+      if (fileId === routeFile.fileId) {
+        return routeFile;
+      }
+
+      if (fileId === hookFile.fileId) {
+        return hookFile;
+      }
+
+      return null;
+    });
+    getSemanticGraphMock.mockResolvedValue({
+      schemaVersion: 1,
+      sourceSymbolIndexSchemaVersion: 4,
+      generatedAt: '2026-03-23T00:00:00.000Z',
+      edges: [{}],
+    });
+    getIncomingSemanticEdgesForSymbolMock.mockImplementation(async (_symbolId: string, options?: { exactness?: string }) => {
+      if (options?.exactness === 'exact') {
+        return [
+          {
+            edge: {
+              edgeId: 'exact-route',
+              kind: 'api_route_handler',
+              strength: 'strong',
+              confidence: 'high',
+              exactness: 'exact',
+              fromFileId: routeFile.fileId,
+              fromSymbolId: routeSymbol.symbolId,
+              toFileId: targetSymbol.fileId,
+              toSymbolId: targetSymbol.symbolId,
+              metadata: {
+                routeId: '/api/widget',
+                routeFileId: routeFile.fileId,
+                routeFilePath: routeFile.filePath,
+                httpMethod: 'GET',
+                source: 'api_propagation',
+              },
+            },
+            fromFile: routeFile,
+            fromSymbol: routeSymbol,
+            toFile: fileNode(targetSymbol.fileId, 'repo-a', targetSymbol.filePath),
+            toSymbol: symbolNode(
+              targetSymbol.symbolId,
+              targetSymbol.fileId,
+              'repo-a',
+              targetSymbol.filePath,
+              targetSymbol.name,
+              targetSymbol.startLine,
+              targetSymbol.endLine,
+            ),
+          },
+        ];
+      }
+
+      if (options?.exactness === 'inferred') {
+        return [
+          {
+            edge: {
+              edgeId: 'inferred-hook',
+              kind: 'api_propagation',
+              strength: 'medium',
+              confidence: 'medium',
+              exactness: 'inferred',
+              fromFileId: hookFile.fileId,
+              fromSymbolId: hookSymbol.symbolId,
+              toFileId: targetSymbol.fileId,
+              toSymbolId: targetSymbol.symbolId,
+              metadata: {
+                routeId: '/api/widget',
+                routeFileId: routeFile.fileId,
+                routeFilePath: routeFile.filePath,
+                httpMethod: 'GET',
+                handlerName: 'GET',
+                source: 'api_propagation',
+              },
+            },
+            fromFile: hookFile,
+            fromSymbol: hookSymbol,
+            toFile: fileNode(targetSymbol.fileId, 'repo-a', targetSymbol.filePath),
+            toSymbol: symbolNode(
+              targetSymbol.symbolId,
+              targetSymbol.fileId,
+              'repo-a',
+              targetSymbol.filePath,
+              targetSymbol.name,
+              targetSymbol.startLine,
+              targetSymbol.endLine,
+            ),
+          },
+        ];
+      }
+
+      return [];
+    });
+
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'safe',
+    });
+
+    expect(result.directConsumers.files).toEqual(
+      expect.arrayContaining([expect.objectContaining({ filePath: routeFile.filePath })]),
+    );
+    expect(result.directConsumers.symbols).toEqual(
+      expect.arrayContaining([expect.objectContaining({ symbolName: 'GET' })]),
+    );
+    expect(result.indirectConsumers.files).toEqual(
+      expect.arrayContaining([expect.objectContaining({ filePath: hookFile.filePath })]),
+    );
+    expect(result.indirectConsumers.symbols).toEqual(
+      expect.arrayContaining([expect.objectContaining({ symbolName: 'useWidget' })]),
+    );
   });
 
   it('resolves the target by filePath and symbolName', async () => {

@@ -2,7 +2,9 @@ import {
   getDefinedSymbols,
   getFileNode,
   getImportingFiles,
+  getIncomingSemanticEdgesForSymbol,
   getReexportingFiles,
+  getSemanticGraph,
 } from '../graph/query.js';
 import { readRepositoryFile } from '../files.js';
 import { getRepositoryById } from '../repositories.js';
@@ -1089,10 +1091,116 @@ function inferReferenceReason(match: {
   return 'calls-target';
 }
 
+function inferSemanticEdgeReason(
+  kind: Awaited<ReturnType<typeof getIncomingSemanticEdgesForSymbol>>[number]['edge']['kind'],
+): ImpactReason {
+  switch (kind) {
+    case 'symbol_call':
+      return 'calls-target';
+    case 'jsx_reference':
+      return 'jsx-uses-target';
+    case 'type_reference':
+      return 'type-propagation';
+    case 'symbol_reference':
+    case 'api_route_handler':
+    case 'api_client_to_route':
+    case 'api_propagation':
+      return 'calls-target';
+  }
+}
+
+async function loadPersistedSemanticConsumerEdges(
+  target: IndexedSymbol,
+  exactness: 'exact' | 'inferred',
+): Promise<Awaited<ReturnType<typeof getIncomingSemanticEdgesForSymbol>> | null> {
+  const semanticGraph = await getSemanticGraph().catch(() => null);
+
+  if (!semanticGraph || semanticGraph.sourceSymbolIndexSchemaVersion <= 0) {
+    return null;
+  }
+
+  return getIncomingSemanticEdgesForSymbol(target.symbolId, { exactness }).catch(() => []);
+}
+
 async function collectCompilerReferenceImpacts(target: IndexedSymbol): Promise<{
   directFiles: ImpactedFile[];
   directSymbols: ImpactedSymbol[];
 }> {
+  const persistedEdges = await loadPersistedSemanticConsumerEdges(target, 'exact');
+
+  if (persistedEdges !== null) {
+    const directFiles: ImpactedFile[] = [];
+    const directSymbols: ImpactedSymbol[] = [];
+
+    for (const entry of persistedEdges) {
+      const sourceFile = entry.fromFile;
+
+      if (!sourceFile || sourceFile.filePath === target.filePath) {
+        continue;
+      }
+
+      const reason = inferSemanticEdgeReason(entry.edge.kind);
+      const notes =
+        entry.edge.kind === 'api_route_handler'
+          ? ['persisted semantic graph confirms the route handler directly references the target symbol']
+          : ['persisted semantic graph confirms an exact cross-file symbol reference to the target declaration'];
+      const fileEvidence = buildEvidence(
+        reason,
+        entry.edge.confidence,
+        sourceFile.filePath,
+        notes,
+        'file-direct',
+        'direct',
+        'graph',
+      );
+
+      directFiles.push(buildImpactedFile({
+        file: sourceFile,
+        fileId: sourceFile.fileId,
+        filePath: sourceFile.filePath,
+        repoId: sourceFile.repoId,
+        impactScope: 'file-direct',
+        tier: 'direct',
+        evidence: [fileEvidence],
+      }));
+
+      if (!entry.fromSymbol) {
+        continue;
+      }
+
+      const symbolEvidence = buildEvidence(
+        reason,
+        entry.edge.confidence,
+        entry.fromSymbol.filePath,
+        [`persisted semantic graph confirms exact symbol-level usage inside "${entry.fromSymbol.name}"`],
+        'symbol-direct',
+        'direct',
+        'graph',
+        entry.fromSymbol.symbolId,
+        entry.fromSymbol.name,
+      );
+
+      directSymbols.push(buildImpactedSymbol({
+        symbol: entry.fromSymbol,
+        file: sourceFile,
+        symbolId: entry.fromSymbol.symbolId,
+        symbolName: entry.fromSymbol.name,
+        kind: entry.fromSymbol.kind,
+        exported: entry.fromSymbol.exported,
+        filePath: entry.fromSymbol.filePath,
+        repoId: entry.fromSymbol.repoId,
+        impactScope: 'symbol-direct',
+        tier: 'direct',
+        evidence: [symbolEvidence],
+      }));
+    }
+
+    return {
+      directFiles,
+      directSymbols,
+    };
+  }
+
   let repository: Awaited<ReturnType<typeof getRepositoryById>> | null = null;
 
   try {
@@ -1305,6 +1413,101 @@ async function collectApiPropagationImpacts(target: IndexedSymbol): Promise<{
   indirectFiles: ImpactedFile[];
   indirectSymbols: ImpactedSymbol[];
 }> {
+  const persistedEdges = await loadPersistedSemanticConsumerEdges(target, 'inferred');
+
+  if (persistedEdges !== null) {
+    const indirectFiles: ImpactedFile[] = [];
+    const indirectSymbols: ImpactedSymbol[] = [];
+
+    for (const entry of persistedEdges) {
+      if (entry.edge.kind !== 'api_propagation') {
+        continue;
+      }
+
+      const sourceFile = entry.fromFile;
+
+      if (!sourceFile) {
+        continue;
+      }
+
+      const routeReason = entry.edge.metadata?.routeId
+        ? [
+            {
+              fileId: entry.edge.metadata.routeFileId,
+              filePath: entry.edge.metadata.routeFilePath ?? entry.edge.metadata.routeId,
+              reason: 'api-route-handler' as const,
+            },
+          ]
+        : undefined;
+      const fileEvidence = buildEvidence(
+        'api-propagation',
+        entry.edge.confidence,
+        sourceFile.filePath,
+        [
+          `persisted semantic graph confirms the file reaches the target through API route "${entry.edge.metadata?.routeId ?? 'unknown'}"`,
+        ],
+        'proxy',
+        'indirect',
+        'graph',
+        undefined,
+        undefined,
+        1,
+        routeReason,
+        ['proxy_only'],
+      );
+
+      indirectFiles.push(buildImpactedFile({
+        file: sourceFile,
+        fileId: sourceFile.fileId,
+        filePath: sourceFile.filePath,
+        repoId: sourceFile.repoId,
+        impactScope: 'proxy',
+        tier: 'indirect',
+        evidence: [fileEvidence],
+      }));
+
+      if (!entry.fromSymbol) {
+        continue;
+      }
+
+      const symbolEvidence = buildEvidence(
+        'api-propagation',
+        entry.edge.confidence,
+        entry.fromSymbol.filePath,
+        [
+          `persisted semantic graph confirms "${entry.fromSymbol.name}" reaches the target through API route "${entry.edge.metadata?.routeId ?? 'unknown'}"`,
+        ],
+        'proxy',
+        'indirect',
+        'graph',
+        entry.fromSymbol.symbolId,
+        entry.fromSymbol.name,
+        1,
+        routeReason,
+        ['proxy_only'],
+      );
+
+      indirectSymbols.push(buildImpactedSymbol({
+        symbol: entry.fromSymbol,
+        file: sourceFile,
+        symbolId: entry.fromSymbol.symbolId,
+        symbolName: entry.fromSymbol.name,
+        kind: entry.fromSymbol.kind,
+        exported: entry.fromSymbol.exported,
+        filePath: entry.fromSymbol.filePath,
+        repoId: entry.fromSymbol.repoId,
+        impactScope: 'proxy',
+        tier: 'indirect',
+        evidence: [symbolEvidence],
+      }));
+    }
+
+    return {
+      indirectFiles,
+      indirectSymbols,
+    };
+  }
+
   let repository: Awaited<ReturnType<typeof getRepositoryById>> | null = null;
 
   try {

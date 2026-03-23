@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { loadConfig } from '../config.js';
 import { buildCodeGraphFromSymbolIndex } from '../graph/build-graph.js';
+import { buildSemanticGraph } from '../graph/build-semantic-graph.js';
 import { loadRepoResolutionConfigs } from '../graph/repo-config.js';
 import type { CodeGraphSnapshot } from '../graph/types.js';
 import { loadPatternIndexResult } from '../patterns/store.js';
@@ -97,6 +98,7 @@ export interface RefreshIndexesOptions {
       uiComposition: UiCompositionIndex;
       uiProps: UiPropSurfaceIndex;
       patternIndex: PatternIndex;
+      semanticGraph: Awaited<ReturnType<typeof buildSemanticGraph>>;
     }) =>
       | Promise<{
           symbolIndex?: SymbolIndex;
@@ -104,6 +106,7 @@ export interface RefreshIndexesOptions {
           uiComposition?: UiCompositionIndex;
           uiProps?: UiPropSurfaceIndex;
           patternIndex?: PatternIndex;
+          semanticGraph?: Awaited<ReturnType<typeof buildSemanticGraph>>;
         }>
       | {
           symbolIndex?: SymbolIndex;
@@ -111,6 +114,7 @@ export interface RefreshIndexesOptions {
           uiComposition?: UiCompositionIndex;
           uiProps?: UiPropSurfaceIndex;
           patternIndex?: PatternIndex;
+          semanticGraph?: Awaited<ReturnType<typeof buildSemanticGraph>>;
         };
   };
 }
@@ -586,6 +590,15 @@ async function refreshIndexesUnlocked(
     const graph = buildCodeGraphFromSymbolIndex(mergedSymbolIndex, {
       repoResolutionConfigsById: repoConfigById,
     });
+    const semanticGraph = await buildSemanticGraph(
+      mergedSymbolIndex,
+      repositories.map((repository) => ({
+        id: repository.repoId,
+        name: repository.repoId,
+        rootPath: repository.repoRoot,
+        isGitRepository: true,
+      })),
+    );
     await applyRefreshFaultInjection(faultInjection, {
       stage: 'rebuild-graph',
       generationId,
@@ -599,12 +612,14 @@ async function refreshIndexesUnlocked(
         reposRoot: path.resolve(reposRoot),
         symbolIndex: mergedSymbolIndex,
         graph,
+        semanticGraph,
         uiComposition,
         uiProps,
         patternIndex: mergedPatternResult.index,
       })) ?? {};
     const finalSymbolIndex = mutatedArtifacts.symbolIndex ?? mergedSymbolIndex;
     const finalGraph = mutatedArtifacts.graph ?? graph;
+    const finalSemanticGraph = mutatedArtifacts.semanticGraph ?? semanticGraph;
     const finalUiComposition = mutatedArtifacts.uiComposition ?? uiComposition;
     const finalUiProps = mutatedArtifacts.uiProps ?? uiProps;
     const finalPatternIndex = mutatedArtifacts.patternIndex ?? mergedPatternResult.index;
@@ -747,6 +762,7 @@ async function refreshIndexesUnlocked(
     const artifacts: Record<string, unknown> = {
       'symbol-index.json': finalSymbolIndex,
       'code-graph.json': finalGraph,
+      'semantic-graph.json': finalSemanticGraph,
       'ui-composition.json': finalUiComposition,
       'ui-props.json': finalUiProps,
       [getUiSemanticsArtifactFileName()]: uiSemantics,

@@ -1,5 +1,10 @@
 import { loadConfig } from '../config.js';
-import { getExportedSymbols, getFileNode } from '../graph/query.js';
+import {
+  getExportedSymbols,
+  getFileNode,
+  getSemanticConsumersForSymbol,
+  getSemanticGraph,
+} from '../graph/query.js';
 import { getRepositoryById } from '../repositories.js';
 import { rankSymbolCandidates } from '../ranking/index.js';
 import { loadRequiredSymbolIndex } from '../symbol-index/store.js';
@@ -73,6 +78,77 @@ function collectSymbolCandidates(
   });
 }
 
+function mergeSignal(
+  signalsByFileId: Record<string, { kinds: FileContextConnectionKind[]; connectionCount: number }>,
+  fileId: string,
+  kinds: FileContextConnectionKind[],
+  connectionCount: number,
+): void {
+  const existing = signalsByFileId[fileId];
+
+  if (!existing) {
+    signalsByFileId[fileId] = {
+      kinds: [...new Set(kinds)],
+      connectionCount,
+    };
+    return;
+  }
+
+  existing.connectionCount += connectionCount;
+
+  for (const kind of kinds) {
+    if (!existing.kinds.includes(kind)) {
+      existing.kinds.push(kind);
+    }
+  }
+}
+
+function mapSemanticEdgeKindsToConnectionKinds(
+  kind: Awaited<ReturnType<typeof getSemanticConsumersForSymbol>>[number]['edge']['kind'],
+): FileContextConnectionKind[] {
+  switch (kind) {
+    case 'symbol_call':
+      return ['call_reference'];
+    case 'symbol_reference':
+      return ['symbol_reference'];
+    case 'jsx_reference':
+      return ['jsx_reference'];
+    case 'type_reference':
+      return ['type_reference'];
+    case 'api_route_handler':
+      return ['api_route_handler'];
+    case 'api_client_to_route':
+      return ['api_client_to_route'];
+    case 'api_propagation':
+      return ['api_client_to_route', 'api_propagation'];
+  }
+}
+
+async function buildPersistedReferenceSignalsByFileId(
+  primarySymbol: IndexedSymbol,
+): Promise<Record<string, { kinds: FileContextConnectionKind[]; connectionCount: number }> | null> {
+  const semanticGraph = await getSemanticGraph();
+
+  if (semanticGraph.sourceSymbolIndexSchemaVersion <= 0) {
+    return null;
+  }
+
+  const edges = await getSemanticConsumersForSymbol(primarySymbol.symbolId);
+  const signalsByFileId: Record<string, { kinds: FileContextConnectionKind[]; connectionCount: number }> = {};
+
+  for (const entry of edges) {
+    const fileId = entry.fromFile?.fileId ?? entry.edge.fromFileId;
+
+    if (!fileId || fileId === primarySymbol.fileId) {
+      continue;
+    }
+
+    mergeSignal(signalsByFileId, fileId, mapSemanticEdgeKindsToConnectionKinds(entry.edge.kind), 1);
+  }
+
+  return signalsByFileId;
+}
+
 async function buildReferenceSignalsByFileId(
   primarySymbol: IndexedSymbol | null,
   indexedSymbols: IndexedSymbol[],
@@ -80,6 +156,12 @@ async function buildReferenceSignalsByFileId(
 ): Promise<Record<string, { kinds: FileContextConnectionKind[]; connectionCount: number }>> {
   if (!primarySymbol) {
     return {};
+  }
+
+  const persistedSignals = await buildPersistedReferenceSignalsByFileId(primarySymbol).catch(() => null);
+
+  if (persistedSignals) {
+    return persistedSignals;
   }
 
   let repository: Awaited<ReturnType<typeof getRepositoryById>> | null = null;
@@ -140,63 +222,17 @@ async function buildReferenceSignalsByFileId(
       kinds.add('symbol_reference');
     }
 
-    const existing = signalsByFileId[fileId];
-
-    if (!existing) {
-      signalsByFileId[fileId] = {
-        kinds: [...kinds],
-        connectionCount: 1,
-      };
-      continue;
-    }
-
-    existing.connectionCount += 1;
-
-    for (const kind of kinds) {
-      if (!existing.kinds.includes(kind)) {
-        existing.kinds.push(kind);
-      }
-    }
+    mergeSignal(signalsByFileId, fileId, [...kinds], 1);
   }
 
   const apiPropagation = await collectApiPropagationForSymbol(repository, primarySymbol, relationsByFile, indexedSymbols);
 
   for (const routeHandler of apiPropagation.routeHandlers) {
-    const existing = signalsByFileId[routeHandler.routeFileId];
-
-    if (!existing) {
-      signalsByFileId[routeHandler.routeFileId] = {
-        kinds: ['api_route_handler'],
-        connectionCount: routeHandler.referenceCount,
-      };
-      continue;
-    }
-
-    existing.connectionCount += routeHandler.referenceCount;
-
-    if (!existing.kinds.includes('api_route_handler')) {
-      existing.kinds.push('api_route_handler');
-    }
+    mergeSignal(signalsByFileId, routeHandler.routeFileId, ['api_route_handler'], routeHandler.referenceCount);
   }
 
   for (const propagatedClient of apiPropagation.propagatedClients) {
-    const existing = signalsByFileId[propagatedClient.clientFileId];
-
-    if (!existing) {
-      signalsByFileId[propagatedClient.clientFileId] = {
-        kinds: ['api_client_to_route', 'api_propagation'],
-        connectionCount: 1,
-      };
-      continue;
-    }
-
-    existing.connectionCount += 1;
-
-    for (const kind of ['api_client_to_route', 'api_propagation'] as const) {
-      if (!existing.kinds.includes(kind)) {
-        existing.kinds.push(kind);
-      }
-    }
+    mergeSignal(signalsByFileId, propagatedClient.clientFileId, ['api_client_to_route', 'api_propagation'], 1);
   }
 
   return signalsByFileId;

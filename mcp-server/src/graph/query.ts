@@ -1,10 +1,20 @@
 import { loadCodeGraph } from './store.js';
+import { loadSemanticGraph } from './semantic-store.js';
+import type { SemanticEdgeExactness, SemanticGraphEdge } from './semantic-types.js';
 import type { CodeGraphSnapshot, FileNode, GraphEdge, GraphEdgeType, RepoNode, SymbolNode } from './types.js';
 
 export interface RelatedFileResult {
   file: FileNode;
   via: string;
   direction?: 'incoming' | 'outgoing';
+}
+
+export interface SemanticEdgeResult {
+  edge: SemanticGraphEdge;
+  fromFile: FileNode | null;
+  fromSymbol: SymbolNode | null;
+  toFile: FileNode | null;
+  toSymbol: SymbolNode | null;
 }
 
 function getEdgeMatches(
@@ -85,6 +95,10 @@ function dedupeRelatedFiles(results: RelatedFileResult[]): RelatedFileResult[] {
 
 export async function getGraph(): Promise<CodeGraphSnapshot> {
   return loadCodeGraph();
+}
+
+export async function getSemanticGraph() {
+  return loadSemanticGraph();
 }
 
 export async function getFileNode(fileId: string): Promise<FileNode | null> {
@@ -225,4 +239,52 @@ export async function getRelatedFiles(fileId: string): Promise<RelatedFileResult
   }
 
   return dedupeRelatedFiles(relatedFiles);
+}
+
+function matchesExactness(edge: SemanticGraphEdge, exactness: SemanticEdgeExactness | undefined): boolean {
+  return exactness === undefined || edge.exactness === exactness;
+}
+
+function mapSemanticEdges(
+  graph: CodeGraphSnapshot,
+  edges: SemanticGraphEdge[],
+): SemanticEdgeResult[] {
+  return edges.map((edge) => ({
+    edge,
+    fromFile: edge.fromFileId ? graph.nodes.files[edge.fromFileId] ?? null : null,
+    fromSymbol: edge.fromSymbolId ? graph.nodes.symbols[edge.fromSymbolId] ?? null : null,
+    toFile: edge.toFileId ? graph.nodes.files[edge.toFileId] ?? null : null,
+    toSymbol: edge.toSymbolId ? graph.nodes.symbols[edge.toSymbolId] ?? null : null,
+  }));
+}
+
+export async function getIncomingSemanticEdgesForSymbol(
+  symbolId: string,
+  options: { exactness?: SemanticEdgeExactness } = {},
+): Promise<SemanticEdgeResult[]> {
+  const [semanticGraph, graph] = await Promise.all([loadSemanticGraph(), loadCodeGraph()]);
+
+  return mapSemanticEdges(
+    graph,
+    semanticGraph.edges.filter((edge) => edge.toSymbolId === symbolId && matchesExactness(edge, options.exactness)),
+  );
+}
+
+export async function getOutgoingSemanticEdgesForSymbol(
+  symbolId: string,
+  options: { exactness?: SemanticEdgeExactness } = {},
+): Promise<SemanticEdgeResult[]> {
+  const [semanticGraph, graph] = await Promise.all([loadSemanticGraph(), loadCodeGraph()]);
+
+  return mapSemanticEdges(
+    graph,
+    semanticGraph.edges.filter((edge) => edge.fromSymbolId === symbolId && matchesExactness(edge, options.exactness)),
+  );
+}
+
+export async function getSemanticConsumersForSymbol(
+  symbolId: string,
+  options: { exactness?: SemanticEdgeExactness } = {},
+): Promise<SemanticEdgeResult[]> {
+  return getIncomingSemanticEdgesForSymbol(symbolId, options);
 }
