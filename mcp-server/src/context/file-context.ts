@@ -12,26 +12,39 @@ import type {
 
 const DEFAULT_RELATED_LIMIT = 10;
 
+function toConnectionKind(entry: Awaited<ReturnType<typeof getRelatedFiles>>[number]): FileContextConnectionKind {
+  if (entry.via === 'file_imports_file') {
+    return entry.direction === 'outgoing' ? 'outgoing_file_imports_file' : 'incoming_file_imports_file';
+  }
+
+  if (entry.via === 'file_reexports_file') {
+    return entry.direction === 'outgoing' ? 'outgoing_file_reexports_file' : 'incoming_file_reexports_file';
+  }
+
+  return entry.via as FileContextConnectionKind;
+}
+
 function buildGraphSignalsByFileId(
   relatedFiles: Awaited<ReturnType<typeof getRelatedFiles>>,
 ): Map<string, { edgeTypes: FileContextConnectionKind[]; connectionCount: number }> {
   const signalsByFileId = new Map<string, { edgeTypes: FileContextConnectionKind[]; connectionCount: number }>();
 
   for (const entry of relatedFiles) {
+    const connectionKind = toConnectionKind(entry);
     const existing = signalsByFileId.get(entry.file.fileId);
 
     if (existing) {
       existing.connectionCount += 1;
 
-      if (!existing.edgeTypes.includes(entry.via as FileContextConnectionKind)) {
-        existing.edgeTypes.push(entry.via as FileContextConnectionKind);
+      if (!existing.edgeTypes.includes(connectionKind)) {
+        existing.edgeTypes.push(connectionKind);
       }
 
       continue;
     }
 
     signalsByFileId.set(entry.file.fileId, {
-      edgeTypes: [entry.via as FileContextConnectionKind],
+      edgeTypes: [connectionKind],
       connectionCount: 1,
     });
   }

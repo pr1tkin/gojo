@@ -44,7 +44,17 @@ export async function runFindRelatedFilesTool(
     graphRelatedFiles.map((entry) => [
       entry.file.fileId,
       {
-        edgeTypes: [entry.via],
+        edgeTypes: [
+          entry.via === 'file_imports_file'
+            ? entry.direction === 'outgoing'
+              ? 'outgoing_file_imports_file'
+              : 'incoming_file_imports_file'
+            : entry.via === 'file_reexports_file'
+              ? entry.direction === 'outgoing'
+                ? 'outgoing_file_reexports_file'
+                : 'incoming_file_reexports_file'
+              : entry.via,
+        ],
         connectionCount: graphRelatedFiles.filter((candidate) => candidate.file.fileId === entry.file.fileId).length,
       },
     ]),
