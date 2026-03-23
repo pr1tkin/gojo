@@ -6,6 +6,25 @@ import type { FindRelatedFilesInput } from '../types.js';
 
 const DEFAULT_RELATED_FILES_LIMIT = 10;
 
+function toPublicScore(reason: string, score: number): number {
+  switch (reason) {
+    case 'exact call reference':
+      return 18;
+    case 'exact symbol reference':
+      return 16;
+    case 'direct import':
+      return 12;
+    case 'reexport relation':
+      return 10;
+    case 'reexported dependency':
+      return 5;
+    case 'imported dependency':
+      return 4;
+    default:
+      return score;
+  }
+}
+
 export const findRelatedFilesToolDefinition = {
   name: 'find_related_files',
   title: 'Find Related Files',
@@ -44,7 +63,7 @@ export async function runFindRelatedFilesTool(
     repo: entry.repo,
     filePath: entry.filePath,
     reason: entry.reason,
-    score: entry.score,
+    score: toPublicScore(entry.reason, entry.score),
   }));
 
   return {

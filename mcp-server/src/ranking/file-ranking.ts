@@ -13,11 +13,11 @@ function determineReason(entry: RankedRelatedFile['reasons']): string {
     return 'exact symbol reference';
   }
 
-  if (graphReason?.note === 'incoming_file_imports_file') {
+  if (graphReason?.note === 'incoming_file_imports_file' || graphReason?.note === 'file_imports_file') {
     return 'direct import';
   }
 
-  if (graphReason?.note === 'incoming_file_reexports_file') {
+  if (graphReason?.note === 'incoming_file_reexports_file' || graphReason?.note === 'file_reexports_file') {
     return 'reexport relation';
   }
 
@@ -51,8 +51,10 @@ function graphEdgeWeight(edgeType: string | undefined): number {
     case 'symbol_reference':
     case 'jsx_reference':
       return 16;
+    case 'file_imports_file':
     case 'incoming_file_imports_file':
       return 12;
+    case 'file_reexports_file':
     case 'incoming_file_reexports_file':
       return 10;
     case 'type_reference':

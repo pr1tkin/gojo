@@ -73,6 +73,14 @@ function getTransitiveImpacts(impact: ImpactAnalysisResult): TransitiveImpact[] 
   return impact.indirectConsumers?.transitive ?? impact.transitiveImpacts;
 }
 
+function getRelatedContextFiles(impact: ImpactAnalysisResult): ImpactedFile[] {
+  return impact.relatedContext?.files ?? [];
+}
+
+function getRelatedContextSymbols(impact: ImpactAnalysisResult): ImpactedSymbol[] {
+  return impact.relatedContext?.symbols ?? [];
+}
+
 function normalizePath(filePath: string): string {
   return filePath.replace(/\\/g, '/').replace(/^\/+/, '');
 }
@@ -1005,8 +1013,8 @@ function buildImpactBuckets(impact: ImpactAnalysisResult): SymbolChangePlanResul
     }),
   ].filter((entry) => Boolean(entry.filePath)));
   const relatedEntries = dedupeBucketEntries([
-    ...impact.relatedContext.files.map((entry) => toBucketEntryFromFile(entry, 'exploratory')),
-    ...impact.relatedContext.symbols.map((entry) => toBucketEntryFromSymbol(entry, 'exploratory')),
+    ...getRelatedContextFiles(impact).map((entry) => toBucketEntryFromFile(entry, 'exploratory')),
+    ...getRelatedContextSymbols(impact).map((entry) => toBucketEntryFromSymbol(entry, 'exploratory')),
   ]);
 
   return {
