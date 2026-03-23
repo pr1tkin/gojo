@@ -23,6 +23,8 @@ import {
   type RawExploreComponentResponse,
   type RawExploreComponentUiTreeNode,
 } from '../tool-response/normalize-explore-component.js';
+import type { RelatedFileContextBucket } from '../context/types.js';
+import type { RelatedFileContextBuckets } from '../context/types.js';
 
 const DEFAULT_CANDIDATE_LIMIT = 5;
 const DEFAULT_RELATED_LIMIT = 10;
@@ -101,6 +103,60 @@ function buildNavigationHints(input: {
 
 function compactSymbolSurface(entries: Array<{ name: string; kind?: string }>, limit = 5): string[] {
   return Array.from(new Set(entries.map((entry) => entry.name).filter(Boolean))).slice(0, limit);
+}
+
+function createEmptyRelatedBuckets(): RelatedFileContextBuckets {
+  return {
+    directConsumers: {
+      kind: 'direct_consumers',
+      label: 'Direct consumers (exact)',
+      explanation: 'confirmed symbol-level usage',
+      confidence: 'high',
+      coverage: 'exact',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+    indirectConsumers: {
+      kind: 'indirect_consumers',
+      label: 'Indirect consumers (inferred)',
+      explanation: 'likely usage via wrappers or re-exports',
+      confidence: 'medium',
+      coverage: 'inferred',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+    relatedContext: {
+      kind: 'related_context',
+      label: 'Related context (exploratory)',
+      explanation: 'nearby or dependent files, not guaranteed direct usage',
+      confidence: 'low',
+      coverage: 'exploratory',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+  };
+}
+
+function buildRawBucket(
+  bucket: RelatedFileContextBucket,
+  entries: RawExploreComponentResponse['results']['primary'],
+): NonNullable<RawExploreComponentResponse['direct_consumers']> {
+  return {
+    label: bucket.label,
+    explanation: bucket.explanation,
+    entries,
+    total: bucket.total,
+    shown: bucket.shown,
+    truncated: bucket.truncated,
+    confidence: bucket.confidence,
+    coverage: bucket.coverage,
+  };
 }
 
 export async function runExploreComponentTool(
@@ -193,6 +249,17 @@ export async function runExploreComponentTool(
       };
     }),
   );
+  const relatedFilesByPath = new Map(relatedFiles.map((entry) => [entry.filePath, entry]));
+  const relatedBuckets = fileContext?.relatedFileBuckets ?? symbolContext.relatedFileBuckets ?? createEmptyRelatedBuckets();
+  const directBucketEntries = relatedBuckets.directConsumers.entries
+    .map((entry: RelatedFileContextBucket['entries'][number]) => relatedFilesByPath.get(entry.file.filePath))
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  const indirectBucketEntries = relatedBuckets.indirectConsumers.entries
+    .map((entry: RelatedFileContextBucket['entries'][number]) => relatedFilesByPath.get(entry.file.filePath))
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  const relatedContextBucketEntries = relatedBuckets.relatedContext.entries
+    .map((entry: RelatedFileContextBucket['entries'][number]) => relatedFilesByPath.get(entry.file.filePath))
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
   const resolvedPrimarySymbolExplanation = symbolContext.primarySymbol
     ? sharedContext.registerExplainability(await buildIndexedSymbolExplainability(symbolContext.primarySymbol, detail))
     : null;
@@ -266,6 +333,9 @@ export async function runExploreComponentTool(
       })),
       uiCompleteness: uiHierarchy?.renderTreeSummary.completeness,
     }),
+    direct_consumers: buildRawBucket(relatedBuckets.directConsumers, directBucketEntries),
+    indirect_consumers: buildRawBucket(relatedBuckets.indirectConsumers, indirectBucketEntries),
+    related_context: buildRawBucket(relatedBuckets.relatedContext, relatedContextBucketEntries),
     summary: {
       resultCount: relatedFiles.length,
       strongMatches: relatedFiles.filter((entry) => entry.confidence === 'high').length,

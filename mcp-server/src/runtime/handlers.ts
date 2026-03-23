@@ -29,6 +29,7 @@ import {
 import { assessRuntimeStateFromHealth, detectRepositoryDrift } from './trust.js';
 import { serveMcpRuntime } from './mcp-service.js';
 import { inspectSearchRuntime } from './search-service.js';
+import type { RelatedFileContextBuckets, RankedFileContextItem } from '../context/types.js';
 
 function formatProductVersion(version: string): string {
   return version.startsWith('v') ? version : `v${version}`;
@@ -234,6 +235,50 @@ function toProductWarning(warning: string): string {
   }
 
   return warning;
+}
+
+function toBucketEntries(entries: RankedFileContextItem[]): Array<{ filePath: string; symbolName?: string }> {
+  return entries.map((entry) => ({
+    filePath: entry.file.filePath,
+  }));
+}
+
+function toMachinePayloadBuckets(buckets: RelatedFileContextBuckets): Pick<
+  ExploreComponentResponse['machine_payload'],
+  'direct_consumers' | 'indirect_consumers' | 'related_context'
+> {
+  return {
+    direct_consumers: {
+      label: buckets.directConsumers.label,
+      explanation: buckets.directConsumers.explanation,
+      entries: toBucketEntries(buckets.directConsumers.entries),
+      total: buckets.directConsumers.total,
+      shown: buckets.directConsumers.shown,
+      truncated: buckets.directConsumers.truncated,
+      confidence: buckets.directConsumers.confidence,
+      coverage: buckets.directConsumers.coverage,
+    },
+    indirect_consumers: {
+      label: buckets.indirectConsumers.label,
+      explanation: buckets.indirectConsumers.explanation,
+      entries: toBucketEntries(buckets.indirectConsumers.entries),
+      total: buckets.indirectConsumers.total,
+      shown: buckets.indirectConsumers.shown,
+      truncated: buckets.indirectConsumers.truncated,
+      confidence: buckets.indirectConsumers.confidence,
+      coverage: buckets.indirectConsumers.coverage,
+    },
+    related_context: {
+      label: buckets.relatedContext.label,
+      explanation: buckets.relatedContext.explanation,
+      entries: toBucketEntries(buckets.relatedContext.entries),
+      total: buckets.relatedContext.total,
+      shown: buckets.relatedContext.shown,
+      truncated: buckets.relatedContext.truncated,
+      confidence: buckets.relatedContext.confidence,
+      coverage: buckets.relatedContext.coverage,
+    },
+  };
 }
 
 function scopeHealthWarnings(warnings: string[], repoPath: string | undefined): string[] {
@@ -510,6 +555,16 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
     const primarySymbol = result.primarySymbol;
     const primaryFile = result.primaryFile;
     const ambiguityDetected = result.summary.ambiguityDetected;
+    const relatedBuckets = result.relatedFileBuckets;
+    const visibleRelatedEntities = [
+      ...relatedBuckets.directConsumers.entries,
+      ...relatedBuckets.indirectConsumers.entries,
+      ...(
+        relatedBuckets.directConsumers.entries.length === 0 && relatedBuckets.indirectConsumers.entries.length === 0
+          ? relatedBuckets.relatedContext.entries
+          : []
+      ),
+    ];
     const warnings = [
       ...(ambiguityDetected
         ? ['Target resolution is ambiguous; runtime result is intentionally compact.']
@@ -567,7 +622,7 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
             },
           ],
       relatedEntities: [
-        ...result.relatedFiles.slice(0, 3).map((entry) => ({
+        ...visibleRelatedEntities.map((entry) => ({
           kind: 'file' as const,
           id: entry.file.fileId,
           name: entry.file.filePath,
@@ -600,6 +655,7 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
         ...(primarySymbol?.name ? { symbolName: primarySymbol.name } : {}),
         candidateCount: result.summary.totalCandidateCount,
         relatedFileCount: result.summary.totalRelatedFileCount,
+        ...toMachinePayloadBuckets(relatedBuckets),
         readinessState: runtimeState.readinessState,
         stateExplanation: runtimeState.stateExplanation,
         ...(generationState?.createdAt ? { lastIndexedAt: generationState.createdAt } : {}),

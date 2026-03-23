@@ -7,6 +7,7 @@ import type { FileRelation, IndexedSymbol } from '../symbol-index/types.js';
 import { findTypeScriptReferencesForIndexedSymbol } from '../typescript/symbol-references.js';
 import type { SymbolContextBundle, SymbolContextQuery } from './types.js';
 import { assembleRelatedFileContext } from './file-context.js';
+import type { RelatedFileContextBuckets } from './types.js';
 
 function buildFileFanInById(relationsByFile: Record<string, FileRelation>): Record<string, number> {
   const fanInById: Record<string, number> = Object.create(null);
@@ -185,7 +186,45 @@ export async function assembleSymbolContext(query: SymbolContextQuery): Promise<
         relatedLimit: query.relatedLimit,
         referenceSignalsByFileId,
       })
-    : { items: [], totalCount: 0 };
+    : {
+        items: [],
+        totalCount: 0,
+        buckets: {
+          directConsumers: {
+            kind: 'direct_consumers',
+            label: 'Direct consumers (exact)',
+            explanation: 'confirmed symbol-level usage',
+            confidence: 'high',
+            coverage: 'exact',
+            entries: [],
+            total: 0,
+            shown: 0,
+            truncated: false,
+          },
+          indirectConsumers: {
+            kind: 'indirect_consumers',
+            label: 'Indirect consumers (inferred)',
+            explanation: 'likely usage via wrappers or re-exports',
+            confidence: 'medium',
+            coverage: 'inferred',
+            entries: [],
+            total: 0,
+            shown: 0,
+            truncated: false,
+          },
+          relatedContext: {
+            kind: 'related_context',
+            label: 'Related context (exploratory)',
+            explanation: 'nearby or dependent files, not guaranteed direct usage',
+            confidence: 'low',
+            coverage: 'exploratory',
+            entries: [],
+            total: 0,
+            shown: 0,
+            truncated: false,
+          },
+        } satisfies RelatedFileContextBuckets,
+      };
   const exportedSymbols = primarySymbol ? await getExportedSymbols(primarySymbol.fileId) : [];
 
   return {
@@ -200,6 +239,7 @@ export async function assembleSymbolContext(query: SymbolContextQuery): Promise<
     primaryFile,
     relatedFiles: relatedFiles.items,
     totalRelatedFiles: relatedFiles.totalCount,
+    relatedFileBuckets: relatedFiles.buckets,
     exportedSymbols,
   };
 }

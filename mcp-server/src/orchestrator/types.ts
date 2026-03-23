@@ -1,4 +1,4 @@
-import type { FileContextBundle, RankedFileContextItem, SymbolContextBundle } from '../context/index.js';
+import type { FileContextBundle, RankedFileContextItem, RelatedFileContextBuckets, SymbolContextBundle } from '../context/index.js';
 import type { FileNode, SymbolNode } from '../graph/types.js';
 import type { PatternStructuralAlignment } from '../patterns/structural-alignment.js';
 import type { RankedSymbolCandidate } from '../ranking/index.js';
@@ -63,6 +63,7 @@ export interface FileExplorationContext {
     definedSymbolCount: number;
     exportedSymbolCount: number;
   };
+  relatedFileBuckets: RelatedFileContextBuckets;
   rawContext: FileContextBundle;
 }
 
@@ -95,6 +96,7 @@ export interface SymbolExplorationContext {
     totalRelatedFileCount: number;
     exportedSymbolCount: number;
   };
+  relatedFileBuckets: RelatedFileContextBuckets;
   rawContext: SymbolContextBundle;
 }
 

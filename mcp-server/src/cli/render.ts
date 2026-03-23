@@ -11,6 +11,9 @@ interface BucketedSection {
   label?: string;
   explanation?: string;
   entries?: BucketedEntry[];
+  total?: number;
+  shown?: number;
+  truncated?: boolean;
 }
 
 interface BucketedMachinePayload {
@@ -51,18 +54,27 @@ function getBucketedPayload(response: RenderableRuntimeResponse): BucketedMachin
 
 function renderBucketEntries(section: BucketedSection | undefined, emptyText: string): string[] {
   const entries = section?.entries ?? [];
+  const lines: string[] = [];
 
   if (entries.length === 0) {
-    return [emptyText];
+    lines.push(emptyText);
+  } else {
+    lines.push(
+      ...entries.map((entry) => {
+        if (entry.symbolName) {
+          return `${entry.filePath}#${entry.symbolName}`;
+        }
+
+        return entry.filePath ?? '(unknown)';
+      }),
+    );
   }
 
-  return entries.map((entry) => {
-    if (entry.symbolName) {
-      return `${entry.filePath}#${entry.symbolName}`;
-    }
+  if (section?.truncated && section.total !== undefined) {
+    lines.push(`showing ${section.shown ?? entries.length} of ${section.total}`);
+  }
 
-    return entry.filePath ?? '(unknown)';
-  });
+  return lines;
 }
 
 export function renderRuntimeResponse(response: RenderableRuntimeResponse, command?: CliCommand): string {

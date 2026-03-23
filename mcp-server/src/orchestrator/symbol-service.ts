@@ -31,6 +31,7 @@ export async function getSymbolExplorationContext(
       totalRelatedFileCount: context.totalRelatedFiles,
       exportedSymbolCount: context.exportedSymbols.length,
     },
+    relatedFileBuckets: context.relatedFileBuckets,
     rawContext: context,
   };
 }

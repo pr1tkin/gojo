@@ -209,6 +209,36 @@ export interface ExploreComponentMachinePayload {
   symbolName?: string;
   candidateCount: number;
   relatedFileCount: number;
+  direct_consumers?: {
+    label: string;
+    explanation: string;
+    entries: Array<{ filePath: string; symbolName?: string }>;
+    total: number;
+    shown: number;
+    truncated: boolean;
+    confidence: 'high' | 'medium' | 'low';
+    coverage: 'exact' | 'inferred' | 'exploratory';
+  };
+  indirect_consumers?: {
+    label: string;
+    explanation: string;
+    entries: Array<{ filePath: string; symbolName?: string }>;
+    total: number;
+    shown: number;
+    truncated: boolean;
+    confidence: 'high' | 'medium' | 'low';
+    coverage: 'exact' | 'inferred' | 'exploratory';
+  };
+  related_context?: {
+    label: string;
+    explanation: string;
+    entries: Array<{ filePath: string; symbolName?: string }>;
+    total: number;
+    shown: number;
+    truncated: boolean;
+    confidence: 'high' | 'medium' | 'low';
+    coverage: 'exact' | 'inferred' | 'exploratory';
+  };
   readinessState?: RuntimeReadinessState;
   lastIndexedAt?: string;
   stateExplanation?: string;

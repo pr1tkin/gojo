@@ -137,6 +137,36 @@ export interface RawExploreComponentResponse {
     >;
   };
   navigationHints: Array<Record<string, string>>;
+  direct_consumers?: {
+    label: string;
+    explanation: string;
+    entries: RawExploreComponentRelatedResult[];
+    total: number;
+    shown: number;
+    truncated: boolean;
+    confidence: ConfidenceLevel;
+    coverage: 'exact' | 'inferred' | 'exploratory';
+  };
+  indirect_consumers?: {
+    label: string;
+    explanation: string;
+    entries: RawExploreComponentRelatedResult[];
+    total: number;
+    shown: number;
+    truncated: boolean;
+    confidence: ConfidenceLevel;
+    coverage: 'exact' | 'inferred' | 'exploratory';
+  };
+  related_context?: {
+    label: string;
+    explanation: string;
+    entries: RawExploreComponentRelatedResult[];
+    total: number;
+    shown: number;
+    truncated: boolean;
+    confidence: ConfidenceLevel;
+    coverage: 'exact' | 'inferred' | 'exploratory';
+  };
   summary: {
     resultCount?: number;
     strongMatches?: number;
@@ -218,6 +248,36 @@ export interface ExploreComponentNormalizedResponse
   extends NormalizedToolResponse<NormalizedExploreComponentResult> {
   target: NormalizedExploreComponentTarget;
   alternatives?: NormalizedExploreComponentAlternative[];
+  direct_consumers?: {
+    label: string;
+    explanation: string;
+    entries: NormalizedExploreComponentResult[];
+    total: number;
+    shown: number;
+    truncated: boolean;
+    confidence: ConfidenceLevel;
+    coverage: 'exact' | 'inferred' | 'exploratory';
+  };
+  indirect_consumers?: {
+    label: string;
+    explanation: string;
+    entries: NormalizedExploreComponentResult[];
+    total: number;
+    shown: number;
+    truncated: boolean;
+    confidence: ConfidenceLevel;
+    coverage: 'exact' | 'inferred' | 'exploratory';
+  };
+  related_context?: {
+    label: string;
+    explanation: string;
+    entries: NormalizedExploreComponentResult[];
+    total: number;
+    shown: number;
+    truncated: boolean;
+    confidence: ConfidenceLevel;
+    coverage: 'exact' | 'inferred' | 'exploratory';
+  };
 }
 
 export interface ExploreComponentNormalizationInput {
@@ -600,6 +660,30 @@ function buildNextActions(raw: RawExploreComponentResponse): NormalizedNextActio
   return actions;
 }
 
+function normalizeBucket(
+  bucket:
+    | RawExploreComponentResponse['direct_consumers']
+    | RawExploreComponentResponse['indirect_consumers']
+    | RawExploreComponentResponse['related_context']
+    | undefined,
+  mode: NormalizedMode,
+) {
+  if (!bucket) {
+    return undefined;
+  }
+
+  return {
+    label: bucket.label,
+    explanation: bucket.explanation,
+    entries: bucket.entries.map((entry) => normalizeResult(entry, mode)),
+    total: bucket.total,
+    shown: bucket.shown,
+    truncated: bucket.truncated,
+    confidence: bucket.confidence,
+    coverage: bucket.coverage,
+  };
+}
+
 export function normalizeExploreComponentResponse(
   input: ExploreComponentNormalizationInput,
 ): ExploreComponentNormalizedResponse {
@@ -693,5 +777,8 @@ export function normalizeExploreComponentResponse(
     ...response,
     target: normalizeTarget(raw, response.expansions),
     ...(normalizedAlternatives?.length ? { alternatives: normalizedAlternatives } : {}),
+    ...(raw.direct_consumers ? { direct_consumers: normalizeBucket(raw.direct_consumers, input.mode) } : {}),
+    ...(raw.indirect_consumers ? { indirect_consumers: normalizeBucket(raw.indirect_consumers, input.mode) } : {}),
+    ...(raw.related_context ? { related_context: normalizeBucket(raw.related_context, input.mode) } : {}),
   };
 }

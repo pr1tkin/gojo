@@ -7,10 +7,14 @@ import type {
   AssembleFileContextOptions,
   FileContextConnectionKind,
   FileContextBundle,
+  RelatedFileContextBucket,
+  RelatedFileContextBuckets,
   RankedFileContextItem,
 } from './types.js';
 
 const DEFAULT_RELATED_LIMIT = 10;
+const EXACT_RELATED_LIMIT_FLOOR = 24;
+const INFERRED_RELATED_LIMIT_FLOOR = 8;
 
 function toConnectionKind(entry: Awaited<ReturnType<typeof getRelatedFiles>>[number]): FileContextConnectionKind {
   if (entry.via === 'file_imports_file') {
@@ -50,6 +54,115 @@ function buildGraphSignalsByFileId(
   }
 
   return signalsByFileId;
+}
+
+function classifyRelatedFileBucket(entry: RankedFileContextItem): RelatedFileContextBucket['kind'] {
+  if (
+    entry.via.some((kind) =>
+      ['call_reference', 'symbol_reference', 'jsx_reference', 'type_reference', 'incoming_file_imports_file'].includes(kind),
+    )
+  ) {
+    return 'direct_consumers';
+  }
+
+  if (entry.via.some((kind) => ['incoming_file_reexports_file', 'outgoing_file_reexports_file'].includes(kind))) {
+    return 'indirect_consumers';
+  }
+
+  return 'related_context';
+}
+
+function bucketDisplay(
+  kind: RelatedFileContextBucket['kind'],
+): Pick<RelatedFileContextBucket, 'kind' | 'label' | 'explanation' | 'confidence' | 'coverage'> {
+  switch (kind) {
+    case 'direct_consumers':
+      return {
+        kind,
+        label: 'Direct consumers (exact)',
+        explanation: 'confirmed symbol-level usage',
+        confidence: 'high',
+        coverage: 'exact',
+      };
+    case 'indirect_consumers':
+      return {
+        kind,
+        label: 'Indirect consumers (inferred)',
+        explanation: 'likely usage via wrappers or re-exports',
+        confidence: 'medium',
+        coverage: 'inferred',
+      };
+    case 'related_context':
+      return {
+        kind,
+        label: 'Related context (exploratory)',
+        explanation: 'nearby or dependent files, not guaranteed direct usage',
+        confidence: 'low',
+        coverage: 'exploratory',
+      };
+  }
+}
+
+function getBucketLimit(
+  kind: RelatedFileContextBucket['kind'],
+  requestedLimit: number,
+): number {
+  switch (kind) {
+    case 'direct_consumers':
+      return Math.max(requestedLimit * 4, EXACT_RELATED_LIMIT_FLOOR);
+    case 'indirect_consumers':
+      return Math.max(requestedLimit, INFERRED_RELATED_LIMIT_FLOOR);
+    case 'related_context':
+      return requestedLimit;
+  }
+}
+
+function buildRelatedFileBuckets(
+  entries: RankedFileContextItem[],
+  requestedLimit: number,
+): { items: RankedFileContextItem[]; buckets: RelatedFileContextBuckets } {
+  const grouped: Record<RelatedFileContextBucket['kind'], RankedFileContextItem[]> = {
+    direct_consumers: [],
+    indirect_consumers: [],
+    related_context: [],
+  };
+
+  for (const entry of entries) {
+    grouped[classifyRelatedFileBucket(entry)].push(entry);
+  }
+
+  const directEntries = grouped.direct_consumers.slice(0, getBucketLimit('direct_consumers', requestedLimit));
+  const indirectEntries = grouped.indirect_consumers.slice(0, getBucketLimit('indirect_consumers', requestedLimit));
+  const relatedEntries = grouped.related_context.slice(0, getBucketLimit('related_context', requestedLimit));
+
+  const buckets: RelatedFileContextBuckets = {
+    directConsumers: {
+      ...bucketDisplay('direct_consumers'),
+      entries: directEntries,
+      total: grouped.direct_consumers.length,
+      shown: directEntries.length,
+      truncated: directEntries.length < grouped.direct_consumers.length,
+    },
+    indirectConsumers: {
+      ...bucketDisplay('indirect_consumers'),
+      entries: indirectEntries,
+      total: grouped.indirect_consumers.length,
+      shown: indirectEntries.length,
+      truncated: indirectEntries.length < grouped.indirect_consumers.length,
+    },
+    relatedContext: {
+      ...bucketDisplay('related_context'),
+      entries: relatedEntries,
+      total: grouped.related_context.length,
+      shown: relatedEntries.length,
+      truncated: relatedEntries.length < grouped.related_context.length,
+    },
+  };
+
+  return {
+    items: [...directEntries, ...indirectEntries, ...relatedEntries],
+    buckets,
+  };
 }
 
 function mergeReferenceSignals(
@@ -107,13 +220,14 @@ function mapRankedRelatedFiles(
 export async function assembleRelatedFileContext(
   fileId: string,
   options: AssembleFileContextOptions = {},
-): Promise<{ items: RankedFileContextItem[]; totalCount: number }> {
+): Promise<{ items: RankedFileContextItem[]; totalCount: number; buckets: RelatedFileContextBuckets }> {
   const targetRelation = await getFileRelationById(fileId);
 
   if (!targetRelation) {
     return {
       items: [],
       totalCount: 0,
+      buckets: buildRelatedFileBuckets([], options.relatedLimit ?? DEFAULT_RELATED_LIMIT).buckets,
     };
   }
 
@@ -149,10 +263,12 @@ export async function assembleRelatedFileContext(
   );
 
   const mapped = mapRankedRelatedFiles(ranked, filesById, signalsByFileId);
+  const bucketed = buildRelatedFileBuckets(mapped, options.relatedLimit ?? DEFAULT_RELATED_LIMIT);
 
   return {
-    items: mapped.slice(0, options.relatedLimit ?? DEFAULT_RELATED_LIMIT),
+    items: bucketed.items,
     totalCount: mapped.length,
+    buckets: bucketed.buckets,
   };
 }
 
@@ -170,6 +286,7 @@ export async function assembleFileContext(
       neighboringFiles: [],
       relatedFiles: [],
       totalRelatedFiles: 0,
+      relatedFileBuckets: buildRelatedFileBuckets([], options.relatedLimit ?? DEFAULT_RELATED_LIMIT).buckets,
       definedSymbols: [],
       exportedSymbols: [],
     };
@@ -189,6 +306,7 @@ export async function assembleFileContext(
     neighboringFiles,
     relatedFiles: relatedFiles.items,
     totalRelatedFiles: relatedFiles.totalCount,
+    relatedFileBuckets: relatedFiles.buckets,
     definedSymbols,
     exportedSymbols,
   };

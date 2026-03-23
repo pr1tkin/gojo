@@ -22,6 +22,7 @@ export async function getFileExplorationContext(
       definedSymbolCount: context.definedSymbols.length,
       exportedSymbolCount: context.exportedSymbols.length,
     },
+    relatedFileBuckets: context.relatedFileBuckets,
     rawContext: context,
   };
 }

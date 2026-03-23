@@ -254,6 +254,68 @@ describe('explore_component tool', () => {
         definedSymbolCount: 1,
         exportedSymbolCount: 1,
       },
+      relatedFileBuckets: {
+        directConsumers: {
+          kind: 'direct_consumers',
+          label: 'Direct consumers (exact)',
+          explanation: 'confirmed symbol-level usage',
+          confidence: 'high',
+          coverage: 'exact',
+          entries: [],
+          total: 0,
+          shown: 0,
+          truncated: false,
+        },
+        indirectConsumers: {
+          kind: 'indirect_consumers',
+          label: 'Indirect consumers (inferred)',
+          explanation: 'likely usage via wrappers or re-exports',
+          confidence: 'medium',
+          coverage: 'inferred',
+          entries: [],
+          total: 0,
+          shown: 0,
+          truncated: false,
+        },
+        relatedContext: {
+          kind: 'related_context',
+          label: 'Related context (exploratory)',
+          explanation: 'nearby or dependent files, not guaranteed direct usage',
+          confidence: 'low',
+          coverage: 'exploratory',
+          entries: [
+            {
+              file: {
+                nodeType: 'file',
+                fileId: 'repo-gamma:components/ui/DownloadButton.tsx',
+                repoId: 'repo-gamma',
+                filePath: 'components/ui/DownloadButton.tsx',
+                classification: 'source',
+              },
+              score: 25,
+              reason: 'direct import',
+              reasons: [{ signal: 'graph_connection', value: 9 }],
+              via: ['file_imports_file'],
+            },
+            {
+              file: {
+                nodeType: 'file',
+                fileId: 'repo-gamma:components/ContractList.tsx',
+                repoId: 'repo-gamma',
+                filePath: 'components/ContractList.tsx',
+                classification: 'source',
+              },
+              score: 20,
+              reason: 'direct import',
+              reasons: [{ signal: 'graph_connection', value: 9 }],
+              via: ['file_imports_file'],
+            },
+          ],
+          total: 2,
+          shown: 2,
+          truncated: false,
+        },
+      },
       rawContext: {},
     });
     getUiHierarchySummaryMock.mockResolvedValue({
@@ -378,6 +440,22 @@ describe('explore_component tool', () => {
     ]);
     expect(parsed.results).not.toHaveProperty('secondary');
     expect(parsed.alternatives).toBeUndefined();
+    expect(parsed.direct_consumers).toEqual(
+      expect.objectContaining({
+        label: 'Direct consumers (exact)',
+        total: 0,
+        shown: 0,
+        truncated: false,
+      }),
+    );
+    expect(parsed.related_context).toEqual(
+      expect.objectContaining({
+        label: 'Related context (exploratory)',
+        total: 2,
+        shown: 2,
+        truncated: false,
+      }),
+    );
     expect(parsed.evidence).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

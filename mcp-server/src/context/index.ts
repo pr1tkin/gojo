@@ -2,6 +2,8 @@ export { assembleFileContext, assembleRelatedFileContext, assembleSymbolContext 
 export type {
   AssembleFileContextOptions,
   FileContextBundle,
+  RelatedFileContextBucket,
+  RelatedFileContextBuckets,
   RankedFileContextItem,
   SymbolContextBundle,
   SymbolContextQuery,

@@ -51,16 +51,25 @@ describe('cli render transparency', () => {
           label: 'Direct consumers (exact)',
           explanation: 'confirmed symbol-level usage',
           entries: [{ filePath: 'lib/services/automationService.ts', symbolName: 'createAutomation' }],
+          total: 1,
+          shown: 1,
+          truncated: false,
         },
         indirect_consumers: {
           label: 'Indirect consumers (inferred)',
           explanation: 'likely usage via wrappers or re-exports',
           entries: [{ filePath: 'lib/hooks/useAutomationsMutation.ts', symbolName: 'createAutomation' }],
+          total: 3,
+          shown: 1,
+          truncated: true,
         },
         related_context: {
           label: 'Related context (exploratory)',
           explanation: 'nearby or related files, not guaranteed direct usage',
           entries: [{ filePath: 'app/automations/page.tsx' }],
+          total: 5,
+          shown: 1,
+          truncated: true,
         },
       },
       trust_level: 'high',
@@ -78,5 +87,7 @@ describe('cli render transparency', () => {
     expect(output).toContain('lib/services/automationService.ts#createAutomation');
     expect(output).toContain('Indirect consumers (inferred)');
     expect(output).toContain('Related context (exploratory)');
+    expect(output).toContain('showing 1 of 3');
+    expect(output).toContain('showing 1 of 5');
   });
 });

@@ -23,6 +23,26 @@ export interface RankedFileContextItem {
   explanation?: ResultExplainability;
 }
 
+export type RelatedFileBucketKind = 'direct_consumers' | 'indirect_consumers' | 'related_context';
+
+export interface RelatedFileContextBucket {
+  kind: RelatedFileBucketKind;
+  label: string;
+  explanation: string;
+  confidence: 'high' | 'medium' | 'low';
+  coverage: 'exact' | 'inferred' | 'exploratory';
+  entries: RankedFileContextItem[];
+  total: number;
+  shown: number;
+  truncated: boolean;
+}
+
+export interface RelatedFileContextBuckets {
+  directConsumers: RelatedFileContextBucket;
+  indirectConsumers: RelatedFileContextBucket;
+  relatedContext: RelatedFileContextBucket;
+}
+
 export interface FileContextBundle {
   fileId: string;
   file: FileNode | null;
@@ -30,6 +50,7 @@ export interface FileContextBundle {
   neighboringFiles: FileNode[];
   relatedFiles: RankedFileContextItem[];
   totalRelatedFiles: number;
+  relatedFileBuckets: RelatedFileContextBuckets;
   definedSymbols: SymbolNode[];
   exportedSymbols: SymbolNode[];
 }
@@ -65,5 +86,6 @@ export interface SymbolContextBundle {
   primaryFile: FileNode | null;
   relatedFiles: RankedFileContextItem[];
   totalRelatedFiles: number;
+  relatedFileBuckets: RelatedFileContextBuckets;
   exportedSymbols: SymbolNode[];
 }

@@ -175,12 +175,22 @@ describe('context assembly', () => {
       neighboringFiles: [],
       relatedFiles: [],
       totalRelatedFiles: 0,
+      relatedFileBuckets: expect.objectContaining({
+        directConsumers: expect.objectContaining({ total: 0, shown: 0, truncated: false, entries: [] }),
+        indirectConsumers: expect.objectContaining({ total: 0, shown: 0, truncated: false, entries: [] }),
+        relatedContext: expect.objectContaining({ total: 0, shown: 0, truncated: false, entries: [] }),
+      }),
       definedSymbols: [],
       exportedSymbols: [],
     });
     expect(missingRelatedContext).toEqual({
       items: [],
       totalCount: 0,
+      buckets: expect.objectContaining({
+        directConsumers: expect.objectContaining({ total: 0, shown: 0, truncated: false, entries: [] }),
+        indirectConsumers: expect.objectContaining({ total: 0, shown: 0, truncated: false, entries: [] }),
+        relatedContext: expect.objectContaining({ total: 0, shown: 0, truncated: false, entries: [] }),
+      }),
     });
     expect(missingSymbolContext).toEqual({
       query: 'MissingSymbol',
@@ -194,6 +204,11 @@ describe('context assembly', () => {
       ambiguityDetected: false,
       viableAlternativeCount: 0,
       totalRelatedFiles: 0,
+      relatedFileBuckets: expect.objectContaining({
+        directConsumers: expect.objectContaining({ total: 0, shown: 0, truncated: false, entries: [] }),
+        indirectConsumers: expect.objectContaining({ total: 0, shown: 0, truncated: false, entries: [] }),
+        relatedContext: expect.objectContaining({ total: 0, shown: 0, truncated: false, entries: [] }),
+      }),
       exportedSymbols: [],
     });
   });
