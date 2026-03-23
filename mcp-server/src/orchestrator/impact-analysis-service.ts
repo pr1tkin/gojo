@@ -10,6 +10,7 @@ import { getFileRelation, getFileRelationById } from '../symbol-index/query.js';
 import { loadRequiredSymbolIndex } from '../symbol-index/store.js';
 import type { ExportRecord, ImportBinding, IndexedSymbol } from '../symbol-index/types.js';
 import { loadConfig } from '../config.js';
+import { findTypeScriptReferencesForIndexedSymbol } from '../typescript/symbol-references.js';
 import {
   getObservedPropNamesForComponent,
   getUiParentsForComponent,
@@ -1056,6 +1057,147 @@ async function collectImporterImpacts(target: IndexedSymbol): Promise<{
   return { directFiles, directSymbols, relatedFiles };
 }
 
+function inferReferenceReason(match: {
+  isCallReference: boolean;
+  isJsxReference: boolean;
+  isTypeReference: boolean;
+  isImportBinding: boolean;
+}): ImpactReason {
+  if (match.isCallReference) {
+    return 'calls-target';
+  }
+
+  if (match.isJsxReference) {
+    return 'jsx-uses-target';
+  }
+
+  if (match.isTypeReference) {
+    return 'type-propagation';
+  }
+
+  if (match.isImportBinding) {
+    return 'imports-target';
+  }
+
+  return 'calls-target';
+}
+
+async function collectCompilerReferenceImpacts(target: IndexedSymbol): Promise<{
+  directFiles: ImpactedFile[];
+  directSymbols: ImpactedSymbol[];
+}> {
+  let repository: Awaited<ReturnType<typeof getRepositoryById>> | null = null;
+
+  try {
+    repository = await getRepositoryById(loadConfig().reposRoot, target.repo);
+  } catch {
+    repository = null;
+  }
+
+  if (!repository) {
+    return {
+      directFiles: [],
+      directSymbols: [],
+    };
+  }
+
+  let matches;
+
+  try {
+    matches = await findTypeScriptReferencesForIndexedSymbol(repository, target);
+  } catch {
+    return {
+      directFiles: [],
+      directSymbols: [],
+    };
+  }
+  const matchesByFile = new Map<string, typeof matches>();
+
+  for (const match of matches) {
+    if (match.filePath === target.filePath) {
+      continue;
+    }
+
+    const existing = matchesByFile.get(match.filePath) ?? [];
+    existing.push(match);
+    matchesByFile.set(match.filePath, existing);
+  }
+
+  const directFiles: ImpactedFile[] = [];
+  const directSymbols: ImpactedSymbol[] = [];
+
+  for (const [filePath, fileMatches] of matchesByFile.entries()) {
+    const [file, relation, definedSymbols] = await Promise.all([
+      getFileNode(`${target.repo}:${filePath}`),
+      getFileRelation(filePath, target.repo).catch(() => null),
+      getDefinedSymbols(`${target.repo}:${filePath}`).catch(() => []),
+    ]);
+    const topMatch = fileMatches.find((entry) => !entry.isImportBinding) ?? fileMatches[0];
+    const reason = inferReferenceReason(topMatch);
+    const fileEvidence = buildEvidence(
+      reason,
+      'high',
+      filePath,
+      ['TypeScript resolved an exact cross-file symbol reference to the target declaration'],
+      'file-direct',
+      'direct',
+      'graph',
+    );
+
+    directFiles.push(buildImpactedFile({
+      file,
+      fileId: relation?.fileId ?? file?.fileId ?? `${target.repo}:${filePath}`,
+      filePath,
+      repoId: target.repo,
+      impactScope: 'file-direct',
+      tier: 'direct',
+      evidence: [fileEvidence],
+    }));
+
+    for (const definedSymbol of definedSymbols) {
+      const symbolMatches = fileMatches.filter((match) => match.line >= definedSymbol.startLine && match.line <= definedSymbol.endLine);
+
+      if (symbolMatches.length === 0) {
+        continue;
+      }
+
+      const topSymbolMatch = symbolMatches.find((entry) => !entry.isImportBinding) ?? symbolMatches[0];
+      const symbolReason = inferReferenceReason(topSymbolMatch);
+      const symbolFile = file ?? (await getFileNode(definedSymbol.fileId));
+      const symbolEvidence = buildEvidence(
+        symbolReason,
+        'high',
+        filePath,
+        [`TypeScript resolved exact symbol references inside "${definedSymbol.name}"`],
+        'symbol-direct',
+        'direct',
+        'graph',
+        definedSymbol.symbolId,
+        definedSymbol.name,
+      );
+
+      directSymbols.push(buildImpactedSymbol({
+        symbol: definedSymbol,
+        file: symbolFile,
+        symbolId: definedSymbol.symbolId,
+        symbolName: definedSymbol.name,
+        kind: definedSymbol.kind,
+        exported: definedSymbol.exported,
+        filePath: definedSymbol.filePath,
+        repoId: definedSymbol.repoId,
+        impactScope: 'symbol-direct',
+        tier: 'direct',
+        evidence: [symbolEvidence],
+      }));
+    }
+  }
+
+  return {
+    directFiles,
+    directSymbols,
+  };
+}
+
 async function collectReexportImpacts(target: IndexedSymbol): Promise<{
   indirectFiles: ImpactedFile[];
   indirectSymbols: ImpactedSymbol[];
@@ -1422,15 +1564,16 @@ export async function analyzeSymbolImpact(input: AnalyzeSymbolImpactInput): Prom
   const effectiveMaxDepth = getEffectiveMaxDepth(input);
   const notes: string[] = [];
 
-  const [sameFileSymbols, importerImpacts, reexportImpacts] = await Promise.all([
+  const [sameFileSymbols, importerImpacts, reexportImpacts, compilerReferenceImpacts] = await Promise.all([
     collectSameFileImpacts(target.symbol),
     collectImporterImpacts(target.symbol),
     collectReexportImpacts(target.symbol),
+    collectCompilerReferenceImpacts(target.symbol),
   ]);
 
   const directConsumers: ImpactResultBucket = {
-    files: mergeImpactedFiles(importerImpacts.directFiles),
-    symbols: mergeImpactedSymbols(importerImpacts.directSymbols),
+    files: mergeImpactedFiles([...importerImpacts.directFiles, ...compilerReferenceImpacts.directFiles]),
+    symbols: mergeImpactedSymbols([...importerImpacts.directSymbols, ...compilerReferenceImpacts.directSymbols]),
   };
   const indirectConsumers: ImpactIndirectConsumers = {
     files: mergeImpactedFiles(reexportImpacts.indirectFiles),

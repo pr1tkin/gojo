@@ -5,12 +5,28 @@ import type { RankedRelatedFile, RelatedFileCandidate } from './types.js';
 function determineReason(entry: RankedRelatedFile['reasons']): string {
   const graphReason = entry.find((reason) => reason.signal === 'graph_connection');
 
-  if (graphReason?.note === 'file_imports_file') {
+  if (graphReason?.note === 'call_reference') {
+    return 'exact call reference';
+  }
+
+  if (graphReason?.note === 'symbol_reference') {
+    return 'exact symbol reference';
+  }
+
+  if (graphReason?.note === 'incoming_file_imports_file') {
     return 'direct import';
   }
 
-  if (graphReason?.note === 'file_reexports_file') {
+  if (graphReason?.note === 'incoming_file_reexports_file') {
     return 'reexport relation';
+  }
+
+  if (graphReason?.note === 'outgoing_file_imports_file') {
+    return 'imported dependency';
+  }
+
+  if (graphReason?.note === 'outgoing_file_reexports_file') {
+    return 'reexported dependency';
   }
 
   if (entry.some((reason) => reason.signal === 'shared_import_tokens')) {
@@ -28,8 +44,68 @@ function determineReason(entry: RankedRelatedFile['reasons']): string {
   return 'related file';
 }
 
+function graphEdgeWeight(edgeType: string | undefined): number {
+  switch (edgeType) {
+    case 'call_reference':
+      return 18;
+    case 'symbol_reference':
+    case 'jsx_reference':
+      return 16;
+    case 'incoming_file_imports_file':
+      return 12;
+    case 'incoming_file_reexports_file':
+      return 10;
+    case 'type_reference':
+      return 8;
+    case 'outgoing_file_reexports_file':
+      return 5;
+    case 'outgoing_file_imports_file':
+      return 4;
+    default:
+      return 8;
+  }
+}
+
 function compareRelations(left: FileRelation, right: FileRelation): number {
   return left.repo.localeCompare(right.repo) || left.filePath.localeCompare(right.filePath);
+}
+
+function architecturalSurfaceScore(filePath: string): number {
+  const normalized = filePath.replace(/\\/g, '/');
+
+  if (/(^|\/)(page|route|layout)\.(tsx?|jsx?)$/i.test(normalized)) {
+    return 4;
+  }
+
+  if (/^(app|pages)\//i.test(normalized) || /(^|\/)app\//i.test(normalized)) {
+    return 2;
+  }
+
+  if (/(^|\/)lib\/(services?|db)\//i.test(normalized) || /(^|\/)(services?|db)\//i.test(normalized)) {
+    return -2;
+  }
+
+  return 0;
+}
+
+function serviceConsumerBias(targetPath: string, candidatePath: string): number {
+  const normalizedTarget = targetPath.replace(/\\/g, '/');
+  const normalizedCandidate = candidatePath.replace(/\\/g, '/');
+  const targetIsService = /(^|\/)(lib\/)?services?\//i.test(normalizedTarget);
+
+  if (!targetIsService) {
+    return 0;
+  }
+
+  if (/(^|\/)(app|pages)\//i.test(normalizedCandidate) || /(^|\/)(page|route|layout)\.(tsx?|jsx?)$/i.test(normalizedCandidate)) {
+    return 4;
+  }
+
+  if (/(\b|\/)(lib\/)?(services?|db)\//i.test(normalizedCandidate)) {
+    return -4;
+  }
+
+  return 0;
 }
 
 export function rankRelatedFileCandidates(
@@ -46,11 +122,14 @@ export function rankRelatedFileCandidates(
       const sameRepo = candidate.relation.repo === target.repo ? 1 : 0;
       const pathCloseness = computePathCloseness(target.filePath, candidate.relation.filePath);
       const graphConnectionCount = candidate.graphSignals?.connectionCount ?? 0;
+      const surfaceScore = architecturalSurfaceScore(candidate.relation.filePath);
+      const serviceBias = serviceConsumerBias(target.filePath, candidate.relation.filePath);
 
       if (graphConnectionCount > 0) {
         const edgeType = candidate.graphSignals?.edgeTypes[0];
-        score += 8 + graphConnectionCount;
-        reasons.push(createReason('graph_connection', 8 + graphConnectionCount, edgeType));
+        const edgeScore = graphEdgeWeight(edgeType) + graphConnectionCount;
+        score += edgeScore;
+        reasons.push(createReason('graph_connection', edgeScore, edgeType));
       }
 
       if (sharedImportTokens > 0) {
@@ -71,6 +150,16 @@ export function rankRelatedFileCandidates(
       if (pathCloseness > 0) {
         score += pathCloseness;
         reasons.push(createReason('path_closeness', pathCloseness));
+      }
+
+      if (surfaceScore !== 0) {
+        score += surfaceScore;
+        reasons.push(createReason('architectural_surface', surfaceScore));
+      }
+
+      if (serviceBias !== 0) {
+        score += serviceBias;
+        reasons.push(createReason('service_consumer_bias', serviceBias));
       }
 
       return {

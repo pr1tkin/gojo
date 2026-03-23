@@ -1,7 +1,10 @@
+import { loadConfig } from '../config.js';
 import { getExportedSymbols, getFileNode } from '../graph/query.js';
+import { getRepositoryById } from '../repositories.js';
 import { rankSymbolCandidates } from '../ranking/index.js';
 import { loadRequiredSymbolIndex } from '../symbol-index/store.js';
 import type { FileRelation, IndexedSymbol } from '../symbol-index/types.js';
+import { findTypeScriptReferencesForIndexedSymbol } from '../typescript/symbol-references.js';
 import type { SymbolContextBundle, SymbolContextQuery } from './types.js';
 import { assembleRelatedFileContext } from './file-context.js';
 
@@ -68,6 +71,94 @@ function collectSymbolCandidates(
   });
 }
 
+async function buildReferenceSignalsByFileId(
+  primarySymbol: IndexedSymbol | null,
+  relationsByFile: Record<string, FileRelation>,
+): Promise<Record<string, { kinds: Array<'symbol_reference' | 'call_reference' | 'jsx_reference' | 'type_reference'>; connectionCount: number }>> {
+  if (!primarySymbol) {
+    return {};
+  }
+
+  let repository: Awaited<ReturnType<typeof getRepositoryById>> | null = null;
+
+  try {
+    repository = await getRepositoryById(loadConfig().reposRoot, primarySymbol.repo);
+  } catch {
+    repository = null;
+  }
+
+  if (!repository) {
+    return {};
+  }
+
+  let matches;
+
+  try {
+    matches = await findTypeScriptReferencesForIndexedSymbol(repository, primarySymbol);
+  } catch {
+    return {};
+  }
+  const fileIdByPath = new Map<string, string>();
+
+  for (const relation of Object.values(relationsByFile)) {
+    if (relation.repo === primarySymbol.repo) {
+      fileIdByPath.set(relation.filePath, relation.fileId);
+    }
+  }
+
+  const signalsByFileId: Record<string, { kinds: Array<'symbol_reference' | 'call_reference' | 'jsx_reference' | 'type_reference'>; connectionCount: number }> = {};
+
+  for (const match of matches) {
+    if (match.filePath === primarySymbol.filePath) {
+      continue;
+    }
+
+    const fileId = fileIdByPath.get(match.filePath);
+
+    if (!fileId) {
+      continue;
+    }
+
+    const kinds = new Set<'symbol_reference' | 'call_reference' | 'jsx_reference' | 'type_reference'>();
+
+    if (match.isCallReference) {
+      kinds.add('call_reference');
+    }
+
+    if (match.isJsxReference) {
+      kinds.add('jsx_reference');
+    }
+
+    if (match.isTypeReference) {
+      kinds.add('type_reference');
+    }
+
+    if (kinds.size === 0) {
+      kinds.add('symbol_reference');
+    }
+
+    const existing = signalsByFileId[fileId];
+
+    if (!existing) {
+      signalsByFileId[fileId] = {
+        kinds: [...kinds],
+        connectionCount: 1,
+      };
+      continue;
+    }
+
+    existing.connectionCount += 1;
+
+    for (const kind of kinds) {
+      if (!existing.kinds.includes(kind)) {
+        existing.kinds.push(kind);
+      }
+    }
+  }
+
+  return signalsByFileId;
+}
+
 export async function assembleSymbolContext(query: SymbolContextQuery): Promise<SymbolContextBundle> {
   const index = await loadRequiredSymbolIndex();
   const candidates = collectSymbolCandidates(index.symbols, query);
@@ -88,8 +179,12 @@ export async function assembleSymbolContext(query: SymbolContextQuery): Promise<
   const ambiguity = detectRankingAmbiguity(limitedRankedSymbols);
   const primarySymbol = limitedRankedSymbols[0]?.item ?? null;
   const primaryFile = primarySymbol ? await getFileNode(primarySymbol.fileId) : null;
+  const referenceSignalsByFileId = await buildReferenceSignalsByFileId(primarySymbol, index.byFile);
   const relatedFiles = primarySymbol
-    ? await assembleRelatedFileContext(primarySymbol.fileId, { relatedLimit: query.relatedLimit })
+    ? await assembleRelatedFileContext(primarySymbol.fileId, {
+        relatedLimit: query.relatedLimit,
+        referenceSignalsByFileId,
+      })
     : { items: [], totalCount: 0 };
   const exportedSymbols = primarySymbol ? await getExportedSymbols(primarySymbol.fileId) : [];
 

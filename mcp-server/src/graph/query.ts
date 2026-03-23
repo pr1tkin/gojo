@@ -3,7 +3,7 @@ import type { CodeGraphSnapshot, FileNode, GraphEdge, GraphEdgeType, RepoNode, S
 
 export interface RelatedFileResult {
   file: FileNode;
-  via: GraphEdgeType;
+  via: string;
 }
 
 function getEdgeMatches(
@@ -204,7 +204,7 @@ export async function getRelatedFiles(fileId: string): Promise<RelatedFileResult
       if (target) {
         relatedFiles.push({
           file: target,
-          via: edge.type,
+          via: `outgoing_${edge.type}`,
         });
       }
     }
@@ -215,7 +215,7 @@ export async function getRelatedFiles(fileId: string): Promise<RelatedFileResult
       if (source) {
         relatedFiles.push({
           file: source,
-          via: edge.type,
+          via: `incoming_${edge.type}`,
         });
       }
     }

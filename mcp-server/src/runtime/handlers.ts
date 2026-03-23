@@ -567,16 +567,6 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
             },
           ],
       relatedEntities: [
-        ...(primaryFile
-          ? [
-              {
-                kind: 'file' as const,
-                id: primaryFile.fileId,
-                name: primaryFile.filePath,
-                path: primaryFile.filePath,
-              },
-            ]
-          : []),
         ...result.relatedFiles.slice(0, 3).map((entry) => ({
           kind: 'file' as const,
           id: entry.file.fileId,

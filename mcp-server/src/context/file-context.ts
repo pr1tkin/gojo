@@ -1,10 +1,11 @@
 import { getDefinedSymbols, getExportedSymbols, getFileNode, getNeighboringFiles, getRelatedFiles } from '../graph/query.js';
-import type { FileNode, GraphEdgeType } from '../graph/types.js';
+import type { FileNode } from '../graph/types.js';
 import { rankRelatedFileCandidates } from '../ranking/index.js';
 import { getFileRelationById } from '../symbol-index/query.js';
 import type { FileRelation } from '../symbol-index/types.js';
 import type {
   AssembleFileContextOptions,
+  FileContextConnectionKind,
   FileContextBundle,
   RankedFileContextItem,
 } from './types.js';
@@ -13,8 +14,8 @@ const DEFAULT_RELATED_LIMIT = 10;
 
 function buildGraphSignalsByFileId(
   relatedFiles: Awaited<ReturnType<typeof getRelatedFiles>>,
-): Map<string, { edgeTypes: GraphEdgeType[]; connectionCount: number }> {
-  const signalsByFileId = new Map<string, { edgeTypes: GraphEdgeType[]; connectionCount: number }>();
+): Map<string, { edgeTypes: FileContextConnectionKind[]; connectionCount: number }> {
+  const signalsByFileId = new Map<string, { edgeTypes: FileContextConnectionKind[]; connectionCount: number }>();
 
   for (const entry of relatedFiles) {
     const existing = signalsByFileId.get(entry.file.fileId);
@@ -22,15 +23,15 @@ function buildGraphSignalsByFileId(
     if (existing) {
       existing.connectionCount += 1;
 
-      if (!existing.edgeTypes.includes(entry.via)) {
-        existing.edgeTypes.push(entry.via);
+      if (!existing.edgeTypes.includes(entry.via as FileContextConnectionKind)) {
+        existing.edgeTypes.push(entry.via as FileContextConnectionKind);
       }
 
       continue;
     }
 
     signalsByFileId.set(entry.file.fileId, {
-      edgeTypes: [entry.via],
+      edgeTypes: [entry.via as FileContextConnectionKind],
       connectionCount: 1,
     });
   }
@@ -38,10 +39,36 @@ function buildGraphSignalsByFileId(
   return signalsByFileId;
 }
 
+function mergeReferenceSignals(
+  signalsByFileId: Map<string, { edgeTypes: FileContextConnectionKind[]; connectionCount: number }>,
+  referenceSignalsByFileId: AssembleFileContextOptions['referenceSignalsByFileId'],
+): void {
+  for (const [fileId, referenceSignal] of Object.entries(referenceSignalsByFileId ?? {})) {
+    const existing = signalsByFileId.get(fileId);
+
+    if (existing) {
+      existing.connectionCount += referenceSignal.connectionCount;
+
+      for (const kind of referenceSignal.kinds) {
+        if (!existing.edgeTypes.includes(kind)) {
+          existing.edgeTypes.push(kind);
+        }
+      }
+
+      continue;
+    }
+
+    signalsByFileId.set(fileId, {
+      edgeTypes: [...referenceSignal.kinds],
+      connectionCount: referenceSignal.connectionCount,
+    });
+  }
+}
+
 function mapRankedRelatedFiles(
   ranked: ReturnType<typeof rankRelatedFileCandidates>,
   filesById: Map<string, FileNode>,
-  signalsByFileId: Map<string, { edgeTypes: GraphEdgeType[]; connectionCount: number }>,
+  signalsByFileId: Map<string, { edgeTypes: FileContextConnectionKind[]; connectionCount: number }>,
 ): RankedFileContextItem[] {
   const results: RankedFileContextItem[] = [];
 
@@ -79,10 +106,19 @@ export async function assembleRelatedFileContext(
 
   const relatedFiles = await getRelatedFiles(fileId);
   const signalsByFileId = buildGraphSignalsByFileId(relatedFiles);
+  mergeReferenceSignals(signalsByFileId, options.referenceSignalsByFileId);
   const filesById = new Map(relatedFiles.map((entry) => [entry.file.fileId, entry.file]));
   const candidateRelations: FileRelation[] = [];
 
   for (const candidateFileId of signalsByFileId.keys()) {
+    if (!filesById.has(candidateFileId)) {
+      const file = await getFileNode(candidateFileId);
+
+      if (file) {
+        filesById.set(candidateFileId, file);
+      }
+    }
+
     const relation = await getFileRelationById(candidateFileId);
 
     if (relation) {
