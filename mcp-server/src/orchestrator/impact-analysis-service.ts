@@ -20,10 +20,14 @@ import type {
   ImpactAnalysisSummary,
   ImpactAnalysisTarget,
   ImpactConfidence,
+  ImpactCoverageSignal,
   ImpactEvidence,
+  ImpactIndirectConsumers,
   ImpactResultSummary,
   ImpactScope,
   ImpactReason,
+  ImpactResultBucket,
+  ImpactTier,
   ImpactedFile,
   ImpactedSymbol,
   ImpactSummarySurface,
@@ -55,7 +59,11 @@ function compareSymbols(
   left: { repoId?: string; filePath: string; symbolName: string },
   right: { repoId?: string; filePath: string; symbolName: string },
 ): number {
-  return compareFiles(left, right) || left.symbolName.localeCompare(right.symbolName);
+  return (
+    wrapperLayerPenalty(left.filePath, left.symbolName) - wrapperLayerPenalty(right.filePath, right.symbolName) ||
+    compareFiles(left, right) ||
+    left.symbolName.localeCompare(right.symbolName)
+  );
 }
 
 function getEffectiveMaxDepth(input: AnalyzeSymbolImpactInput): number {
@@ -124,6 +132,24 @@ function pickConfidence(evidence: ImpactEvidence[]): ImpactConfidence {
   }
 
   return current;
+}
+
+function mergeCoverageSignals(evidence: ImpactEvidence[]): ImpactCoverageSignal[] {
+  return [...new Set(evidence.flatMap((entry) => entry.coverageSignals))].sort((left, right) => left.localeCompare(right));
+}
+
+function wrapperLayerPenalty(filePath: string, symbolName: string): number {
+  const normalizedFilePath = normalizePath(filePath);
+
+  if (/(^|\/)(wrappers?|hooks?)\//i.test(normalizedFilePath) || /^use[A-Z]/.test(symbolName) || /wrapper/i.test(symbolName)) {
+    return 2;
+  }
+
+  if (/(^|\/)index\.(tsx?|jsx?)$/i.test(normalizedFilePath)) {
+    return 1;
+  }
+
+  return 0;
 }
 
 function compareEvidence(left: ImpactEvidence[], right: ImpactEvidence[]): number {
@@ -341,12 +367,29 @@ function buildMissingResult(input: AnalyzeSymbolImpactInput, notes: string[]): I
       repoId: input.repoId ?? null,
       file: null,
     },
+    directConsumers: {
+      files: [],
+      symbols: [],
+    },
+    indirectConsumers: {
+      files: [],
+      symbols: [],
+      transitive: [],
+    },
+    relatedContext: {
+      files: [],
+      symbols: [],
+    },
     directlyImpactedSymbols: [],
     directlyImpactedFiles: [],
     transitiveImpacts: [],
     impactSummary: {
       directFiles: 0,
       directSymbols: 0,
+      indirectFiles: 0,
+      indirectSymbols: 0,
+      relatedContextFiles: 0,
+      relatedContextSymbols: 0,
       transitiveFiles: 0,
       transitiveSymbols: 0,
       viaGroups: 0,
@@ -361,6 +404,10 @@ function buildMissingResult(input: AnalyzeSymbolImpactInput, notes: string[]): I
     summary: {
       directFileCount: 0,
       directSymbolCount: 0,
+      indirectFileCount: 0,
+      indirectSymbolCount: 0,
+      relatedContextFileCount: 0,
+      relatedContextSymbolCount: 0,
       transitiveFileCount: 0,
       transitiveSymbolCount: 0,
       highConfidenceImpactCount: 0,
@@ -494,10 +541,16 @@ async function buildUiImpactSummary(target: ImpactAnalysisTarget): Promise<UiImp
 function buildImpactResultSummary(
   directFiles: ImpactedFile[],
   directSymbols: ImpactedSymbol[],
+  indirectFiles: ImpactedFile[],
+  indirectSymbols: ImpactedSymbol[],
+  relatedFiles: ImpactedFile[],
+  relatedSymbols: ImpactedSymbol[],
   transitiveImpacts: TransitiveImpact[],
 ): ImpactResultSummary {
   const allFiles = [
     ...directFiles.map((entry) => ({ fileId: entry.fileId, filePath: entry.filePath })),
+    ...indirectFiles.map((entry) => ({ fileId: entry.fileId, filePath: entry.filePath })),
+    ...relatedFiles.map((entry) => ({ fileId: entry.fileId, filePath: entry.filePath })),
     ...transitiveImpacts
       .map((entry) => entry.file)
       .filter((entry): entry is ImpactedFile => Boolean(entry))
@@ -558,12 +611,20 @@ function buildImpactResultSummary(
     }
   }
 
-  const totalFiles = directFiles.length + transitiveImpacts.filter((entry) => entry.file).length;
+  const totalFiles =
+    directFiles.length +
+    indirectFiles.length +
+    relatedFiles.length +
+    transitiveImpacts.filter((entry) => entry.file).length;
   const minimalSummary = totalFiles < 10;
 
   return {
     directFiles: directFiles.length,
     directSymbols: directSymbols.length,
+    indirectFiles: indirectFiles.length,
+    indirectSymbols: indirectSymbols.length,
+    relatedContextFiles: relatedFiles.length,
+    relatedContextSymbols: relatedSymbols.length,
     transitiveFiles: transitiveImpacts.filter((entry) => entry.file).length,
     transitiveSymbols: transitiveImpacts.filter((entry) => entry.symbol).length,
     viaGroups: transitiveGroups.size,
@@ -706,17 +767,20 @@ function buildEvidence(
   filePath: string,
   notes: string[],
   impactScope: ImpactScope,
+  tier: ImpactTier,
   source: ImpactEvidence['source'] = 'graph',
   symbolId?: string,
   symbolName?: string,
   depth = 1,
   via?: ImpactEvidence['via'],
+  coverageSignals: ImpactCoverageSignal[] = [],
 ): ImpactEvidence {
   return {
     reason,
     confidence,
     source,
     impactScope,
+    tier,
     depth,
     via:
       via ??
@@ -728,7 +792,28 @@ function buildEvidence(
           reason,
         },
       ],
+    coverageSignals,
     notes,
+  };
+}
+
+function buildImpactedSymbol(
+  entry: Omit<ImpactedSymbol, 'confidence' | 'coverageSignals'> & { evidence: ImpactEvidence[] },
+): ImpactedSymbol {
+  return {
+    ...entry,
+    confidence: pickConfidence(entry.evidence),
+    coverageSignals: mergeCoverageSignals(entry.evidence),
+  };
+}
+
+function buildImpactedFile(
+  entry: Omit<ImpactedFile, 'confidence' | 'coverageSignals'> & { evidence: ImpactEvidence[] },
+): ImpactedFile {
+  return {
+    ...entry,
+    confidence: pickConfidence(entry.evidence),
+    coverageSignals: mergeCoverageSignals(entry.evidence),
   };
 }
 
@@ -811,12 +896,16 @@ async function collectSameFileImpacts(target: IndexedSymbol): Promise<ImpactedSy
       candidate.filePath,
       ['exact symbol-name occurrence found inside a sibling symbol span in the same file; this is local same-file evidence, not a confirmed symbol reference edge'],
       'local-symbol',
+      'context',
       'symbol-index',
       candidate.symbolId,
       candidate.name,
+      1,
+      undefined,
+      ['approximate_scope'],
     );
 
-    impacts.push({
+    impacts.push(buildImpactedSymbol({
       symbol: candidate,
       file,
       symbolId: candidate.symbolId,
@@ -826,17 +915,18 @@ async function collectSameFileImpacts(target: IndexedSymbol): Promise<ImpactedSy
       filePath: candidate.filePath,
       repoId: candidate.repoId,
       impactScope: 'local-symbol',
-      confidence: 'low',
+      tier: 'context',
       evidence: [evidence],
-    });
+    }));
   }
 
   return impacts.sort((left, right) => compareSymbols(left, right));
 }
 
 async function collectImporterImpacts(target: IndexedSymbol): Promise<{
-  files: ImpactedFile[];
-  symbols: ImpactedSymbol[];
+  directFiles: ImpactedFile[];
+  directSymbols: ImpactedSymbol[];
+  relatedFiles: ImpactedFile[];
 }> {
   const [importingFiles, targetRelation] = await Promise.all([
     getImportingFiles(target.fileId),
@@ -844,12 +934,13 @@ async function collectImporterImpacts(target: IndexedSymbol): Promise<{
   ]);
 
   if (!targetRelation) {
-    return { files: [], symbols: [] };
+    return { directFiles: [], directSymbols: [], relatedFiles: [] };
   }
 
   const { names: exportedNames, hasDefault } = getTargetExportNames(target, targetRelation.exports);
-  const files: ImpactedFile[] = [];
-  const symbols: ImpactedSymbol[] = [];
+  const directFiles: ImpactedFile[] = [];
+  const directSymbols: ImpactedSymbol[] = [];
+  const relatedFiles: ImpactedFile[] = [];
 
   for (const importingFile of importingFiles) {
     const [relation, definedSymbols, content] = await Promise.all([
@@ -858,31 +949,11 @@ async function collectImporterImpacts(target: IndexedSymbol): Promise<{
       getFileContent(importingFile.repoId, importingFile.filePath),
     ]);
 
-    const importerFileEvidence = buildEvidence(
-      'imports-target',
-      'medium',
-      importingFile.filePath,
-      ['file directly imports the target file through a graph-known import edge; symbol-level usage inside the file is not confirmed by this evidence alone'],
-      'file-direct',
-      'graph',
-    );
+    const matchingBindings = (relation?.imports ?? []).flatMap((entry) => {
+      const targetsFile =
+        entry.resolvedTargetFileId === target.fileId || importSourceLikelyTargetsFile(entry.source, target.filePath);
 
-    files.push({
-      file: importingFile,
-      fileId: importingFile.fileId,
-      filePath: importingFile.filePath,
-      repoId: importingFile.repoId,
-      impactScope: 'file-direct',
-      confidence: 'medium',
-      evidence: [importerFileEvidence],
-    });
-
-    if (!relation) {
-      continue;
-    }
-
-    const matchingBindings = relation.imports.flatMap((entry) => {
-      if (!importSourceLikelyTargetsFile(entry.source, target.filePath)) {
+      if (!targetsFile) {
         return [];
       }
 
@@ -893,6 +964,53 @@ async function collectImporterImpacts(target: IndexedSymbol): Promise<{
           source: entry.source,
         }));
     });
+
+    if (matchingBindings.length > 0) {
+      const importerFileEvidence = buildEvidence(
+        'imports-target',
+        'high',
+        importingFile.filePath,
+        [`file declares import bindings tied to the target export surface (${matchingBindings.map((binding) => binding.localName).join(', ')})`],
+        'file-direct',
+        'direct',
+        'graph',
+      );
+
+      directFiles.push(buildImpactedFile({
+        file: importingFile,
+        fileId: importingFile.fileId,
+        filePath: importingFile.filePath,
+        repoId: importingFile.repoId,
+        impactScope: 'file-direct',
+        tier: 'direct',
+        evidence: [importerFileEvidence],
+      }));
+    } else {
+      const relatedImporterEvidence = buildEvidence(
+        'imports-target',
+        'low',
+        importingFile.filePath,
+        ['file imports the target file through a graph-known edge, but no target binding could be proven from the local import relation'],
+        'fallback',
+        'context',
+        'graph',
+        undefined,
+        undefined,
+        1,
+        undefined,
+        ['missing_graph_evidence', 'approximate_scope'],
+      );
+
+      relatedFiles.push(buildImpactedFile({
+        file: importingFile,
+        fileId: importingFile.fileId,
+        filePath: importingFile.filePath,
+        repoId: importingFile.repoId,
+        impactScope: 'fallback',
+        tier: 'context',
+        evidence: [relatedImporterEvidence],
+      }));
+    }
 
     if (!content || matchingBindings.length === 0) {
       continue;
@@ -913,12 +1031,13 @@ async function collectImporterImpacts(target: IndexedSymbol): Promise<{
         definedSymbol.filePath,
         [`symbol span references imported binding "${referencedBinding.localName}" from "${referencedBinding.source}", tied to the target export surface`],
         'symbol-direct',
+        'direct',
         'symbol-index',
         definedSymbol.symbolId,
         definedSymbol.name,
       );
 
-      symbols.push({
+      directSymbols.push(buildImpactedSymbol({
         symbol: definedSymbol,
         file: symbolFile,
         symbolId: definedSymbol.symbolId,
@@ -928,22 +1047,22 @@ async function collectImporterImpacts(target: IndexedSymbol): Promise<{
         filePath: definedSymbol.filePath,
         repoId: definedSymbol.repoId,
         impactScope: 'symbol-direct',
-        confidence: 'high',
+        tier: 'direct',
         evidence: [symbolEvidence],
-      });
+      }));
     }
   }
 
-  return { files, symbols };
+  return { directFiles, directSymbols, relatedFiles };
 }
 
 async function collectReexportImpacts(target: IndexedSymbol): Promise<{
-  files: ImpactedFile[];
-  symbols: ImpactedSymbol[];
+  indirectFiles: ImpactedFile[];
+  indirectSymbols: ImpactedSymbol[];
 }> {
   const reexportingFiles = await getReexportingFiles(target.fileId);
-  const files: ImpactedFile[] = [];
-  const symbols: ImpactedSymbol[] = [];
+  const indirectFiles: ImpactedFile[] = [];
+  const indirectSymbols: ImpactedSymbol[] = [];
 
   for (const reexportingFile of reexportingFiles) {
     const [relation, definedSymbols, content] = await Promise.all([
@@ -958,18 +1077,24 @@ async function collectReexportImpacts(target: IndexedSymbol): Promise<{
       reexportingFile.filePath,
       ['file re-exports the target file through a resolved local re-export edge; downstream consumer usage is not confirmed by this evidence alone'],
       'proxy',
+      'indirect',
       'graph',
+      undefined,
+      undefined,
+      1,
+      undefined,
+      ['proxy_only'],
     );
 
-    files.push({
+    indirectFiles.push(buildImpactedFile({
       file: reexportingFile,
       fileId: reexportingFile.fileId,
       filePath: reexportingFile.filePath,
       repoId: reexportingFile.repoId,
       impactScope: 'proxy',
-      confidence: 'medium',
+      tier: 'indirect',
       evidence: [evidence],
-    });
+    }));
 
     if (!relation || !content) {
       continue;
@@ -995,16 +1120,20 @@ async function collectReexportImpacts(target: IndexedSymbol): Promise<{
       const symbolFile = await getFileNode(definedSymbol.fileId);
       const symbolEvidence = buildEvidence(
         'reexports-target',
-        'low',
+        'medium',
         definedSymbol.filePath,
         ['same-file symbol span references a local symbol that is re-exported from this file; this is a barrel-proxy signal, not a confirmed downstream consumer reference'],
         'proxy',
+        'indirect',
         'symbol-index',
         definedSymbol.symbolId,
         definedSymbol.name,
+        1,
+        undefined,
+        ['proxy_only', 'approximate_scope'],
       );
 
-      symbols.push({
+      indirectSymbols.push(buildImpactedSymbol({
         symbol: definedSymbol,
         file: symbolFile,
         symbolId: definedSymbol.symbolId,
@@ -1014,13 +1143,13 @@ async function collectReexportImpacts(target: IndexedSymbol): Promise<{
         filePath: definedSymbol.filePath,
         repoId: definedSymbol.repoId,
         impactScope: 'proxy',
-        confidence: 'low',
+        tier: 'indirect',
         evidence: [symbolEvidence],
-      });
+      }));
     }
   }
 
-  return { files, symbols };
+  return { indirectFiles, indirectSymbols };
 }
 
 function mergeImpactedFiles(entries: ImpactedFile[]): ImpactedFile[] {
@@ -1037,6 +1166,7 @@ function mergeImpactedFiles(entries: ImpactedFile[]): ImpactedFile[] {
 
     existing.evidence.push(...entry.evidence);
     existing.confidence = pickConfidence(existing.evidence);
+    existing.coverageSignals = mergeCoverageSignals(existing.evidence);
   }
 
   return Array.from(byFile.values())
@@ -1057,6 +1187,7 @@ function mergeImpactedSymbols(entries: ImpactedSymbol[]): ImpactedSymbol[] {
 
     existing.evidence.push(...entry.evidence);
     existing.confidence = pickConfidence(existing.evidence);
+    existing.coverageSignals = mergeCoverageSignals(existing.evidence);
   }
 
   return Array.from(bySymbol.values())
@@ -1116,17 +1247,17 @@ function collectDirectImpactFileSeeds(
 
 async function collectTransitiveImpacts(
   target: ImpactAnalysisTarget,
-  directFiles: ImpactedFile[],
-  directSymbols: ImpactedSymbol[],
+  seedFiles: ImpactedFile[],
+  seedSymbols: ImpactedSymbol[],
 ): Promise<{ impacts: TransitiveImpact[]; truncated: boolean }> {
   if (!target.file?.fileId) {
     return { impacts: [], truncated: false };
   }
 
-  const seeds = collectDirectImpactFileSeeds(directFiles, directSymbols, target.file.fileId);
+  const seeds = collectDirectImpactFileSeeds(seedFiles, seedSymbols, target.file.fileId);
   const directFileIds = new Set<string>([
     target.file.fileId,
-    ...directFiles.map((entry) => entry.fileId).filter((entry): entry is string => typeof entry === 'string'),
+    ...seedFiles.map((entry) => entry.fileId).filter((entry): entry is string => typeof entry === 'string'),
   ]);
   const impacts = new Map<string, TransitiveImpact>();
   const visited = new Set<string>([target.file.fileId]);
@@ -1151,10 +1282,11 @@ async function collectTransitiveImpacts(
 
       const evidence = buildEvidence(
         'imports-target',
-        'low',
+        'medium',
         importer.filePath,
         [`file imports direct impact file "${seed.filePath}" and is included as a bounded exploratory second-hop candidate`],
         'proxy',
+        'indirect',
         'graph',
         undefined,
         undefined,
@@ -1166,21 +1298,24 @@ async function collectTransitiveImpacts(
             reason: seed.reason,
           },
         ],
+        ['proxy_only'],
       );
-      const fileImpact: ImpactedFile = {
+      const fileImpact = buildImpactedFile({
         file: importer,
         fileId: importer.fileId,
         filePath: importer.filePath,
         repoId: importer.repoId,
         impactScope: 'proxy',
-        confidence: 'low',
+        tier: 'indirect',
         evidence: [evidence],
-      };
+      });
 
       impacts.set(importer.fileId, {
         depth: 2,
         file: fileImpact,
-        confidence: 'low',
+        tier: 'indirect',
+        confidence: 'medium',
+        coverageSignals: mergeCoverageSignals([evidence]),
         evidence: [evidence],
       });
       visited.add(importer.fileId);
@@ -1203,51 +1338,65 @@ async function collectTransitiveImpacts(
 }
 
 function buildSummary(
-  files: ImpactedFile[],
-  symbols: ImpactedSymbol[],
+  directFiles: ImpactedFile[],
+  directSymbols: ImpactedSymbol[],
+  indirectFiles: ImpactedFile[],
+  indirectSymbols: ImpactedSymbol[],
+  relatedFiles: ImpactedFile[],
+  relatedSymbols: ImpactedSymbol[],
   transitiveImpacts: TransitiveImpact[],
   notes: string[],
 ): ImpactAnalysisSummary {
   const impacts = [
-    ...files.map((entry) => entry.confidence),
-    ...symbols.map((entry) => entry.confidence),
+    ...directFiles.map((entry) => entry.confidence),
+    ...directSymbols.map((entry) => entry.confidence),
+    ...indirectFiles.map((entry) => entry.confidence),
+    ...indirectSymbols.map((entry) => entry.confidence),
+    ...relatedFiles.map((entry) => entry.confidence),
+    ...relatedSymbols.map((entry) => entry.confidence),
+    ...transitiveImpacts.map((entry) => entry.confidence),
   ];
-  const symbolDirectImpactCount = symbols.filter((entry) => entry.impactScope === 'symbol-direct').length;
-  const fileDirectImpactCount = files.filter((entry) => entry.impactScope === 'file-direct').length;
+  const symbolDirectImpactCount = directSymbols.filter((entry) => entry.impactScope === 'symbol-direct').length;
+  const fileDirectImpactCount = directFiles.filter((entry) => entry.impactScope === 'file-direct').length;
   const proxyImpactCount =
-    files.filter((entry) => entry.impactScope === 'proxy').length +
-    symbols.filter((entry) => entry.impactScope === 'proxy').length;
-  const localSymbolImpactCount = symbols.filter((entry) => entry.impactScope === 'local-symbol').length;
+    indirectFiles.filter((entry) => entry.impactScope === 'proxy').length +
+    indirectSymbols.filter((entry) => entry.impactScope === 'proxy').length +
+    transitiveImpacts.filter((entry) => entry.file?.impactScope === 'proxy' || entry.symbol?.impactScope === 'proxy').length;
+  const localSymbolImpactCount = relatedSymbols.filter((entry) => entry.impactScope === 'local-symbol').length;
   const overviewParts: string[] = [];
 
   if (symbolDirectImpactCount > 0) {
-    overviewParts.push(`${symbolDirectImpactCount} symbol-direct`);
+    overviewParts.push(`${symbolDirectImpactCount} exact symbol consumer`);
   }
 
   if (fileDirectImpactCount > 0) {
-    overviewParts.push(`${fileDirectImpactCount} file-level importer`);
+    overviewParts.push(`${fileDirectImpactCount} exact file consumer`);
   }
 
-  if (proxyImpactCount > 0) {
-    overviewParts.push(`${proxyImpactCount} proxy`);
+  if (indirectFiles.length + indirectSymbols.length > 0) {
+    overviewParts.push(`${indirectFiles.length + indirectSymbols.length} inferred indirect consumer`);
   }
 
-  if (localSymbolImpactCount > 0) {
-    overviewParts.push(`${localSymbolImpactCount} local same-file`);
+  if (relatedFiles.length + localSymbolImpactCount > 0) {
+    overviewParts.push(`${relatedFiles.length + localSymbolImpactCount} related context`);
   }
 
   if (transitiveImpacts.length > 0) {
-    overviewParts.push(`${transitiveImpacts.length} bounded transitive`);
+    overviewParts.push(`${transitiveImpacts.length} bounded transitive consumer`);
   }
 
   const overview =
     overviewParts.length > 0
-      ? `likely direct impacts identified from graph and local evidence: ${overviewParts.join(', ')}`
-      : 'no likely direct impacts identified from the current safe-mode evidence';
+      ? `exact direct consumers are separated from inferred and contextual results: ${overviewParts.join(', ')}`
+      : 'no exact direct consumers identified from the current symbol and graph evidence';
 
   return {
-    directFileCount: files.length,
-    directSymbolCount: symbols.length,
+    directFileCount: directFiles.length,
+    directSymbolCount: directSymbols.length,
+    indirectFileCount: indirectFiles.length,
+    indirectSymbolCount: indirectSymbols.length,
+    relatedContextFileCount: relatedFiles.length,
+    relatedContextSymbolCount: relatedSymbols.length,
     transitiveFileCount: transitiveImpacts.filter((entry) => entry.file).length,
     transitiveSymbolCount: transitiveImpacts.filter((entry) => entry.symbol).length,
     highConfidenceImpactCount: impacts.filter((entry) => entry === 'high').length,
@@ -1279,23 +1428,34 @@ export async function analyzeSymbolImpact(input: AnalyzeSymbolImpactInput): Prom
     collectReexportImpacts(target.symbol),
   ]);
 
-  const directlyImpactedSymbols = mergeImpactedSymbols([
-    ...sameFileSymbols,
-    ...importerImpacts.symbols,
-    ...reexportImpacts.symbols,
-  ]);
-  const directlyImpactedFiles = mergeImpactedFiles([
-    ...importerImpacts.files,
-    ...reexportImpacts.files,
-  ]);
+  const directConsumers: ImpactResultBucket = {
+    files: mergeImpactedFiles(importerImpacts.directFiles),
+    symbols: mergeImpactedSymbols(importerImpacts.directSymbols),
+  };
+  const indirectConsumers: ImpactIndirectConsumers = {
+    files: mergeImpactedFiles(reexportImpacts.indirectFiles),
+    symbols: mergeImpactedSymbols(reexportImpacts.indirectSymbols),
+    transitive: [],
+  };
+  const relatedContext: ImpactResultBucket = {
+    files: mergeImpactedFiles(importerImpacts.relatedFiles),
+    symbols: mergeImpactedSymbols(sameFileSymbols),
+  };
+  const directlyImpactedSymbols = directConsumers.symbols;
+  const directlyImpactedFiles = directConsumers.files;
   let transitiveImpacts: TransitiveImpact[] = [];
 
   if (input.mode === 'exploratory' && effectiveMaxDepth >= 2) {
-    const transitive = await collectTransitiveImpacts(target, directlyImpactedFiles, directlyImpactedSymbols);
+    const transitive = await collectTransitiveImpacts(
+      target,
+      [...directConsumers.files, ...indirectConsumers.files],
+      [...directConsumers.symbols, ...indirectConsumers.symbols],
+    );
     transitiveImpacts = transitive.impacts;
+    indirectConsumers.transitive = transitiveImpacts;
 
     if (transitiveImpacts.length > 0) {
-      notes.push('exploratory mode adds one bounded transitive importer hop beyond the direct impact surface');
+      notes.push('exploratory mode adds one bounded inferred-consumer hop beyond the exact direct consumer surface');
     }
 
     if (transitive.truncated) {
@@ -1305,12 +1465,16 @@ export async function analyzeSymbolImpact(input: AnalyzeSymbolImpactInput): Prom
     notes.push('exploratory mode is enabled, but bounded transitive expansion was not applied because maxDepth is below 2');
   }
 
-  if (directlyImpactedFiles.length > 0) {
-    notes.push('direct importer files and re-export files are file-level or proxy impact signals unless symbol-level usage is separately confirmed');
+  if (directConsumers.files.length > 0) {
+    notes.push('direct consumers require proven import bindings, callsites, or graph-backed symbol references');
   }
 
-  if (sameFileSymbols.length > 0) {
-    notes.push('same-file symbol impacts are based on exact symbol-name matches inside sibling symbol spans and should be treated as local proxy evidence');
+  if (indirectConsumers.files.length > 0 || indirectConsumers.symbols.length > 0 || transitiveImpacts.length > 0) {
+    notes.push('re-exports, wrapper layers, and bounded transitive propagation are reported as inferred indirect consumers, not exact breakage');
+  }
+
+  if (relatedContext.files.length > 0 || relatedContext.symbols.length > 0) {
+    notes.push('same-file matches and unresolved importer edges are kept as related context only because exact symbol-level usage was not proven');
   }
 
   const uiImpact = await buildUiImpactSummary(target);
@@ -1322,15 +1486,35 @@ export async function analyzeSymbolImpact(input: AnalyzeSymbolImpactInput): Prom
   return {
     mode: input.mode,
     target,
+    directConsumers,
+    indirectConsumers,
+    relatedContext,
     directlyImpactedSymbols,
     directlyImpactedFiles,
     transitiveImpacts,
-    impactSummary: buildImpactResultSummary(directlyImpactedFiles, directlyImpactedSymbols, transitiveImpacts),
+    impactSummary: buildImpactResultSummary(
+      directConsumers.files,
+      directConsumers.symbols,
+      indirectConsumers.files,
+      indirectConsumers.symbols,
+      relatedContext.files,
+      relatedContext.symbols,
+      transitiveImpacts,
+    ),
     ...(uiImpact ? { uiImpact } : {}),
     publicSurfaceRisk: {
       level: 'unknown',
       notes: ['public surface risk is not derived in phase 5.1 step B'],
     },
-    summary: buildSummary(directlyImpactedFiles, directlyImpactedSymbols, transitiveImpacts, notes),
+    summary: buildSummary(
+      directConsumers.files,
+      directConsumers.symbols,
+      indirectConsumers.files,
+      indirectConsumers.symbols,
+      relatedContext.files,
+      relatedContext.symbols,
+      transitiveImpacts,
+      notes,
+    ),
   };
 }

@@ -51,6 +51,26 @@ interface PlanningFacts {
   repoWide: boolean;
 }
 
+function getDirectImpactFiles(impact: ImpactAnalysisResult): ImpactedFile[] {
+  return impact.directConsumers?.files ?? impact.directlyImpactedFiles;
+}
+
+function getDirectImpactSymbols(impact: ImpactAnalysisResult): ImpactedSymbol[] {
+  return impact.directConsumers?.symbols ?? impact.directlyImpactedSymbols;
+}
+
+function getIndirectImpactFiles(impact: ImpactAnalysisResult): ImpactedFile[] {
+  return impact.indirectConsumers?.files ?? [];
+}
+
+function getIndirectImpactSymbols(impact: ImpactAnalysisResult): ImpactedSymbol[] {
+  return impact.indirectConsumers?.symbols ?? [];
+}
+
+function getTransitiveImpacts(impact: ImpactAnalysisResult): TransitiveImpact[] {
+  return impact.indirectConsumers?.transitive ?? impact.transitiveImpacts;
+}
+
 function normalizePath(filePath: string): string {
   return filePath.replace(/\\/g, '/').replace(/^\/+/, '');
 }
@@ -179,8 +199,8 @@ function getUsageKind(signals: OwnershipSignal[]): UsageKind {
 function toPlanningSignals(ownership: SymbolOwnershipResult, impact: ImpactAnalysisResult): ChangePlanningSignal[] {
   const signals: ChangePlanningSignal[] = [];
   const usageKind = getUsageKind(ownership.signals);
-  const directCount = impact.directlyImpactedFiles.length + impact.directlyImpactedSymbols.length;
-  const transitiveCount = impact.transitiveImpacts.length;
+  const directCount = getDirectImpactFiles(impact).length + getDirectImpactSymbols(impact).length;
+  const transitiveCount = getTransitiveImpacts(impact).length;
   const totalBreadth = directCount + transitiveCount;
 
   signals.push({
@@ -286,15 +306,23 @@ function getPlanningFacts(ownership: SymbolOwnershipResult, signals: ChangePlann
 function collectImpactedPaths(impact: ImpactAnalysisResult, targetFilePath: string): string[] {
   const filePaths = new Set<string>();
 
-  for (const entry of impact.directlyImpactedFiles) {
+  for (const entry of getDirectImpactFiles(impact)) {
     filePaths.add(normalizePath(entry.filePath));
   }
 
-  for (const entry of impact.directlyImpactedSymbols) {
+  for (const entry of getDirectImpactSymbols(impact)) {
     filePaths.add(normalizePath(entry.filePath));
   }
 
-  for (const entry of impact.transitiveImpacts) {
+  for (const entry of getIndirectImpactFiles(impact)) {
+    filePaths.add(normalizePath(entry.filePath));
+  }
+
+  for (const entry of getIndirectImpactSymbols(impact)) {
+    filePaths.add(normalizePath(entry.filePath));
+  }
+
+  for (const entry of getTransitiveImpacts(impact)) {
     if (entry.file?.filePath) {
       filePaths.add(normalizePath(entry.file.filePath));
     }
@@ -331,7 +359,7 @@ function classifyScope(ownership: SymbolOwnershipResult, impact: ImpactAnalysisR
   const repoWide = signals.some((entry) => entry.type === 'repo-wide');
   const barrelSurface = signals.some((entry) => entry.type === 'barrel-surface');
 
-  if (ownership.ownership === 'internal-local' && impact.directlyImpactedFiles.length === 0 && impact.transitiveImpacts.length === 0) {
+  if (ownership.ownership === 'internal-local' && getDirectImpactFiles(impact).length === 0 && getTransitiveImpacts(impact).length === 0) {
     return 'local-file';
   }
 
@@ -687,7 +715,7 @@ async function toOrderedPlan(
     bucket: 'primary',
   });
 
-  for (const entry of impact.directlyImpactedSymbols) {
+  for (const entry of getDirectImpactSymbols(impact)) {
     const candidate = toCandidateFromDirectSymbol(entry, scope, normalizedTargetFilePath, facts);
 
     if (!candidate) {
@@ -697,7 +725,7 @@ async function toOrderedPlan(
     candidates.set(candidate.filePath, mergeCandidate(candidates.get(candidate.filePath), candidate));
   }
 
-  for (const entry of impact.directlyImpactedFiles) {
+  for (const entry of getDirectImpactFiles(impact)) {
     const candidate = toCandidateFromDirectFile(entry, scope, normalizedTargetFilePath, facts);
 
     if (!candidate) {
@@ -707,7 +735,20 @@ async function toOrderedPlan(
     candidates.set(candidate.filePath, mergeCandidate(candidates.get(candidate.filePath), candidate));
   }
 
-  for (const entry of impact.transitiveImpacts) {
+  for (const entry of [...getIndirectImpactSymbols(impact), ...getIndirectImpactFiles(impact)]) {
+    const candidate =
+      'symbolName' in entry
+        ? toCandidateFromDirectSymbol(entry, scope, normalizedTargetFilePath, facts)
+        : toCandidateFromDirectFile(entry, scope, normalizedTargetFilePath, facts);
+
+    if (!candidate) {
+      continue;
+    }
+
+    candidates.set(candidate.filePath, mergeCandidate(candidates.get(candidate.filePath), candidate));
+  }
+
+  for (const entry of getTransitiveImpacts(impact)) {
     const candidate = toCandidateFromTransitive(entry, normalizedTargetFilePath, scope);
 
     if (!candidate) {

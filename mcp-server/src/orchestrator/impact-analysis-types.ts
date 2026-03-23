@@ -8,6 +8,10 @@ export type ImpactConfidence = 'high' | 'medium' | 'low';
 
 export type ImpactEvidenceSource = 'symbol-index' | 'graph' | 'text-match';
 
+export type ImpactTier = 'direct' | 'indirect' | 'context';
+
+export type ImpactCoverageSignal = 'missing_graph_evidence' | 'approximate_scope' | 'proxy_only';
+
 export type ImpactScope =
   | 'symbol-direct'
   | 'file-direct'
@@ -74,8 +78,10 @@ export interface ImpactEvidence {
   confidence: ImpactConfidence;
   source: ImpactEvidenceSource;
   impactScope: ImpactScope;
+  tier: ImpactTier;
   depth: number;
   via: ImpactPathStep[];
+  coverageSignals: ImpactCoverageSignal[];
   notes: string[];
 }
 
@@ -89,7 +95,9 @@ export interface ImpactedSymbol {
   filePath: string;
   repoId?: string;
   impactScope: Extract<ImpactScope, 'symbol-direct' | 'proxy' | 'local-symbol' | 'fallback'>;
+  tier: ImpactTier;
   confidence: ImpactConfidence;
+  coverageSignals: ImpactCoverageSignal[];
   evidence: ImpactEvidence[];
 }
 
@@ -99,7 +107,9 @@ export interface ImpactedFile {
   filePath: string;
   repoId?: string;
   impactScope: Extract<ImpactScope, 'file-direct' | 'proxy' | 'fallback'>;
+  tier: ImpactTier;
   confidence: ImpactConfidence;
+  coverageSignals: ImpactCoverageSignal[];
   evidence: ImpactEvidence[];
 }
 
@@ -107,13 +117,28 @@ export interface TransitiveImpact {
   depth: number;
   symbol?: ImpactedSymbol;
   file?: ImpactedFile;
+  tier: Extract<ImpactTier, 'indirect'>;
   confidence: Extract<ImpactConfidence, 'medium' | 'low'>;
+  coverageSignals: ImpactCoverageSignal[];
   evidence: ImpactEvidence[];
+}
+
+export interface ImpactResultBucket<TFile = ImpactedFile, TSymbol = ImpactedSymbol> {
+  files: TFile[];
+  symbols: TSymbol[];
+}
+
+export interface ImpactIndirectConsumers extends ImpactResultBucket {
+  transitive: TransitiveImpact[];
 }
 
 export interface ImpactAnalysisSummary {
   directFileCount: number;
   directSymbolCount: number;
+  indirectFileCount: number;
+  indirectSymbolCount: number;
+  relatedContextFileCount: number;
+  relatedContextSymbolCount: number;
   transitiveFileCount: number;
   transitiveSymbolCount: number;
   highConfidenceImpactCount: number;
@@ -148,6 +173,10 @@ export interface ImpactSummaryTransitiveGroup {
 export interface ImpactResultSummary {
   directFiles: number;
   directSymbols: number;
+  indirectFiles: number;
+  indirectSymbols: number;
+  relatedContextFiles: number;
+  relatedContextSymbols: number;
   transitiveFiles: number;
   transitiveSymbols: number;
   viaGroups: number;
@@ -178,6 +207,9 @@ export interface UiImpactSummary {
 export interface ImpactAnalysisResult {
   mode: ImpactAnalysisMode;
   target: ImpactAnalysisTarget;
+  directConsumers: ImpactResultBucket;
+  indirectConsumers: ImpactIndirectConsumers;
+  relatedContext: ImpactResultBucket;
   directlyImpactedSymbols: ImpactedSymbol[];
   directlyImpactedFiles: ImpactedFile[];
   transitiveImpacts: TransitiveImpact[];

@@ -443,36 +443,50 @@ describe('impact analysis service', () => {
     });
 
     expect(result.target.symbolId).toBe(targetSymbol.symbolId);
-    expect(result.directlyImpactedFiles).toEqual([
-      expect.objectContaining({ filePath: consumerFile.filePath }),
-      expect.objectContaining({ filePath: barrelFile.filePath }),
+    expect(result.directConsumers.files).toEqual([
+      expect.objectContaining({ filePath: consumerFile.filePath, tier: 'direct' }),
     ]);
-    expect(result.directlyImpactedSymbols).toEqual(
+    expect(result.indirectConsumers.files).toEqual([
+      expect.objectContaining({ filePath: barrelFile.filePath, tier: 'indirect' }),
+    ]);
+    expect(result.directConsumers.symbols).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ symbolName: 'DashboardPage' }),
+      ]),
+    );
+    expect(result.relatedContext.symbols).toEqual(
+      expect.arrayContaining([
         expect.objectContaining({ symbolName: 'WidgetProps' }),
         expect.objectContaining({ symbolName: 'renderWidget' }),
       ]),
     );
     expect(result.summary).toEqual(expect.objectContaining({
-      directFileCount: 2,
-      directSymbolCount: 3,
-      highConfidenceImpactCount: 1,
-      mediumConfidenceImpactCount: 2,
+      directFileCount: 1,
+      directSymbolCount: 1,
+      indirectFileCount: 1,
+      indirectSymbolCount: 0,
+      relatedContextSymbolCount: 2,
+      highConfidenceImpactCount: 2,
+      mediumConfidenceImpactCount: 1,
       lowConfidenceImpactCount: 2,
       symbolDirectImpactCount: 1,
       fileDirectImpactCount: 1,
       proxyImpactCount: 1,
       localSymbolImpactCount: 2,
     }));
-    expect(result.summary.overview).toContain('likely direct impacts identified from graph and local evidence');
+    expect(result.summary.overview).toContain('exact direct consumers are separated');
     expect(result.summary.notes).toEqual(expect.arrayContaining([
-      'direct importer files and re-export files are file-level or proxy impact signals unless symbol-level usage is separately confirmed',
-      'same-file symbol impacts are based on exact symbol-name matches inside sibling symbol spans and should be treated as local proxy evidence',
+      'direct consumers require proven import bindings, callsites, or graph-backed symbol references',
+      're-exports, wrapper layers, and bounded transitive propagation are reported as inferred indirect consumers, not exact breakage',
+      'same-file matches and unresolved importer edges are kept as related context only because exact symbol-level usage was not proven',
     ]));
     expect(result.impactSummary).toEqual({
-      directFiles: 2,
-      directSymbols: 3,
+      directFiles: 1,
+      directSymbols: 1,
+      indirectFiles: 1,
+      indirectSymbols: 0,
+      relatedContextFiles: 0,
+      relatedContextSymbols: 2,
       transitiveFiles: 0,
       transitiveSymbols: 0,
       viaGroups: 0,
@@ -500,13 +514,14 @@ describe('impact analysis service', () => {
       mode: 'safe',
     });
 
-    const sameFileImpact = result.directlyImpactedSymbols.find((entry) => entry.symbolName === 'renderWidget');
+    const sameFileImpact = result.relatedContext.symbols.find((entry) => entry.symbolName === 'renderWidget');
 
     expect(sameFileImpact).toEqual(
       expect.objectContaining({
         filePath: targetSymbol.filePath,
         impactScope: 'local-symbol',
         confidence: 'low',
+        tier: 'context',
       }),
     );
     expect(sameFileImpact?.evidence[0]).toEqual(
@@ -530,9 +545,10 @@ describe('impact analysis service', () => {
     expect(importerFile?.evidence[0]).toEqual(expect.objectContaining({
       reason: 'imports-target',
       impactScope: 'file-direct',
-      confidence: 'medium',
+      confidence: 'high',
+      tier: 'direct',
     }));
-    expect(importerFile?.evidence[0].notes[0]).toContain('symbol-level usage inside the file is not confirmed');
+    expect(importerFile?.evidence[0].notes[0]).toContain('declares import bindings tied to the target export surface');
     expect(importerSymbol?.impactScope).toBe('symbol-direct');
     expect(importerSymbol?.evidence[0].notes[0]).toContain('references imported binding "Widget"');
   });
@@ -703,7 +719,7 @@ describe('impact analysis service', () => {
 
     expect(importerFile).toEqual(expect.objectContaining({
       impactScope: 'file-direct',
-      confidence: 'medium',
+      confidence: 'high',
     }));
     expect(importerSymbol).toBeUndefined();
   });
@@ -714,16 +730,18 @@ describe('impact analysis service', () => {
       mode: 'safe',
     });
 
-    const barrelImpact = result.directlyImpactedFiles.find((entry) => entry.filePath === barrelFile.filePath);
+    const barrelImpact = result.indirectConsumers.files.find((entry) => entry.filePath === barrelFile.filePath);
 
     expect(barrelImpact).toEqual(expect.objectContaining({
       impactScope: 'proxy',
       confidence: 'medium',
+      tier: 'indirect',
     }));
     expect(barrelImpact?.evidence[0]).toEqual(expect.objectContaining({
       reason: 'reexports-target',
       impactScope: 'proxy',
       confidence: 'medium',
+      tier: 'indirect',
     }));
   });
 
@@ -847,8 +865,8 @@ describe('impact analysis service', () => {
     });
 
     expect(result.directlyImpactedFiles).toEqual([
-      expect.objectContaining({ filePath: modalOne.filePath, impactScope: 'file-direct', confidence: 'medium' }),
-      expect.objectContaining({ filePath: modalTwo.filePath, impactScope: 'file-direct', confidence: 'medium' }),
+      expect.objectContaining({ filePath: modalOne.filePath, impactScope: 'file-direct', confidence: 'high' }),
+      expect.objectContaining({ filePath: modalTwo.filePath, impactScope: 'file-direct', confidence: 'high' }),
     ]);
     expect(result.summary.fileDirectImpactCount).toBe(2);
   });
@@ -863,7 +881,7 @@ describe('impact analysis service', () => {
       filePath: consumerFile.filePath,
       impactScope: 'file-direct',
     }));
-    expect(result.directlyImpactedFiles[1]).toEqual(expect.objectContaining({
+    expect(result.indirectConsumers.files[0]).toEqual(expect.objectContaining({
       filePath: barrelFile.filePath,
       impactScope: 'proxy',
     }));
@@ -878,17 +896,18 @@ describe('impact analysis service', () => {
     expect(result.transitiveImpacts).toEqual([
       expect.objectContaining({
         depth: 2,
-        confidence: 'low',
+        confidence: 'medium',
+        tier: 'indirect',
         file: expect.objectContaining({
           filePath: transitivePageFile.filePath,
           impactScope: 'proxy',
-          confidence: 'low',
+          confidence: 'medium',
         }),
       }),
     ]);
     expect(result.summary.transitiveFileCount).toBe(1);
-    expect(result.summary.overview).toContain('1 bounded transitive');
-    expect(result.summary.notes).toContain('exploratory mode adds one bounded transitive importer hop beyond the direct impact surface');
+    expect(result.summary.overview).toContain('1 bounded transitive consumer');
+    expect(result.summary.notes).toContain('exploratory mode adds one bounded inferred-consumer hop beyond the exact direct consumer surface');
     expect(result.impactSummary.directFiles).toBe(result.directlyImpactedFiles.length);
     expect(result.impactSummary.directSymbols).toBe(result.directlyImpactedSymbols.length);
     expect(result.impactSummary.transitiveFiles).toBe(result.transitiveImpacts.length);
@@ -906,8 +925,9 @@ describe('impact analysis service', () => {
     expect(transitive.file?.filePath).toBe(transitivePageFile.filePath);
     expect(transitive.evidence[0]).toEqual(expect.objectContaining({
       depth: 2,
-      confidence: 'low',
+      confidence: 'medium',
       impactScope: 'proxy',
+      tier: 'indirect',
     }));
     expect(transitive.evidence[0].via).toEqual([
       expect.objectContaining({
@@ -1241,10 +1261,8 @@ describe('impact analysis service', () => {
       mode: 'exploratory',
     });
 
-    expect(result.directlyImpactedFiles.map((entry) => entry.filePath)).toEqual([
-      consumerFile.filePath,
-      barrelFile.filePath,
-    ]);
+    expect(result.directlyImpactedFiles.map((entry) => entry.filePath)).toEqual([consumerFile.filePath]);
+    expect(result.indirectConsumers.files.map((entry) => entry.filePath)).toEqual([barrelFile.filePath]);
     expect(result.transitiveImpacts.map((entry) => entry.file?.filePath)).toEqual([
       appPageFile.filePath,
       layoutFile.filePath,
@@ -1566,10 +1584,8 @@ describe('impact analysis service', () => {
       ],
       confidence: 'medium',
     });
-    expect(result.directlyImpactedFiles.map((entry) => entry.filePath)).toEqual([
-      consumerFile.filePath,
-      barrelFile.filePath,
-    ]);
+    expect(result.directlyImpactedFiles.map((entry) => entry.filePath)).toEqual([consumerFile.filePath]);
+    expect(result.indirectConsumers.files.map((entry) => entry.filePath)).toEqual([barrelFile.filePath]);
     expect(result.summary.notes).toContain(
       'ui impact signals are supplementary JSX hierarchy hints derived from component composition and observed prop usage; they do not change graph-based impact ranking',
     );
@@ -1616,7 +1632,7 @@ describe('impact analysis service', () => {
 
     expect(result.mode).toBe('exploratory');
     expect(result.summary.notes).toEqual(expect.arrayContaining([
-      'exploratory mode adds one bounded transitive importer hop beyond the direct impact surface',
+      'exploratory mode adds one bounded inferred-consumer hop beyond the exact direct consumer surface',
     ]));
     expect(result.summary.transitiveFileCount).toBeGreaterThan(0);
   });
