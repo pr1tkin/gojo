@@ -292,4 +292,89 @@ describe('ranking layer', () => {
     );
     expect(ranked[0].score).toBeGreaterThan(ranked[1].score);
   });
+
+  it('ranks strong reference edges above medium and weak graph edges', () => {
+    const target = createRelation({
+      fileId: 'repo-a:lib/services/contract.ts',
+      filePath: 'lib/services/contract.ts',
+    });
+    const ranked = rankRelatedFileCandidates(
+      target,
+      [
+        {
+          relation: createRelation({
+            fileId: 'repo-a:app/api/contracts/[id]/route.ts',
+            filePath: 'app/api/contracts/[id]/route.ts',
+          }),
+          graphSignals: {
+            edgeTypes: ['incoming_file_imports_file', 'symbol_reference', 'call_reference'],
+            connectionCount: 3,
+          },
+        },
+        {
+          relation: createRelation({
+            fileId: 'repo-a:app/api/contracts/route.ts',
+            filePath: 'app/api/contracts/route.ts',
+          }),
+          graphSignals: {
+            edgeTypes: ['incoming_file_imports_file'],
+            connectionCount: 1,
+          },
+        },
+        {
+          relation: createRelation({
+            fileId: 'repo-a:lib/db/model/Contract.ts',
+            filePath: 'lib/db/model/Contract.ts',
+          }),
+          graphSignals: {
+            edgeTypes: ['outgoing_file_imports_file'],
+            connectionCount: 1,
+          },
+        },
+      ],
+      10,
+    );
+
+    expect(ranked.map((entry) => entry.filePath)).toEqual([
+      'app/api/contracts/[id]/route.ts',
+      'app/api/contracts/route.ts',
+      'lib/db/model/Contract.ts',
+    ]);
+  });
+
+  it('down-ranks story and test files below non-noise files with similar graph evidence', () => {
+    const target = createRelation({
+      fileId: 'repo-a:src/components/Button.tsx',
+      filePath: 'src/components/Button.tsx',
+    });
+    const ranked = rankRelatedFileCandidates(
+      target,
+      [
+        {
+          relation: createRelation({
+            fileId: 'repo-a:src/components/ButtonConsumer.tsx',
+            filePath: 'src/components/ButtonConsumer.tsx',
+          }),
+          graphSignals: {
+            edgeTypes: ['outgoing_file_imports_file'],
+            connectionCount: 1,
+          },
+        },
+        {
+          relation: createRelation({
+            fileId: 'repo-a:src/components/Button.stories.tsx',
+            filePath: 'src/components/Button.stories.tsx',
+          }),
+          graphSignals: {
+            edgeTypes: ['outgoing_file_imports_file'],
+            connectionCount: 1,
+          },
+        },
+      ],
+      10,
+    );
+
+    expect(ranked[0].filePath).toBe('src/components/ButtonConsumer.tsx');
+    expect(ranked.find((entry) => entry.filePath === 'src/components/Button.stories.tsx')).toBeUndefined();
+  });
 });

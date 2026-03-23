@@ -2,6 +2,52 @@ import type { FileRelation } from '../symbol-index/types.js';
 import { countIntersection, computePathCloseness, createReason } from './scoring.js';
 import type { RankedRelatedFile, RelatedFileCandidate } from './types.js';
 
+type EdgeStrength = 'strong' | 'medium' | 'weak';
+
+function edgeStrength(edgeType: string | undefined): EdgeStrength {
+  switch (edgeType) {
+    case 'call_reference':
+    case 'symbol_reference':
+    case 'jsx_reference':
+    case 'type_reference':
+      return 'strong';
+    case 'file_imports_file':
+    case 'incoming_file_imports_file':
+    case 'file_reexports_file':
+    case 'incoming_file_reexports_file':
+      return 'medium';
+    default:
+      return 'weak';
+  }
+}
+
+function edgeStrengthRank(edgeType: string | undefined): number {
+  switch (edgeStrength(edgeType)) {
+    case 'strong':
+      return 3;
+    case 'medium':
+      return 2;
+    case 'weak':
+      return 1;
+  }
+}
+
+function strongestGraphEdgeType(edgeTypes: string[] | undefined): string | undefined {
+  const values = edgeTypes ?? [];
+
+  return values
+    .slice()
+    .sort((left, right) => {
+      const strengthDelta = edgeStrengthRank(right) - edgeStrengthRank(left);
+
+      if (strengthDelta !== 0) {
+        return strengthDelta;
+      }
+
+      return graphEdgeWeight(right) - graphEdgeWeight(left);
+    })[0];
+}
+
 function determineReason(entry: RankedRelatedFile['reasons']): string {
   const graphReason = entry.find((reason) => reason.signal === 'graph_connection');
 
@@ -110,6 +156,44 @@ function serviceConsumerBias(targetPath: string, candidatePath: string): number 
   return 0;
 }
 
+function noisePenalty(filePath: string): number {
+  const normalized = filePath.replace(/\\/g, '/');
+
+  if (/\.(test|spec)\.(tsx?|jsx?)$/i.test(normalized) || /(^|\/)__tests__\//i.test(normalized)) {
+    return -10;
+  }
+
+  if (/\.(stories|story)\.(tsx?|jsx?)$/i.test(normalized)) {
+    return -8;
+  }
+
+  if (/(^|\/)(demo|demos|playground|playgrounds|example|examples)\//i.test(normalized)) {
+    return -6;
+  }
+
+  return 0;
+}
+
+function graphEvidenceScore(edgeTypes: string[], connectionCount: number): { score: number; primaryEdgeType?: string; strengthRank: number } {
+  const primaryEdgeType = strongestGraphEdgeType(edgeTypes);
+  const strengthRank = edgeStrengthRank(primaryEdgeType);
+  const strongCount = edgeTypes.filter((edgeType) => edgeStrength(edgeType) === 'strong').length;
+  const mediumCount = edgeTypes.filter((edgeType) => edgeStrength(edgeType) === 'medium').length;
+  const weakCount = edgeTypes.filter((edgeType) => edgeStrength(edgeType) === 'weak').length;
+  const score =
+    graphEdgeWeight(primaryEdgeType) +
+    connectionCount +
+    strongCount * 8 +
+    mediumCount * 2 -
+    weakCount;
+
+  return {
+    score,
+    primaryEdgeType,
+    strengthRank,
+  };
+}
+
 export function rankRelatedFileCandidates(
   target: FileRelation,
   candidates: RelatedFileCandidate[],
@@ -124,14 +208,17 @@ export function rankRelatedFileCandidates(
       const sameRepo = candidate.relation.repo === target.repo ? 1 : 0;
       const pathCloseness = computePathCloseness(target.filePath, candidate.relation.filePath);
       const graphConnectionCount = candidate.graphSignals?.connectionCount ?? 0;
+      const graphEdgeTypes = candidate.graphSignals?.edgeTypes ?? [];
       const surfaceScore = architecturalSurfaceScore(candidate.relation.filePath);
       const serviceBias = serviceConsumerBias(target.filePath, candidate.relation.filePath);
+      const candidateNoisePenalty = noisePenalty(candidate.relation.filePath);
+      let primaryEdgeStrengthRank = 0;
 
       if (graphConnectionCount > 0) {
-        const edgeType = candidate.graphSignals?.edgeTypes[0];
-        const edgeScore = graphEdgeWeight(edgeType) + graphConnectionCount;
-        score += edgeScore;
-        reasons.push(createReason('graph_connection', edgeScore, edgeType));
+        const graphEvidence = graphEvidenceScore(graphEdgeTypes, graphConnectionCount);
+        primaryEdgeStrengthRank = graphEvidence.strengthRank;
+        score += graphEvidence.score;
+        reasons.push(createReason('graph_connection', graphEvidence.score, graphEvidence.primaryEdgeType));
       }
 
       if (sharedImportTokens > 0) {
@@ -164,6 +251,11 @@ export function rankRelatedFileCandidates(
         reasons.push(createReason('service_consumer_bias', serviceBias));
       }
 
+      if (candidateNoisePenalty !== 0) {
+        score += candidateNoisePenalty;
+        reasons.push(createReason('noise_penalty', candidateNoisePenalty));
+      }
+
       return {
         fileId: candidate.relation.fileId,
         repo: candidate.relation.repo,
@@ -172,10 +264,15 @@ export function rankRelatedFileCandidates(
         reason: determineReason(reasons),
         reasons,
         relation: candidate.relation,
+        edgeStrengthRank: primaryEdgeStrengthRank,
       };
     })
     .filter((entry) => entry.score > 0)
     .sort((left, right) => {
+      if (right.edgeStrengthRank !== left.edgeStrengthRank) {
+        return right.edgeStrengthRank - left.edgeStrengthRank;
+      }
+
       if (right.score !== left.score) {
         return right.score - left.score;
       }
@@ -183,5 +280,5 @@ export function rankRelatedFileCandidates(
       return compareRelations(left.relation, right.relation);
     })
     .slice(0, limit)
-    .map(({ relation: _relation, ...entry }) => entry);
+    .map(({ relation: _relation, edgeStrengthRank: _edgeStrengthRank, ...entry }) => entry);
 }

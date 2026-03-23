@@ -243,6 +243,47 @@ function toBucketEntries(entries: RankedFileContextItem[]): Array<{ filePath: st
   }));
 }
 
+function normalizePath(filePath: string): string {
+  return filePath.replace(/\\/g, '/');
+}
+
+function isCompanionArtifact(targetPath: string | undefined, candidatePath: string): boolean {
+  if (!targetPath) {
+    return false;
+  }
+
+  const normalizedTarget = normalizePath(targetPath);
+  const normalizedCandidate = normalizePath(candidatePath);
+  const extensionMatch = normalizedTarget.match(/\.[^.]+$/);
+  const targetWithoutExtension = extensionMatch
+    ? normalizedTarget.slice(0, -extensionMatch[0].length)
+    : normalizedTarget;
+
+  return (
+    normalizedCandidate.startsWith(`${targetWithoutExtension}.`) &&
+    /\.(stories|story|test|spec)\.(tsx?|jsx?)$/i.test(normalizedCandidate)
+  );
+}
+
+function selectLegacyRelatedEntities(
+  buckets: RelatedFileContextBuckets,
+  targetPath: string | undefined,
+): RankedFileContextItem[] {
+  if (buckets.directConsumers.entries.length > 0) {
+    const companionContextEntries = buckets.relatedContext.entries.filter((entry) =>
+      isCompanionArtifact(targetPath, entry.file.filePath),
+    );
+
+    return [...buckets.directConsumers.entries, ...companionContextEntries];
+  }
+
+  if (buckets.indirectConsumers.entries.length > 0) {
+    return buckets.indirectConsumers.entries;
+  }
+
+  return buckets.relatedContext.entries;
+}
+
 function createEmptyRelatedFileBuckets(): RelatedFileContextBuckets {
   return {
     directConsumers: {
@@ -594,15 +635,10 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
     const primaryFile = result.primaryFile;
     const ambiguityDetected = result.summary.ambiguityDetected;
     const relatedBuckets = result.relatedFileBuckets ?? createEmptyRelatedFileBuckets();
-    const visibleRelatedEntities = [
-      ...relatedBuckets.directConsumers.entries,
-      ...relatedBuckets.indirectConsumers.entries,
-      ...(
-        relatedBuckets.directConsumers.entries.length === 0 && relatedBuckets.indirectConsumers.entries.length === 0
-          ? relatedBuckets.relatedContext.entries
-          : []
-      ),
-    ];
+    const visibleRelatedEntities = selectLegacyRelatedEntities(
+      relatedBuckets,
+      primaryFile?.filePath ?? primarySymbol?.filePath,
+    );
     const warnings = [
       ...(ambiguityDetected
         ? ['Target resolution is ambiguous; runtime result is intentionally compact.']

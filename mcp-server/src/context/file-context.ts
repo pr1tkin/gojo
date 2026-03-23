@@ -16,6 +16,25 @@ const DEFAULT_RELATED_LIMIT = 10;
 const EXACT_RELATED_LIMIT_FLOOR = 24;
 const INFERRED_RELATED_LIMIT_FLOOR = 8;
 
+function isNoisePath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, '/');
+
+  return (
+    /\.(test|spec)\.(tsx?|jsx?)$/i.test(normalized) ||
+    /\.(stories|story)\.(tsx?|jsx?)$/i.test(normalized) ||
+    /(^|\/)__tests__\//i.test(normalized) ||
+    /(^|\/)(demo|demos|playground|playgrounds|example|examples)\//i.test(normalized)
+  );
+}
+
+function hasStrongEdge(via: FileContextConnectionKind[]): boolean {
+  return via.some((kind) => ['call_reference', 'symbol_reference', 'jsx_reference', 'type_reference'].includes(kind));
+}
+
+function hasMediumEdge(via: FileContextConnectionKind[]): boolean {
+  return via.some((kind) => ['incoming_file_imports_file', 'incoming_file_reexports_file', 'outgoing_file_reexports_file'].includes(kind));
+}
+
 function toConnectionKind(entry: Awaited<ReturnType<typeof getRelatedFiles>>[number]): FileContextConnectionKind {
   if (entry.via === 'file_imports_file') {
     return entry.direction === 'outgoing' ? 'outgoing_file_imports_file' : 'incoming_file_imports_file';
@@ -57,15 +76,15 @@ function buildGraphSignalsByFileId(
 }
 
 function classifyRelatedFileBucket(entry: RankedFileContextItem): RelatedFileContextBucket['kind'] {
-  if (
-    entry.via.some((kind) =>
-      ['call_reference', 'symbol_reference', 'jsx_reference', 'type_reference', 'incoming_file_imports_file'].includes(kind),
-    )
-  ) {
+  if (isNoisePath(entry.file.filePath)) {
+    return 'related_context';
+  }
+
+  if (hasStrongEdge(entry.via)) {
     return 'direct_consumers';
   }
 
-  if (entry.via.some((kind) => ['incoming_file_reexports_file', 'outgoing_file_reexports_file'].includes(kind))) {
+  if (hasMediumEdge(entry.via)) {
     return 'indirect_consumers';
   }
 

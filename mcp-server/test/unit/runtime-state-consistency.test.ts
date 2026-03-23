@@ -147,7 +147,7 @@ describe('runtime state consistency', () => {
     );
   });
 
-  it('flattens shown direct and indirect buckets into legacy related_entities before related context', async () => {
+  it('prefers shown direct bucket entries for legacy related_entities when exact results exist', async () => {
     getCurrentIndexHealthMock.mockResolvedValue({
       schemaVersion: 1,
       generatedAt: '2026-03-22T09:30:00.000Z',
@@ -302,8 +302,10 @@ describe('runtime state consistency', () => {
 
     expect(response.related_entities).toEqual([
       expect.objectContaining({ path: 'src/direct-a.ts' }),
-      expect.objectContaining({ path: 'src/indirect-a.ts' }),
     ]);
+    expect(response.related_entities).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: 'src/indirect-a.ts' })]),
+    );
     expect(response.related_entities).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ path: 'src/context-a.ts' })]),
     );
@@ -315,6 +317,186 @@ describe('runtime state consistency', () => {
     );
     expect(response.machine_payload.related_context).toEqual(
       expect.objectContaining({ total: 5, shown: 1, truncated: true, coverage: 'exploratory' }),
+    );
+  });
+
+  it('includes story and test companion artifacts after direct entries in legacy related_entities', async () => {
+    getCurrentIndexHealthMock.mockResolvedValue({
+      schemaVersion: 1,
+      generatedAt: '2026-03-22T09:30:00.000Z',
+      generationId: 'gen-1',
+      generationStatus: 'ready',
+      publishedAt: '2026-03-22T09:29:00.000Z',
+      repositories: [{ repoId: 'repo-a', repoRoot: '/repos/repo-a' }],
+      reposRoot: '/repos/repo-a',
+      search: {
+        status: 'ready',
+        aggregateFingerprint: 'abc',
+        repoFingerprints: [],
+        coordinationMode: 'shared-marker',
+        details: 'ready',
+      },
+      changeSummary: null,
+      consistency: null,
+      recentActivity: {
+        lastRefreshAt: '2026-03-22T09:29:00.000Z',
+        lastRefreshStatus: 'committed',
+        delta: { added: 0, modified: 0, deleted: 0 },
+        maintenanceRan: false,
+        repairsApplied: 0,
+        repairsRecommended: 0,
+        riskyChangeCount: 0,
+        unknownStructuralChangeCount: 0,
+        recentChangedFiles: [],
+      },
+      lastRefreshFailure: null,
+      trustState: 'healthy',
+      suitableForAgentWorkflows: true,
+      reasons: [],
+      warnings: [],
+      errors: [],
+    });
+
+    loadCurrentGenerationStateMock.mockResolvedValue({
+      generationId: 'gen-1',
+      createdAt: '2026-03-22T09:29:00.000Z',
+    });
+
+    getSymbolExplorationContextMock.mockResolvedValue({
+      query: 'ArticleHeaderBar',
+      repo: 'repo-a',
+      primarySymbol: {
+        symbolId: 'repo-a:src/components/ArticleHeaderBar.tsx:function:ArticleHeaderBar:1',
+        fileId: 'repo-a:src/components/ArticleHeaderBar.tsx',
+        name: 'ArticleHeaderBar',
+        kind: 'function',
+        repo: 'repo-a',
+        filePath: 'src/components/ArticleHeaderBar.tsx',
+        startLine: 1,
+        endLine: 3,
+        exported: true,
+      },
+      primaryFile: {
+        fileId: 'repo-a:src/components/ArticleHeaderBar.tsx',
+        repoId: 'repo-a',
+        filePath: 'src/components/ArticleHeaderBar.tsx',
+      },
+      relatedFiles: [],
+      relatedFileBuckets: {
+        directConsumers: {
+          kind: 'direct_consumers',
+          label: 'Direct consumers (exact)',
+          explanation: 'confirmed symbol-level usage',
+          confidence: 'high',
+          coverage: 'exact',
+          entries: [
+            {
+              file: {
+                fileId: 'repo-a:src/consumers/ArticleHeaderText.tsx',
+                repoId: 'repo-a',
+                filePath: 'src/consumers/ArticleHeaderText.tsx',
+              },
+            },
+          ],
+          total: 1,
+          shown: 1,
+          truncated: false,
+        },
+        indirectConsumers: {
+          kind: 'indirect_consumers',
+          label: 'Indirect consumers (inferred)',
+          explanation: 'likely usage via wrappers or re-exports',
+          confidence: 'medium',
+          coverage: 'inferred',
+          entries: [
+            {
+              file: {
+                fileId: 'repo-a:src/indirect/Wrapper.tsx',
+                repoId: 'repo-a',
+                filePath: 'src/indirect/Wrapper.tsx',
+              },
+            },
+          ],
+          total: 1,
+          shown: 1,
+          truncated: false,
+        },
+        relatedContext: {
+          kind: 'related_context',
+          label: 'Related context (exploratory)',
+          explanation: 'nearby or dependent files, not guaranteed direct usage',
+          confidence: 'low',
+          coverage: 'exploratory',
+          entries: [
+            {
+              file: {
+                fileId: 'repo-a:src/components/ArticleHeaderBar.stories.tsx',
+                repoId: 'repo-a',
+                filePath: 'src/components/ArticleHeaderBar.stories.tsx',
+              },
+            },
+            {
+              file: {
+                fileId: 'repo-a:src/components/ArticleHeaderBar.test.tsx',
+                repoId: 'repo-a',
+                filePath: 'src/components/ArticleHeaderBar.test.tsx',
+              },
+            },
+            {
+              file: {
+                fileId: 'repo-a:src/components/ArticleHeaderBar.css.ts',
+                repoId: 'repo-a',
+                filePath: 'src/components/ArticleHeaderBar.css.ts',
+              },
+            },
+          ],
+          total: 3,
+          shown: 3,
+          truncated: false,
+        },
+      },
+      summary: {
+        candidateCount: 1,
+        totalCandidateCount: 1,
+        relatedFileCount: 4,
+        totalRelatedFileCount: 4,
+        exportedSymbolCount: 1,
+      },
+    });
+
+    const response = await exploreComponentHandler.execute(
+      {
+        target: 'ArticleHeaderBar',
+        repo: {
+          repoId: 'repo-a',
+        },
+      },
+      {
+        executionContext: {
+          debug: false,
+          outputMode: 'json',
+          repoTarget: {
+            repoId: 'repo-a',
+          },
+        },
+        dependencies: {
+          config: {
+            reposRoot: '/repos',
+          } as never,
+        },
+      },
+    );
+
+    expect(response.related_entities).toEqual([
+      expect.objectContaining({ path: 'src/consumers/ArticleHeaderText.tsx' }),
+      expect.objectContaining({ path: 'src/components/ArticleHeaderBar.stories.tsx' }),
+      expect.objectContaining({ path: 'src/components/ArticleHeaderBar.test.tsx' }),
+    ]);
+    expect(response.related_entities).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: 'src/indirect/Wrapper.tsx' })]),
+    );
+    expect(response.related_entities).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: 'src/components/ArticleHeaderBar.css.ts' })]),
     );
   });
 
