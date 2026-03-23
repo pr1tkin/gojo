@@ -31,6 +31,44 @@ import {
   runCollectRefactorContextTool,
 } from '../../src/tools/collect-refactor-context.js';
 
+function makeRelatedBuckets() {
+  return {
+    directConsumers: {
+      kind: 'direct_consumers',
+      label: 'Direct consumers (exact)',
+      explanation: 'confirmed symbol-level usage',
+      confidence: 'high',
+      coverage: 'exact',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+    indirectConsumers: {
+      kind: 'indirect_consumers',
+      label: 'Indirect consumers (inferred)',
+      explanation: 'likely usage via wrappers or re-exports',
+      confidence: 'medium',
+      coverage: 'inferred',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+    relatedContext: {
+      kind: 'related_context',
+      label: 'Related context (exploratory)',
+      explanation: 'nearby or related files, not guaranteed direct usage',
+      confidence: 'low',
+      coverage: 'exploratory',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+  };
+}
+
 describe('collect_refactor_context tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -122,6 +160,23 @@ describe('collect_refactor_context tool', () => {
           file: { fileId: 'example-news-app:src/app/_components/articleHeaderText/ArticleHeaderText.tsx' },
         },
       ],
+      relatedFileBuckets: {
+        ...makeRelatedBuckets(),
+        directConsumers: {
+          ...makeRelatedBuckets().directConsumers,
+          entries: [
+            {
+              score: 20,
+              reason: 'direct import',
+              reasons: [{ signal: 'graph_connection', value: 9 }],
+              via: ['file_imports_file'],
+              file: { fileId: 'example-news-app:src/app/_components/articleHeaderText/ArticleHeaderText.tsx' },
+            },
+          ],
+          total: 1,
+          shown: 1,
+        },
+      },
       nearbyFiles: [
         {
           category: 'bundle_family',
@@ -252,6 +307,21 @@ describe('collect_refactor_context tool', () => {
         confidence: 'high',
       }),
     );
+    expect(parsed.direct_consumers).toEqual(
+      expect.objectContaining({
+        label: 'Direct consumers (exact)',
+        total: 1,
+        shown: 1,
+        truncated: false,
+        entries: [
+          expect.objectContaining({
+            filePath: 'src/app/_components/articleHeaderText/ArticleHeaderText.tsx',
+          }),
+        ],
+      }),
+    );
+    expect(parsed.indirect_consumers).toEqual(expect.objectContaining({ total: 0, shown: 0 }));
+    expect(parsed.related_context).toEqual(expect.objectContaining({ total: 0, shown: 0 }));
     expect(parsed.contextSummary).toEqual(
       expect.objectContaining({
         importingFileCount: 1,
@@ -315,6 +385,7 @@ describe('collect_refactor_context tool', () => {
       reexportedFiles: [],
       graphNeighbors: [],
       relatedFiles: [],
+      relatedFileBuckets: makeRelatedBuckets(),
       nearbyFiles: [],
       definedSymbols: [],
       symbolCandidates: [],

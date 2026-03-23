@@ -18,6 +18,7 @@ import {
   normalizeCollectRefactorContextResponse,
   type RawCollectRefactorContextResponse,
 } from '../tool-response/normalize-collect-refactor-context.js';
+import type { RelatedFileContextBucket, RelatedFileContextBuckets } from '../context/types.js';
 
 export const collectRefactorContextToolDefinition = {
   name: 'collect_refactor_context',
@@ -83,6 +84,60 @@ function buildNavigationHints(input: {
   }
 
   return dedupeNavigationHints(hints, 3);
+}
+
+function createEmptyRelatedBuckets(): RelatedFileContextBuckets {
+  return {
+    directConsumers: {
+      kind: 'direct_consumers',
+      label: 'Direct consumers (exact)',
+      explanation: 'confirmed symbol-level usage',
+      confidence: 'high',
+      coverage: 'exact',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+    indirectConsumers: {
+      kind: 'indirect_consumers',
+      label: 'Indirect consumers (inferred)',
+      explanation: 'likely usage via wrappers or re-exports',
+      confidence: 'medium',
+      coverage: 'inferred',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+    relatedContext: {
+      kind: 'related_context',
+      label: 'Related context (exploratory)',
+      explanation: 'nearby or dependent files, not guaranteed direct usage',
+      confidence: 'low',
+      coverage: 'exploratory',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+  };
+}
+
+function buildRawBucket(
+  bucket: RelatedFileContextBucket,
+  entries: RawCollectRefactorContextResponse['results']['primary'],
+): NonNullable<RawCollectRefactorContextResponse['direct_consumers']> {
+  return {
+    label: bucket.label,
+    explanation: bucket.explanation,
+    entries,
+    total: bucket.total,
+    shown: bucket.shown,
+    truncated: bucket.truncated,
+    confidence: bucket.confidence,
+    coverage: bucket.coverage,
+  };
 }
 
 export async function runCollectRefactorContextTool(
@@ -167,6 +222,21 @@ export async function runCollectRefactorContextTool(
     ? sharedContext.registerExplainability(await buildIndexedSymbolExplainability(result.target.symbol, detail))
     : null;
   const relatedTiers = splitPrimarySecondary(relatedFiles, Math.min(2, relatedFiles.length));
+  const relatedFilesByPath = new Map(
+    relatedFiles
+      .filter((entry) => entry.filePath)
+      .map((entry) => [entry.filePath, entry]),
+  );
+  const relatedBuckets = result.relatedFileBuckets ?? createEmptyRelatedBuckets();
+  const directBucketEntries = relatedBuckets.directConsumers.entries
+    .map((entry) => relatedFilesByPath.get(entry.file.filePath ?? inferPathFromFileId(entry.file.fileId) ?? ''))
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  const indirectBucketEntries = relatedBuckets.indirectConsumers.entries
+    .map((entry) => relatedFilesByPath.get(entry.file.filePath ?? inferPathFromFileId(entry.file.fileId) ?? ''))
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+  const relatedContextBucketEntries = relatedBuckets.relatedContext.entries
+    .map((entry) => relatedFilesByPath.get(entry.file.filePath ?? inferPathFromFileId(entry.file.fileId) ?? ''))
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
   const builtSharedContext = sharedContext.build();
 
   const target = {
@@ -273,6 +343,9 @@ export async function runCollectRefactorContextTool(
       appliedCandidateLimit: input.expandRelated ? 6 : 3,
       navigationHintLimit: 3,
     },
+    direct_consumers: buildRawBucket(relatedBuckets.directConsumers, directBucketEntries),
+    indirect_consumers: buildRawBucket(relatedBuckets.indirectConsumers, indirectBucketEntries),
+    related_context: buildRawBucket(relatedBuckets.relatedContext, relatedContextBucketEntries),
   };
   const normalizedOutput = normalizeCollectRefactorContextResponse({
     rawResponse: shapedOutput,

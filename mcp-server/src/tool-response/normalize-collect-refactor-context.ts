@@ -4,6 +4,7 @@ import {
   buildNormalizedTruncation,
   mergeNormalizedDiagnostics,
 } from './diagnostics-builder.js';
+import type { CanonicalBucket } from './bucket-schema.js';
 import { buildExpansionRefId, buildNormalizedExpansion } from './expansion-builder.js';
 import { buildNormalizedExplanation, normalizeExplanationSignals } from './explanation-builder.js';
 import { buildNormalizedDebugPayload } from './mode-shaping.js';
@@ -154,6 +155,9 @@ export interface RawCollectRefactorContextResponse {
     appliedCandidateLimit?: number;
     navigationHintLimit?: number;
   };
+  direct_consumers?: CanonicalBucket<RawCollectRefactorRelatedResult>;
+  indirect_consumers?: CanonicalBucket<RawCollectRefactorRelatedResult>;
+  related_context?: CanonicalBucket<RawCollectRefactorRelatedResult>;
 }
 
 export interface NormalizedCollectRefactorContextResult extends NormalizedResultBase {
@@ -240,6 +244,9 @@ export interface CollectRefactorContextNormalizedResponse
   extends NormalizedToolResponse<NormalizedCollectRefactorContextResult> {
   target: NormalizedCollectRefactorTarget;
   contextSummary: NormalizedRefactorContextSummary;
+  direct_consumers?: CanonicalBucket<NormalizedCollectRefactorContextResult>;
+  indirect_consumers?: CanonicalBucket<NormalizedCollectRefactorContextResult>;
+  related_context?: CanonicalBucket<NormalizedCollectRefactorContextResult>;
   nearbyFiles?: NormalizedCollectRefactorNearbyResult[];
   symbolCandidates?: NormalizedCollectRefactorCandidate[];
 }
@@ -604,6 +611,26 @@ function buildNextActions(raw: RawCollectRefactorContextResponse): NormalizedNex
   return actions;
 }
 
+function normalizeBucket(
+  bucket: CanonicalBucket<RawCollectRefactorRelatedResult> | undefined,
+  mode: NormalizedMode,
+): CanonicalBucket<NormalizedCollectRefactorContextResult> | undefined {
+  if (!bucket) {
+    return undefined;
+  }
+
+  return {
+    label: bucket.label,
+    explanation: bucket.explanation,
+    entries: bucket.entries.map((entry) => normalizeRelatedResult(entry, mode)),
+    total: bucket.total,
+    shown: bucket.shown,
+    truncated: bucket.truncated,
+    confidence: bucket.confidence,
+    coverage: bucket.coverage,
+  };
+}
+
 export function normalizeCollectRefactorContextResponse(
   input: CollectRefactorContextNormalizationInput,
 ): CollectRefactorContextNormalizedResponse {
@@ -724,6 +751,9 @@ export function normalizeCollectRefactorContextResponse(
       ...(response.expansions['refactor:defined-symbols'] ? { definedSymbolsExpansionId: 'refactor:defined-symbols' } : {}),
       ...(response.expansions['refactor:exported-symbols'] ? { exportedSymbolsExpansionId: 'refactor:exported-symbols' } : {}),
     },
+    ...(raw.direct_consumers ? { direct_consumers: normalizeBucket(raw.direct_consumers, input.mode) } : {}),
+    ...(raw.indirect_consumers ? { indirect_consumers: normalizeBucket(raw.indirect_consumers, input.mode) } : {}),
+    ...(raw.related_context ? { related_context: normalizeBucket(raw.related_context, input.mode) } : {}),
     ...(raw.results.nearby?.length
       ? {
           nearbyFiles: raw.results.nearby.map((entry) => normalizeNearbyResult(entry, input.mode)),

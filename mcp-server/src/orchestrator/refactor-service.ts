@@ -15,6 +15,7 @@ import type { CollectRefactorContextInput, RefactorContextMode } from '../types.
 import { getFileExplorationContext } from './file-service.js';
 import { getSymbolExplorationContext } from './symbol-service.js';
 import type { RefactorContext, RefactorNearbyFile, RefactorSymbolCandidate } from './types.js';
+import type { RelatedFileContextBuckets } from '../context/types.js';
 
 const DEFAULT_LIMIT = 10;
 const BUNDLE_SUFFIXES = ['test', 'spec', 'stories', 'story', 'styles', 'style', 'css'];
@@ -22,6 +23,44 @@ const BUNDLE_SUFFIXES = ['test', 'spec', 'stories', 'story', 'styles', 'style', 
 interface RefactorOptions {
   repo?: string;
   limit?: number;
+}
+
+function createEmptyRelatedFileBuckets(): RelatedFileContextBuckets {
+  return {
+    directConsumers: {
+      kind: 'direct_consumers',
+      label: 'Direct consumers (exact)',
+      explanation: 'confirmed symbol-level usage',
+      confidence: 'high',
+      coverage: 'exact',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+    indirectConsumers: {
+      kind: 'indirect_consumers',
+      label: 'Indirect consumers (inferred)',
+      explanation: 'likely usage via wrappers or re-exports',
+      confidence: 'medium',
+      coverage: 'inferred',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+    relatedContext: {
+      kind: 'related_context',
+      label: 'Related context (exploratory)',
+      explanation: 'nearby or dependent files, not guaranteed direct usage',
+      confidence: 'low',
+      coverage: 'exploratory',
+      entries: [],
+      total: 0,
+      shown: 0,
+      truncated: false,
+    },
+  };
 }
 
 function getBaseName(filePath: string): string {
@@ -154,6 +193,7 @@ function buildMissingContext(
     reexportedFiles: [],
     graphNeighbors: [],
     relatedFiles: [],
+    relatedFileBuckets: createEmptyRelatedFileBuckets(),
     nearbyFiles: [],
     definedSymbols: [],
     symbolCandidates,
@@ -242,6 +282,7 @@ async function buildResolvedContext(
     reexportedFiles: reexportedFiles.sort(compareFiles),
     graphNeighbors: graphNeighbors.sort(compareFiles),
     relatedFiles: fileContext.relatedFiles.slice(0, limit),
+    relatedFileBuckets: fileContext.relatedFileBuckets,
     nearbyFiles: nearbyFiles.items,
     definedSymbols,
     symbolCandidates,

@@ -208,6 +208,7 @@ export interface RefactorContext {
   reexportedFiles: FileNode[];
   graphNeighbors: FileNode[];
   relatedFiles: RankedFileContextItem[];
+  relatedFileBuckets: RelatedFileContextBuckets;
   nearbyFiles: RefactorNearbyFile[];
   definedSymbols: SymbolNode[];
   symbolCandidates: RefactorSymbolCandidate[];

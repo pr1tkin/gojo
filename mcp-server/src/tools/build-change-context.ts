@@ -11,6 +11,7 @@ import type {
   CollectRefactorContextNormalizedResponse,
   ExploreComponentNormalizedResponse,
   FindPrecedentsNormalizedResponse,
+  CanonicalBucket,
   PlanChangeNormalizedResponse,
 } from '../tool-response/index.js';
 import type {
@@ -76,6 +77,9 @@ interface BuildChangeContextTarget {
 interface BuildChangeContextResponse
   extends NormalizedToolResponse<NormalizedBuildChangeContextResult> {
   target: BuildChangeContextTarget;
+  direct_consumers?: CanonicalBucket<{ filePath?: string | null; symbolName?: string | null }>;
+  indirect_consumers?: CanonicalBucket<{ filePath?: string | null; symbolName?: string | null }>;
+  related_context?: CanonicalBucket<{ filePath?: string | null; symbolName?: string | null }>;
 }
 
 export const buildChangeContextToolDefinition = {
@@ -483,6 +487,44 @@ function derivePlanMode(intent: BuildChangeContextIntent | undefined): 'safe' | 
   return 'safe';
 }
 
+function simplifyBucketEntries(
+  bucket:
+    | CanonicalBucket<{ filePath?: string | null; symbolName?: string | null }>
+    | CanonicalBucket<{ filePath: string; symbolName?: string }>
+    | undefined,
+): CanonicalBucket<{ filePath?: string | null; symbolName?: string | null }> | undefined {
+  if (!bucket) {
+    return undefined;
+  }
+
+  return {
+    ...bucket,
+    entries: bucket.entries.map((entry) => ({
+      ...(entry.filePath ? { filePath: entry.filePath } : {}),
+      ...(entry.symbolName ? { symbolName: entry.symbolName } : {}),
+    })),
+  };
+}
+
+function selectCanonicalBuckets(input: {
+  planChange: PlanChangeNormalizedResponse | null;
+  refactorContext: CollectRefactorContextNormalizedResponse;
+}): Pick<BuildChangeContextResponse, 'direct_consumers' | 'indirect_consumers' | 'related_context'> {
+  if (input.planChange?.direct_consumers && input.planChange.indirect_consumers && input.planChange.related_context) {
+    return {
+      direct_consumers: simplifyBucketEntries(input.planChange.direct_consumers),
+      indirect_consumers: simplifyBucketEntries(input.planChange.indirect_consumers),
+      related_context: simplifyBucketEntries(input.planChange.related_context),
+    };
+  }
+
+  return {
+    ...(input.refactorContext.direct_consumers ? { direct_consumers: simplifyBucketEntries(input.refactorContext.direct_consumers) } : {}),
+    ...(input.refactorContext.indirect_consumers ? { indirect_consumers: simplifyBucketEntries(input.refactorContext.indirect_consumers) } : {}),
+    ...(input.refactorContext.related_context ? { related_context: simplifyBucketEntries(input.refactorContext.related_context) } : {}),
+  };
+}
+
 function shouldGeneratePlan(input: {
   intent?: BuildChangeContextIntent;
   targetFilePath?: string | null;
@@ -719,6 +761,10 @@ export async function runBuildChangeContextTool(
   const output: BuildChangeContextResponse = {
     ...response,
     target,
+    ...selectCanonicalBuckets({
+      planChange,
+      refactorContext,
+    }),
   };
 
   return {

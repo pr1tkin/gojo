@@ -269,6 +269,9 @@ function selectLegacyRelatedEntities(
   buckets: RelatedFileContextBuckets,
   targetPath: string | undefined,
 ): RankedFileContextItem[] {
+  // Deprecated compatibility surface for older runtime consumers.
+  // Keep this derived from canonical buckets so legacy flattening cannot
+  // influence selection, ranking, or bucket semantics.
   if (buckets.directConsumers.entries.length > 0) {
     const companionContextEntries = buckets.relatedContext.entries.filter((entry) =>
       isCompanionArtifact(targetPath, entry.file.filePath),

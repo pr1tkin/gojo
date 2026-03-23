@@ -165,6 +165,24 @@ describe('plan_change tool', () => {
           reviewFiles: ['src/app/_components/metadata/podcast/Podcast.tsx'],
         }),
       }),
+      direct_consumers: expect.objectContaining({
+        label: 'Direct consumers (exact)',
+        confidence: 'high',
+        coverage: 'exact',
+        entries: [
+          expect.objectContaining({
+            filePath: 'src/app/_components/button/index.ts',
+          }),
+        ],
+      }),
+      indirect_consumers: expect.objectContaining({
+        label: 'Indirect consumers (inferred)',
+        confidence: 'medium',
+      }),
+      related_context: expect.objectContaining({
+        label: 'Related context (exploratory)',
+        confidence: 'low',
+      }),
       impact: expect.objectContaining({
         direct_consumers: expect.objectContaining({
           label: 'Direct consumers (exact)',

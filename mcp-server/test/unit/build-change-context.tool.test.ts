@@ -206,6 +206,43 @@ function makeRefactorResponse(overrides: Record<string, any> = {}) {
       ambiguityDetected: false,
       graphNeighborsExpansionId: 'refactor:graph-neighbors',
     },
+    direct_consumers: {
+      entries: [
+        {
+          filePath: 'src/components/WidgetCard.tsx',
+        },
+      ],
+      total: 1,
+      shown: 1,
+      truncated: false,
+      confidence: 'high',
+      coverage: 'exact',
+    },
+    indirect_consumers: {
+      entries: [
+        {
+          filePath: 'src/hooks/useWidget.ts',
+          symbolName: 'useWidget',
+        },
+      ],
+      total: 1,
+      shown: 1,
+      truncated: false,
+      confidence: 'medium',
+      coverage: 'inferred',
+    },
+    related_context: {
+      entries: [
+        {
+          filePath: 'src/components/Widget.stories.tsx',
+        },
+      ],
+      total: 1,
+      shown: 1,
+      truncated: false,
+      confidence: 'low',
+      coverage: 'exploratory',
+    },
     ...overrides,
   };
 }
@@ -262,6 +299,43 @@ function makePlanResponse(overrides: Record<string, any> = {}) {
         reviewFiles: ['src/pages/Dashboard.tsx'],
       },
       signalsExpansionId: 'plan:signals',
+    },
+    direct_consumers: {
+      entries: [
+        {
+          filePath: 'src/components/Widget.tsx',
+          symbolName: 'Widget',
+        },
+      ],
+      total: 1,
+      shown: 1,
+      truncated: false,
+      confidence: 'high',
+      coverage: 'exact',
+    },
+    indirect_consumers: {
+      entries: [
+        {
+          filePath: 'src/components/index.ts',
+        },
+      ],
+      total: 1,
+      shown: 1,
+      truncated: false,
+      confidence: 'medium',
+      coverage: 'inferred',
+    },
+    related_context: {
+      entries: [
+        {
+          filePath: 'src/pages/Dashboard.tsx',
+        },
+      ],
+      total: 1,
+      shown: 1,
+      truncated: false,
+      confidence: 'low',
+      coverage: 'exploratory',
     },
     ...overrides,
   };
@@ -347,6 +421,43 @@ describe('build_change_context tool', () => {
         family: 'ui_component',
         planIncluded: true,
       }),
+    }));
+    expect(parsed.direct_consumers).toEqual(expect.objectContaining({
+      entries: [
+        expect.objectContaining({
+          filePath: 'src/components/Widget.tsx',
+          symbolName: 'Widget',
+        }),
+      ],
+      total: 1,
+      shown: 1,
+      truncated: false,
+      confidence: 'high',
+      coverage: 'exact',
+    }));
+    expect(parsed.indirect_consumers).toEqual(expect.objectContaining({
+      entries: [
+        expect.objectContaining({
+          filePath: 'src/components/index.ts',
+        }),
+      ],
+      total: 1,
+      shown: 1,
+      truncated: false,
+      confidence: 'medium',
+      coverage: 'inferred',
+    }));
+    expect(parsed.related_context).toEqual(expect.objectContaining({
+      entries: [
+        expect.objectContaining({
+          filePath: 'src/pages/Dashboard.tsx',
+        }),
+      ],
+      total: 1,
+      shown: 1,
+      truncated: false,
+      confidence: 'low',
+      coverage: 'exploratory',
     }));
     expect(parsed.results.primary.map((entry: Record<string, any>) => entry.kind)).toEqual([
       'component_summary',
@@ -448,6 +559,43 @@ describe('build_change_context tool', () => {
 
     expect(runPlanChangeToolMock).not.toHaveBeenCalled();
     expect(parsed.target.planIncluded).toBe(false);
+    expect(parsed.direct_consumers).toEqual(expect.objectContaining({
+      entries: [
+        expect.objectContaining({
+          filePath: 'src/components/WidgetCard.tsx',
+        }),
+      ],
+      total: 1,
+      shown: 1,
+      truncated: false,
+      confidence: 'high',
+      coverage: 'exact',
+    }));
+    expect(parsed.indirect_consumers).toEqual(expect.objectContaining({
+      entries: [
+        expect.objectContaining({
+          filePath: 'src/hooks/useWidget.ts',
+          symbolName: 'useWidget',
+        }),
+      ],
+      total: 1,
+      shown: 1,
+      truncated: false,
+      confidence: 'medium',
+      coverage: 'inferred',
+    }));
+    expect(parsed.related_context).toEqual(expect.objectContaining({
+      entries: [
+        expect.objectContaining({
+          filePath: 'src/components/Widget.stories.tsx',
+        }),
+      ],
+      total: 1,
+      shown: 1,
+      truncated: false,
+      confidence: 'low',
+      coverage: 'exploratory',
+    }));
     expect(parsed.results.primary).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: 'change_plan',

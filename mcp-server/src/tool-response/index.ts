@@ -1,4 +1,5 @@
 export * from './diagnostics-builder.js';
+export * from './bucket-schema.js';
 export * from './evidence-builder.js';
 export * from './expansion-builder.js';
 export * from './explanation-builder.js';

@@ -1,4 +1,5 @@
 import type { SymbolChangePlanResult } from '../orchestrator/index.js';
+import type { CanonicalBucket } from './bucket-schema.js';
 import { buildNormalizedDiagnostics } from './diagnostics-builder.js';
 import { buildNormalizedExpansion } from './expansion-builder.js';
 import { buildNormalizedExplanation } from './explanation-builder.js';
@@ -74,9 +75,34 @@ export interface NormalizedPlanImpactBucket {
   entries: NormalizedPlanImpactEntry[];
 }
 
+function normalizeImpactBucket(
+  bucket: SymbolChangePlanResult['impactBuckets']['directConsumers'],
+): CanonicalBucket<NormalizedPlanImpactEntry> {
+  return {
+    label: bucket.label,
+    explanation: bucket.explanation,
+    entries: bucket.entries.map((entry) => ({
+      filePath: entry.filePath,
+      ...(entry.symbolName ? { symbolName: entry.symbolName } : {}),
+      confidence: entry.confidence,
+      coverage: entry.coverage,
+      signals: entry.signals,
+    })),
+    total: bucket.entries.length,
+    shown: bucket.entries.length,
+    truncated: false,
+    confidence: bucket.confidence,
+    coverage: bucket.coverage,
+  };
+}
+
 export interface PlanChangeNormalizedResponse extends NormalizedToolResponse<NormalizedPlanChangeStep> {
   target: NormalizedPlanChangeTarget;
   plan: NormalizedPlanOverview;
+  direct_consumers: CanonicalBucket<NormalizedPlanImpactEntry>;
+  indirect_consumers: CanonicalBucket<NormalizedPlanImpactEntry>;
+  related_context: CanonicalBucket<NormalizedPlanImpactEntry>;
+  // Deprecated compatibility surface. Derive from the canonical top-level buckets only.
   impact: {
     direct_consumers: NormalizedPlanImpactBucket;
     indirect_consumers: NormalizedPlanImpactBucket;
@@ -302,6 +328,10 @@ export function normalizePlanChangeResponse(
     debug: null,
   });
 
+  const direct_consumers = normalizeImpactBucket(raw.impactBuckets.directConsumers);
+  const indirect_consumers = normalizeImpactBucket(raw.impactBuckets.indirectConsumers);
+  const related_context = normalizeImpactBucket(raw.impactBuckets.relatedContext);
+
   return {
     ...response,
     target: {
@@ -326,6 +356,9 @@ export function normalizePlanChangeResponse(
       ...(response.expansions['plan:signals'] ? { signalsExpansionId: 'plan:signals' } : {}),
       ...(response.expansions['plan:ui-hints'] ? { uiHintsExpansionId: 'plan:ui-hints' } : {}),
     },
+    direct_consumers,
+    indirect_consumers,
+    related_context,
     impact: {
       direct_consumers: raw.impactBuckets.directConsumers,
       indirect_consumers: raw.impactBuckets.indirectConsumers,

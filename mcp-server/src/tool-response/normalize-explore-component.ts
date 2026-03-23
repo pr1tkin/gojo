@@ -1,5 +1,6 @@
 import type { ResultExplainabilitySignals } from '../orchestrator/types.js';
 import type { ToolTrustMetadata } from '../tools/trust-metadata.js';
+import type { CanonicalBucket } from './bucket-schema.js';
 import {
   buildNormalizedDiagnostics,
   buildNormalizedTruncation,
@@ -248,36 +249,9 @@ export interface ExploreComponentNormalizedResponse
   extends NormalizedToolResponse<NormalizedExploreComponentResult> {
   target: NormalizedExploreComponentTarget;
   alternatives?: NormalizedExploreComponentAlternative[];
-  direct_consumers?: {
-    label: string;
-    explanation: string;
-    entries: NormalizedExploreComponentResult[];
-    total: number;
-    shown: number;
-    truncated: boolean;
-    confidence: ConfidenceLevel;
-    coverage: 'exact' | 'inferred' | 'exploratory';
-  };
-  indirect_consumers?: {
-    label: string;
-    explanation: string;
-    entries: NormalizedExploreComponentResult[];
-    total: number;
-    shown: number;
-    truncated: boolean;
-    confidence: ConfidenceLevel;
-    coverage: 'exact' | 'inferred' | 'exploratory';
-  };
-  related_context?: {
-    label: string;
-    explanation: string;
-    entries: NormalizedExploreComponentResult[];
-    total: number;
-    shown: number;
-    truncated: boolean;
-    confidence: ConfidenceLevel;
-    coverage: 'exact' | 'inferred' | 'exploratory';
-  };
+  direct_consumers?: CanonicalBucket<NormalizedExploreComponentResult>;
+  indirect_consumers?: CanonicalBucket<NormalizedExploreComponentResult>;
+  related_context?: CanonicalBucket<NormalizedExploreComponentResult>;
 }
 
 export interface ExploreComponentNormalizationInput {
