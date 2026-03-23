@@ -26,7 +26,7 @@ import {
   assessHealthTransparency,
   assessIndexTransparency,
 } from './transparency.js';
-import { assessRuntimeStateFromHealth, detectRepositoryDrift } from './trust.js';
+import { assessRuntimeStateFromHealth, detectRepositoryDrift, inspectRuntimeRefreshActivity } from './trust.js';
 import { serveMcpRuntime } from './mcp-service.js';
 import { inspectSearchRuntime } from './search-service.js';
 import type { RelatedFileContextBuckets, RankedFileContextItem } from '../context/types.js';
@@ -339,16 +339,18 @@ export const indexRepoHandler: RuntimeCapabilityHandler<IndexRepoRequest, IndexR
     const result = await refreshIndexes(reposRoot, {
       logger: context.dependencies.logger,
     });
-    const [health, generationState] = await Promise.all([
+    const [health, generationState, refreshActivity] = await Promise.all([
       getCurrentIndexHealth(),
       loadCurrentGenerationState().catch(() => null),
+      inspectRuntimeRefreshActivity(reposRoot).catch(() => undefined),
     ]);
     const drift = await detectRepositoryDrift({
       repoPath,
       generationCreatedAt: generationState?.createdAt,
     });
     const runtimeState = assessRuntimeStateFromHealth(health, {
-      additionalWarnings: drift.warning ? [drift.warning] : [],
+      drift,
+      refreshActivity,
       repoPath,
     });
     const transparency = assessIndexTransparency({
@@ -376,7 +378,7 @@ export const indexRepoHandler: RuntimeCapabilityHandler<IndexRepoRequest, IndexR
           severity:
             runtimeState.readinessState === 'ready'
               ? 'info'
-              : runtimeState.readinessState === 'inconsistent'
+              : runtimeState.readinessState === 'degraded'
                 ? 'error'
                 : 'warning',
         },
@@ -434,16 +436,18 @@ export const refreshRepoHandler: RuntimeCapabilityHandler<RefreshRepoRequest, Re
     const result = await refreshIndexes(reposRoot, {
       logger: context.dependencies.logger,
     });
-    const [health, generationState] = await Promise.all([
+    const [health, generationState, refreshActivity] = await Promise.all([
       getCurrentIndexHealth(),
       loadCurrentGenerationState().catch(() => null),
+      inspectRuntimeRefreshActivity(reposRoot).catch(() => undefined),
     ]);
     const drift = await detectRepositoryDrift({
       repoPath,
       generationCreatedAt: generationState?.createdAt,
     });
     const runtimeState = assessRuntimeStateFromHealth(health, {
-      additionalWarnings: drift.warning ? [drift.warning] : [],
+      drift,
+      refreshActivity,
       repoPath,
     });
     const transparency = assessIndexTransparency({
@@ -471,7 +475,7 @@ export const refreshRepoHandler: RuntimeCapabilityHandler<RefreshRepoRequest, Re
           severity:
             runtimeState.readinessState === 'ready'
               ? 'info'
-              : runtimeState.readinessState === 'inconsistent'
+              : runtimeState.readinessState === 'degraded'
                 ? 'error'
                 : 'warning',
         },
@@ -530,7 +534,8 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
       context.executionContext.repoTarget?.repoId,
     );
     const repoPath = request.repo?.repoPath ?? context.executionContext.repoTarget?.repoPath;
-    const [result, health, generationState] = await Promise.all([
+    const reposRoot = context.dependencies.config.reposRoot;
+    const [result, health, generationState, refreshActivity] = await Promise.all([
       getSymbolExplorationContext(request.target, {
         repo: repoId,
         limit: request.limit,
@@ -538,13 +543,15 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
       }),
       getCurrentIndexHealth(),
       loadCurrentGenerationState().catch(() => null),
+      inspectRuntimeRefreshActivity(reposRoot).catch(() => undefined),
     ]);
     const drift = await detectRepositoryDrift({
       repoPath,
       generationCreatedAt: generationState?.createdAt,
     });
     const runtimeState = assessRuntimeStateFromHealth(health, {
-      additionalWarnings: drift.warning ? [drift.warning] : [],
+      drift,
+      refreshActivity,
       repoPath,
     });
 
@@ -660,17 +667,20 @@ export const runHealthChecksHandler: RuntimeCapabilityHandler<
   executionMode: 'one_shot',
   async execute(request, context) {
     const repoPath = request.repo?.repoPath ?? context.executionContext.repoTarget?.repoPath;
-    const [result, generationState, searchRuntime] = await Promise.all([
+    const reposRoot = context.dependencies.config.reposRoot;
+    const [result, generationState, searchRuntime, refreshActivity] = await Promise.all([
       getCurrentIndexHealth(),
       loadCurrentGenerationState().catch(() => null),
       inspectSearchRuntime(context.dependencies.config),
+      inspectRuntimeRefreshActivity(reposRoot).catch(() => undefined),
     ]);
     const drift = await detectRepositoryDrift({
       repoPath,
       generationCreatedAt: generationState?.createdAt,
     });
     const runtimeState = assessRuntimeStateFromHealth(result, {
-      additionalWarnings: drift.warning ? [drift.warning] : [],
+      drift,
+      refreshActivity,
       repoPath,
     });
     const repoLabel =

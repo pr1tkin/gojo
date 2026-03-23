@@ -23,7 +23,7 @@ function coverageFromReadiness(readinessState: RuntimeReadinessState): RuntimeCo
     return 'stale';
   }
 
-  if (readinessState === 'unknown' || readinessState === 'inconsistent') {
+  if (readinessState === 'unknown' || readinessState === 'degraded' || readinessState === 'refreshing') {
     return 'partial';
   }
 
@@ -35,7 +35,7 @@ function baseCoverageSignals(readinessState: RuntimeReadinessState): RuntimeCove
     return ['stale'];
   }
 
-  if (readinessState === 'unknown' || readinessState === 'inconsistent') {
+  if (readinessState === 'unknown' || readinessState === 'degraded' || readinessState === 'refreshing') {
     return ['partial'];
   }
 
@@ -107,8 +107,10 @@ export function assessIndexTransparency(input: {
 
   if (input.readinessState === 'stale') {
     note = 'Published generation exists, but freshness or search synchronization is still behind.';
-  } else if (input.readinessState === 'inconsistent') {
-    note = 'Generation was produced, but runtime coverage is incomplete or contradictory.';
+  } else if (input.readinessState === 'degraded') {
+    note = 'Published generation exists, but runtime trust is degraded by inconsistent or incomplete artifacts.';
+  } else if (input.readinessState === 'refreshing') {
+    note = 'A refresh is in progress; the published generation is grounded but may change soon.';
   } else if (input.readinessState === 'unknown') {
     note = 'Indexing did not establish a trustworthy published state yet.';
   } else if (input.hasWarnings) {

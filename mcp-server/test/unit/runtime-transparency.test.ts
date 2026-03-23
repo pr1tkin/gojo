@@ -57,6 +57,27 @@ describe('runtime transparency', () => {
     expect(result.coverageSignals).toContain('stale');
   });
 
+  it('marks refreshing health as partial coverage instead of complete', () => {
+    const result = assessHealthTransparency({
+      readinessState: 'refreshing',
+      suitableForAgentWorkflows: true,
+      searchHelpersAvailable: true,
+    });
+
+    expect(result.coverage).toBe('partial');
+    expect(result.coverageSignals).toContain('partial');
+  });
+
+  it('marks degraded index results as partial with a degradation note', () => {
+    const result = assessIndexTransparency({
+      readinessState: 'degraded',
+      hasWarnings: false,
+    });
+
+    expect(result.coverage).toBe('partial');
+    expect(result.note).toContain('degraded');
+  });
+
   it('marks ready index results with warnings as partial rather than exact complete coverage', () => {
     const result = assessIndexTransparency({
       readinessState: 'ready',

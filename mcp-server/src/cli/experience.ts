@@ -252,21 +252,26 @@ export function deriveSuggestedCommands(response: RuntimeResponse<unknown>, comm
       appendUnique(suggestions, commandForIndex(command));
     }
 
-    if (payload.readinessState === 'stale' || response.readiness_state === 'stale') {
+    if (
+      payload.readinessState === 'stale' ||
+      payload.readinessState === 'refreshing' ||
+      response.readiness_state === 'stale' ||
+      response.readiness_state === 'refreshing'
+    ) {
       appendUnique(suggestions, commandForRefresh(command));
     }
 
-    if (payload.readinessState === 'inconsistent' || response.readiness_state === 'inconsistent') {
+    if (payload.readinessState === 'degraded' || response.readiness_state === 'degraded') {
       appendUnique(suggestions, commandForIndex(command));
     }
   }
 
   if (response.capability === 'ExploreComponent') {
-    if (response.readiness_state === 'stale') {
+    if (response.readiness_state === 'stale' || response.readiness_state === 'refreshing') {
       appendUnique(suggestions, commandForRefresh(command));
     }
 
-    if (response.readiness_state === 'inconsistent' || response.readiness_state === 'unknown') {
+    if (response.readiness_state === 'degraded' || response.readiness_state === 'unknown') {
       appendUnique(suggestions, commandForIndex(command));
     }
 
@@ -280,11 +285,11 @@ export function deriveSuggestedCommands(response: RuntimeResponse<unknown>, comm
   }
 
   if (response.capability === 'RefreshRepo') {
-    if (response.readiness_state === 'stale') {
+    if (response.readiness_state === 'stale' || response.readiness_state === 'refreshing') {
       appendUnique(suggestions, commandForHealth(command));
     }
 
-    if (response.readiness_state === 'inconsistent' || response.readiness_state === 'unknown') {
+    if (response.readiness_state === 'degraded' || response.readiness_state === 'unknown') {
       appendUnique(suggestions, commandForIndex(command));
     }
   }

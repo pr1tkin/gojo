@@ -8,7 +8,7 @@ export type RuntimeOutputMode = 'human' | 'json';
 
 export type RuntimeTrustLevel = 'high' | 'medium' | 'low' | 'degraded';
 
-export type RuntimeReadinessState = 'ready' | 'stale' | 'inconsistent' | 'unknown';
+export type RuntimeReadinessState = 'ready' | 'refreshing' | 'stale' | 'degraded' | 'unknown';
 
 export type RuntimeExecutionMode = 'one_shot' | 'long_running';
 

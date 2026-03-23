@@ -231,6 +231,34 @@ describe.sequential('index health', () => {
     expect(health.errors.join(' ')).toContain('symbol-index.json is missing');
   });
 
+  it('downgrades trust to inconsistent when the semantic graph is missing', async () => {
+    const tempRoot = await createTempDirectory();
+    const reposRoot = path.join(tempRoot, 'repos');
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    await ensureRepository(reposRoot, 'app-repo');
+    await writeRepositoryFile(reposRoot, 'app-repo', 'src/a.ts', 'export function alpha() { return "a"; }');
+    await refreshIndexes(reposRoot, { logger: silentLogger, runConsistencyChecks: 'never' });
+    const state = await loadCurrentGenerationState();
+
+    await writeSearchSnapshot(tempRoot, {
+      schemaVersion: 1,
+      snapshotId: 'snapshot-ready-semantic-missing',
+      status: 'ready',
+      refreshedAt: '2026-03-17T10:00:00.000Z',
+      aggregateFingerprint: state?.search.aggregateFingerprint,
+      repoFingerprints: state?.search.repoFingerprints,
+    });
+    await removeCurrentArtifact('semantic-graph.json');
+
+    const health = await getCurrentIndexHealth();
+
+    expect(health.trustState).toBe('inconsistent');
+    expect(health.suitableForAgentWorkflows).toBe(false);
+    expect(health.errors.join(' ')).toContain('semantic-graph.json is missing');
+  });
+
   it('downgrades trust when the published pattern artifact is missing', async () => {
     const tempRoot = await createTempDirectory();
     const reposRoot = path.join(tempRoot, 'repos');

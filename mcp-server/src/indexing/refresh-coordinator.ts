@@ -19,6 +19,15 @@ interface RefreshLockMetadata {
   heartbeatAt: string;
 }
 
+export interface RefreshActivityState {
+  status: 'idle' | 'active' | 'stale';
+  reposRoot: string;
+  phase?: RefreshLockMetadata['phase'];
+  ownerId?: string;
+  startedAt?: string;
+  heartbeatAt?: string;
+}
+
 interface RefreshLockHandle {
   scopeKey: string;
   lockPath: string;
@@ -167,6 +176,39 @@ async function hasRefreshPending(reposRoot: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function inspectRefreshActivity(reposRoot: string): Promise<RefreshActivityState> {
+  const resolvedReposRoot = path.resolve(reposRoot);
+  const lockPath = getRefreshLockFilePath(reposRoot);
+  const metadata = await readLockMetadata(lockPath);
+
+  if (!metadata) {
+    return {
+      status: (await hasRefreshPending(reposRoot)) ? 'active' : 'idle',
+      reposRoot: resolvedReposRoot,
+    };
+  }
+
+  if (isStaleLock(metadata)) {
+    return {
+      status: 'stale',
+      reposRoot: resolvedReposRoot,
+      phase: metadata.phase,
+      ownerId: metadata.ownerId,
+      startedAt: metadata.startedAt,
+      heartbeatAt: metadata.heartbeatAt,
+    };
+  }
+
+  return {
+    status: 'active',
+    reposRoot: resolvedReposRoot,
+    phase: metadata.phase,
+    ownerId: metadata.ownerId,
+    startedAt: metadata.startedAt,
+    heartbeatAt: metadata.heartbeatAt,
+  };
 }
 
 async function clearRefreshPending(reposRoot: string): Promise<void> {

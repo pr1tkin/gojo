@@ -189,12 +189,15 @@ export async function assessCriticalDataDependencies(input: {
   snapshotResult: CoordinationMarkerParseResult<unknown>;
   patternIndexResult: PatternIndexLoadResult;
 }): Promise<CriticalDataAssessment> {
-  const [symbolStatus, graphStatus, metadataStatus] = await Promise.all([
+  const [symbolStatus, graphStatus, semanticGraphStatus, metadataStatus] = await Promise.all([
     readJsonFileStatus<Record<string, unknown>>(
       getGenerationArtifactFilePath(input.generationId, 'symbol-index.json'),
     ),
     readJsonFileStatus<Record<string, unknown>>(
       getGenerationArtifactFilePath(input.generationId, 'code-graph.json'),
+    ),
+    readJsonFileStatus<Record<string, unknown>>(
+      getGenerationArtifactFilePath(input.generationId, 'semantic-graph.json'),
     ),
     readJsonFileStatus<Record<string, unknown>>(
       getGenerationArtifactFilePath(input.generationId, 'index-generation.json'),
@@ -204,6 +207,7 @@ export async function assessCriticalDataDependencies(input: {
   const issues = [
     buildArtifactIssue('symbol-index-missing-or-malformed', 'symbol-index.json', symbolStatus),
     buildArtifactIssue('code-graph-missing-or-malformed', 'code-graph.json', graphStatus),
+    buildArtifactIssue('semantic-graph-missing-or-malformed', 'semantic-graph.json', semanticGraphStatus),
     buildArtifactIssue('generation-metadata-missing-or-malformed', 'index-generation.json', metadataStatus),
     buildPatternIssue(input.patternIndexResult),
     buildCoordinationIssue(

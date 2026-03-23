@@ -1,14 +1,16 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import { inspectRefreshActivity, type RefreshActivityState } from '../indexing/refresh-coordinator.js';
 import { collectRepositorySourceFiles } from '../symbol-index/build-index.js';
 import type { IndexHealthSummary, IndexHealthTrustState } from '../indexing/types.js';
 import type { RuntimeReadinessState, RuntimeTrustLevel } from './types.js';
 
 // Runtime readiness is intentionally small and product-facing:
 // - ready: published artifacts exist, search is synchronized, and no known drift exists
+// - refreshing: a refresh is actively rebuilding or publishing a new generation
 // - stale: artifacts exist, but freshness or synchronization is behind current repo state
-// - inconsistent: required runtime data is missing or contradictory
+// - degraded: required runtime data is partially unavailable or contradictory
 // - unknown: Gojo does not have a trustworthy published generation yet
 //
 // Trust and confidence are derived from the same readiness inputs so that
@@ -31,6 +33,7 @@ export interface DriftDetectionInput {
 
 export interface DriftDetectionResult {
   stale: boolean;
+  severity?: 'stale' | 'degraded';
   warning?: string;
 }
 
@@ -45,8 +48,6 @@ function mapHealthTrustState(trustState: IndexHealthTrustState): RuntimeStateAss
         stateExplanation: 'Gojo indexes and search data are synchronized.',
         warnings: [],
       };
-    case 'degraded':
-    case 'repair-recommended':
     case 'stale-search':
       return {
         trustLevel: 'medium',
@@ -54,15 +55,26 @@ function mapHealthTrustState(trustState: IndexHealthTrustState): RuntimeStateAss
         readinessState: 'stale',
         stateSummary: 'stale',
         stateExplanation: 'Gojo has index data, but freshness or search synchronization is behind.',
-        recommendedAction: 'Run gojo index to rebuild and republish current repo data.',
+        recommendedAction: 'Run gojo refresh to reconcile stale Gojo data for this repo.',
+        warnings: [],
+      };
+    case 'degraded':
+    case 'repair-recommended':
+      return {
+        trustLevel: 'degraded',
+        confidence: 'degraded',
+        readinessState: 'degraded',
+        stateSummary: 'degraded',
+        stateExplanation: 'Gojo can answer requests, but runtime evidence is degraded or requires repair.',
+        recommendedAction: 'Run gojo refresh to reconcile stale Gojo data for this repo.',
         warnings: [],
       };
     case 'inconsistent':
       return {
         trustLevel: 'degraded',
         confidence: 'low',
-        readinessState: 'inconsistent',
-        stateSummary: 'inconsistent',
+        readinessState: 'degraded',
+        stateSummary: 'degraded',
         stateExplanation: 'Gojo runtime artifacts are incomplete or contradictory.',
         recommendedAction: 'Run gojo index to rebuild Gojo artifacts from a clean generation.',
         warnings: [],
@@ -132,17 +144,63 @@ function formatRepoDriftWarning(warning: string | undefined): string | undefined
 
 export function assessRuntimeStateFromHealth(
   health: IndexHealthSummary,
-  options?: { additionalWarnings?: string[]; repoPath?: string },
+  options?: {
+    drift?: DriftDetectionResult;
+    refreshActivity?: RefreshActivityState;
+    repoPath?: string;
+  },
 ): RuntimeStateAssessment {
   const base = mapHealthTrustState(health.trustState);
-  const warnings = [...base.warnings, ...(options?.additionalWarnings ?? [])];
-  const hasAdditionalWarnings = warnings.length > base.warnings.length;
-  const driftWarning = formatRepoDriftWarning(options?.additionalWarnings?.[0]);
+  const extraWarnings = [
+    ...(options?.drift?.warning ? [options.drift.warning] : []),
+    ...(options?.refreshActivity?.status === 'stale'
+      ? ['Refresh state is degraded because a stale refresh lock was detected.']
+      : []),
+    ...(options?.refreshActivity?.status === 'active'
+      ? ['A refresh is currently in progress; published results may change once it completes.']
+      : []),
+  ];
+  const warnings = [...base.warnings, ...extraWarnings];
+  const driftWarning = formatRepoDriftWarning(options?.drift?.warning);
   const stateExplanation = driftWarning ?? explanationFromHealth(health);
   const recommendedAction =
     recommendedActionFromHealth(health, options?.repoPath, driftWarning) ?? base.recommendedAction;
 
-  if (hasAdditionalWarnings && base.readinessState === 'ready') {
+  if (options?.refreshActivity?.status === 'active' && base.readinessState !== 'degraded') {
+    return {
+      trustLevel: base.trustLevel === 'high' ? 'medium' : base.trustLevel,
+      confidence: base.confidence === 'high' ? 'medium' : base.confidence,
+      readinessState: 'refreshing',
+      stateSummary: 'refreshing',
+      stateExplanation:
+        'Gojo has a published generation and is actively refreshing runtime artifacts.',
+      recommendedAction: 'Wait for the active refresh to complete before treating results as stable.',
+      warnings,
+    };
+  }
+
+  if (
+    (options?.refreshActivity?.status === 'stale' || options?.drift?.severity === 'degraded') &&
+    base.readinessState !== 'unknown'
+  ) {
+    return {
+      trustLevel: 'degraded',
+      confidence: base.confidence === 'high' ? 'medium' : base.confidence,
+      readinessState: 'degraded',
+      stateSummary: 'degraded',
+      stateExplanation:
+        options?.refreshActivity?.status === 'stale'
+          ? 'Gojo detected evidence of an interrupted or stale refresh lock.'
+          : stateExplanation,
+      recommendedAction:
+        options?.refreshActivity?.status === 'stale'
+          ? 'Run gojo refresh to rebuild and clear interrupted refresh state.'
+          : recommendedAction,
+      warnings,
+    };
+  }
+
+  if (options?.drift?.severity === 'stale' && base.readinessState === 'ready') {
     return {
       trustLevel: 'medium',
       confidence: 'medium',
@@ -187,19 +245,59 @@ export async function detectRepositoryDrift(
   }
 
   const repositoryId = path.basename(input.repoPath);
-  const sourceFiles = await collectRepositorySourceFiles(input.repoPath, repositoryId);
+  let sourceFiles: string[];
+
+  try {
+    sourceFiles = await collectRepositorySourceFiles(input.repoPath, repositoryId);
+  } catch (error) {
+    return {
+      stale: false,
+      severity: 'degraded',
+      warning: `Results may be incomplete because Gojo could not inspect the repo for drift: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 
   for (const relativePath of sourceFiles) {
     const absolutePath = path.join(input.repoPath, relativePath);
-    const stat = await fs.stat(absolutePath).catch(() => null);
+    const stat = await fs.stat(absolutePath).catch((error) => {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: string }).code)
+          : '';
+
+      if (code === 'ENOENT') {
+        return null;
+      }
+
+      return error;
+    });
+
+    if (stat instanceof Error) {
+      return {
+        stale: false,
+        severity: 'degraded',
+        warning: `Results may be incomplete because Gojo could not inspect ${relativePath} for drift.`,
+      };
+    }
 
     if (stat && stat.mtimeMs > generationCreatedAtMs) {
       return {
         stale: true,
+        severity: 'stale',
         warning: `Results may be based on stale index data. ${relativePath} changed after the last index build.`,
       };
     }
   }
 
   return { stale: false };
+}
+
+export async function inspectRuntimeRefreshActivity(
+  reposRoot: string | undefined,
+): Promise<RefreshActivityState | undefined> {
+  if (!reposRoot) {
+    return undefined;
+  }
+
+  return inspectRefreshActivity(reposRoot);
 }
