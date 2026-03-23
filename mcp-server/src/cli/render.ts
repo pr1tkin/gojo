@@ -85,6 +85,7 @@ export function renderRuntimeResponse(response: RenderableRuntimeResponse, comma
   const sections: string[] = [
     `${response.summary.title}\n${response.summary.text}`,
   ];
+  const bucketedPayload = getBucketedPayload(response);
 
   const stateSection = renderSection('State', [
     `readiness: ${response.readiness_state}`,
@@ -119,14 +120,16 @@ export function renderRuntimeResponse(response: RenderableRuntimeResponse, comma
     sections.push(warningsSection.join('\n'));
   }
 
-  const relatedSection = renderSection(
-    'Related',
-    response.related_entities.map((entity) =>
-      entity.path ? `${entity.kind}: ${entity.name} (${entity.path})` : `${entity.kind}: ${entity.name}`,
-    ),
-  );
-  if (relatedSection.length > 0) {
-    sections.push(relatedSection.join('\n'));
+  if (!bucketedPayload) {
+    const relatedSection = renderSection(
+      'Related',
+      response.related_entities.map((entity) =>
+        entity.path ? `${entity.kind}: ${entity.name} (${entity.path})` : `${entity.kind}: ${entity.name}`,
+      ),
+    );
+    if (relatedSection.length > 0) {
+      sections.push(relatedSection.join('\n'));
+    }
   }
 
   const signalsSection = renderSection(
@@ -136,8 +139,6 @@ export function renderRuntimeResponse(response: RenderableRuntimeResponse, comma
   if (signalsSection.length > 0) {
     sections.push(signalsSection.join('\n'));
   }
-
-  const bucketedPayload = getBucketedPayload(response);
 
   if (bucketedPayload) {
     const directSection = renderSection(

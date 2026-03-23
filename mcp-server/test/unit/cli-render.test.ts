@@ -82,6 +82,7 @@ describe('cli render transparency', () => {
       evidence_types: ['graph', 'symbol_index'],
     });
 
+    expect(output).not.toContain('Related\n');
     expect(output).toContain('Direct consumers (exact)');
     expect(output).toContain('confirmed symbol-level usage');
     expect(output).toContain('lib/services/automationService.ts#createAutomation');
