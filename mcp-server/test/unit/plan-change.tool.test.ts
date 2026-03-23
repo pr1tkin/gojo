@@ -185,6 +185,7 @@ describe('plan_change tool', () => {
       }),
       impact: expect.objectContaining({
         direct_consumers: expect.objectContaining({
+          kind: 'direct_consumers',
           label: 'Direct consumers (exact)',
           explanation: 'confirmed symbol-level usage',
           confidence: 'high',
@@ -197,15 +198,23 @@ describe('plan_change tool', () => {
           ],
         }),
         indirect_consumers: expect.objectContaining({
+          kind: 'indirect_consumers',
           label: 'Indirect consumers (inferred)',
           confidence: 'medium',
         }),
         related_context: expect.objectContaining({
+          kind: 'related_context',
           label: 'Related context (exploratory)',
           confidence: 'low',
         }),
       }),
     }));
+    expect(parsed.impact.direct_consumers.entries).toEqual(parsed.direct_consumers.entries);
+    expect(parsed.impact.indirect_consumers.entries).toEqual(parsed.indirect_consumers.entries);
+    expect(parsed.impact.related_context.entries).toEqual(parsed.related_context.entries);
+    expect(parsed.impact.direct_consumers).not.toHaveProperty('total');
+    expect(parsed.impact.indirect_consumers).not.toHaveProperty('shown');
+    expect(parsed.impact.related_context).not.toHaveProperty('truncated');
     expect(parsed.results.primary).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: 'plan_step',

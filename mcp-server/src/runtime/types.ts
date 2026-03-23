@@ -66,6 +66,11 @@ export interface RuntimeResponse<TMachinePayload = unknown> {
   executionMode: RuntimeExecutionMode;
   summary: RuntimeSummary;
   findings: RuntimeFinding[];
+  /**
+   * @deprecated Compatibility surface only.
+   * Derived from canonical bucketed output for older runtime consumers and
+   * planned for removal after downstream migration.
+   */
   related_entities: RuntimeRelatedEntity[];
   signals: RuntimeSignal[];
   warnings: string[];

@@ -303,6 +303,9 @@ describe('runtime state consistency', () => {
     expect(response.related_entities).toEqual([
       expect.objectContaining({ path: 'src/direct-a.ts' }),
     ]);
+    expect(response.related_entities).toHaveLength(
+      response.machine_payload.direct_consumers?.shown ?? 0,
+    );
     expect(response.related_entities).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ path: 'src/indirect-a.ts' })]),
     );
@@ -492,6 +495,7 @@ describe('runtime state consistency', () => {
       expect.objectContaining({ path: 'src/components/ArticleHeaderBar.stories.tsx' }),
       expect.objectContaining({ path: 'src/components/ArticleHeaderBar.test.tsx' }),
     ]);
+    expect(response.related_entities).toHaveLength(3);
     expect(response.related_entities).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ path: 'src/indirect/Wrapper.tsx' })]),
     );
@@ -640,5 +644,8 @@ describe('runtime state consistency', () => {
     expect(response.related_entities).toEqual([
       expect.objectContaining({ path: 'src/context-a.ts' }),
     ]);
+    expect(response.related_entities).toHaveLength(
+      response.machine_payload.related_context?.shown ?? 0,
+    );
   });
 });

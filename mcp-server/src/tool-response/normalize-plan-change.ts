@@ -96,13 +96,31 @@ function normalizeImpactBucket(
   };
 }
 
+function toLegacyImpactBucket(
+  bucket: CanonicalBucket<NormalizedPlanImpactEntry>,
+  kind: 'direct_consumers' | 'indirect_consumers' | 'related_context',
+): NormalizedPlanImpactBucket & { kind: typeof kind } {
+  return {
+    kind,
+    label: bucket.label,
+    explanation: bucket.explanation,
+    confidence: bucket.confidence,
+    coverage: bucket.coverage,
+    signals: [],
+    entries: bucket.entries,
+  };
+}
+
 export interface PlanChangeNormalizedResponse extends NormalizedToolResponse<NormalizedPlanChangeStep> {
   target: NormalizedPlanChangeTarget;
   plan: NormalizedPlanOverview;
   direct_consumers: CanonicalBucket<NormalizedPlanImpactEntry>;
   indirect_consumers: CanonicalBucket<NormalizedPlanImpactEntry>;
   related_context: CanonicalBucket<NormalizedPlanImpactEntry>;
-  // Deprecated compatibility surface. Derive from the canonical top-level buckets only.
+  /**
+   * @deprecated Compatibility surface only.
+   * Derive from canonical top-level buckets only and remove after downstream migration.
+   */
   impact: {
     direct_consumers: NormalizedPlanImpactBucket;
     indirect_consumers: NormalizedPlanImpactBucket;
@@ -360,9 +378,9 @@ export function normalizePlanChangeResponse(
     indirect_consumers,
     related_context,
     impact: {
-      direct_consumers: raw.impactBuckets.directConsumers,
-      indirect_consumers: raw.impactBuckets.indirectConsumers,
-      related_context: raw.impactBuckets.relatedContext,
+      direct_consumers: toLegacyImpactBucket(direct_consumers, 'direct_consumers'),
+      indirect_consumers: toLegacyImpactBucket(indirect_consumers, 'indirect_consumers'),
+      related_context: toLegacyImpactBucket(related_context, 'related_context'),
     },
   };
 }

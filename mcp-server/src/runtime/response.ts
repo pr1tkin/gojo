@@ -19,6 +19,7 @@ export interface CreateRuntimeResponseOptions<TMachinePayload> {
   summary: RuntimeSummary;
   machinePayload: TMachinePayload;
   findings?: RuntimeFinding[];
+  // Deprecated compatibility surface. Keep derived from canonical buckets only.
   relatedEntities?: RuntimeRelatedEntity[];
   signals?: RuntimeSignal[];
   warnings?: string[];
