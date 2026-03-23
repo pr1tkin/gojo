@@ -133,6 +133,100 @@ describe('context assembly', () => {
     expect(bundle.viableAlternativeCount).toBe(0);
   });
 
+  it('surfaces api-mediated hook consumers as inferred related files', async () => {
+    const tempRoot = await createTempDirectory();
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    const reposRoot = path.join(tempRoot, 'repos');
+    const repositoryRoot = path.join(reposRoot, 'api-context-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'lib', 'services'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'lib', 'hooks'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'app', 'api', 'automations'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          target: 'ES2020',
+          module: 'ESNext',
+          moduleResolution: 'Bundler',
+          jsx: 'preserve',
+          allowJs: true,
+          skipLibCheck: true,
+        },
+        include: ['**/*.ts', '**/*.tsx'],
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'lib', 'services', 'automations.ts'),
+      [
+        'export async function getAutomations() {',
+        '  return [];',
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'app', 'api', 'automations', 'route.ts'),
+      [
+        "import { getAutomations } from '../../../lib/services/automations';",
+        '',
+        'export async function GET() {',
+        '  return Response.json(await getAutomations());',
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'lib', 'hooks', 'useAutomationsQuery.ts'),
+      [
+        'export async function useAutomationsQuery() {',
+        "  return fetch('/api/automations');",
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    await saveSymbolIndex(index);
+    await saveCodeGraph(await buildCodeGraph());
+
+    const bundle = await assembleSymbolContext({
+      name: 'getAutomations',
+      repo: 'api-context-repo',
+    });
+
+    expect(bundle.primarySymbol).toEqual(
+      expect.objectContaining({
+        filePath: 'lib/services/automations.ts',
+      }),
+    );
+    expect(bundle.relatedFileBuckets.directConsumers.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          file: expect.objectContaining({ filePath: 'app/api/automations/route.ts' }),
+        }),
+      ]),
+    );
+    expect(bundle.relatedFileBuckets.indirectConsumers.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          file: expect.objectContaining({ filePath: 'lib/hooks/useAutomationsQuery.ts' }),
+          via: expect.arrayContaining(['api_client_to_route', 'api_propagation']),
+        }),
+      ]),
+    );
+    expect(bundle.relatedFileBuckets.directConsumers.entries).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          file: expect.objectContaining({ filePath: 'lib/hooks/useAutomationsQuery.ts' }),
+        }),
+      ]),
+    );
+  });
+
   it('degrades safely for missing file and unresolved symbol context requests', async () => {
     const tempRoot = await createTempDirectory();
     tempDirectories.push(tempRoot);

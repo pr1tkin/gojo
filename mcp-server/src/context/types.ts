@@ -12,7 +12,10 @@ export type FileContextConnectionKind =
   | 'symbol_reference'
   | 'call_reference'
   | 'jsx_reference'
-  | 'type_reference';
+  | 'type_reference'
+  | 'api_route_handler'
+  | 'api_client_to_route'
+  | 'api_propagation';
 
 export interface RankedFileContextItem {
   file: FileNode;

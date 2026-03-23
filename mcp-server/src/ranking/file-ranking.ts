@@ -10,11 +10,14 @@ function edgeStrength(edgeType: string | undefined): EdgeStrength {
     case 'symbol_reference':
     case 'jsx_reference':
     case 'type_reference':
+    case 'api_route_handler':
       return 'strong';
     case 'file_imports_file':
     case 'incoming_file_imports_file':
     case 'file_reexports_file':
     case 'incoming_file_reexports_file':
+    case 'api_client_to_route':
+    case 'api_propagation':
       return 'medium';
     default:
       return 'weak';
@@ -59,6 +62,18 @@ function determineReason(entry: RankedRelatedFile['reasons']): string {
     return 'exact symbol reference';
   }
 
+  if (graphReason?.note === 'api_route_handler') {
+    return 'api route handler';
+  }
+
+  if (graphReason?.note === 'api_propagation') {
+    return 'api-mediated consumer';
+  }
+
+  if (graphReason?.note === 'api_client_to_route') {
+    return 'client calls api route';
+  }
+
   if (graphReason?.note === 'incoming_file_imports_file' || graphReason?.note === 'file_imports_file') {
     return 'direct import';
   }
@@ -94,9 +109,15 @@ function graphEdgeWeight(edgeType: string | undefined): number {
   switch (edgeType) {
     case 'call_reference':
       return 18;
+    case 'api_route_handler':
+      return 17;
     case 'symbol_reference':
     case 'jsx_reference':
       return 16;
+    case 'api_propagation':
+      return 13;
+    case 'api_client_to_route':
+      return 11;
     case 'file_imports_file':
     case 'incoming_file_imports_file':
       return 12;

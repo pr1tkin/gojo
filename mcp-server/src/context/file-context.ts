@@ -28,11 +28,21 @@ function isNoisePath(filePath: string): boolean {
 }
 
 function hasStrongEdge(via: FileContextConnectionKind[]): boolean {
-  return via.some((kind) => ['call_reference', 'symbol_reference', 'jsx_reference', 'type_reference'].includes(kind));
+  return via.some((kind) =>
+    ['call_reference', 'symbol_reference', 'jsx_reference', 'type_reference', 'api_route_handler'].includes(kind),
+  );
 }
 
 function hasMediumEdge(via: FileContextConnectionKind[]): boolean {
-  return via.some((kind) => ['incoming_file_imports_file', 'incoming_file_reexports_file', 'outgoing_file_reexports_file'].includes(kind));
+  return via.some((kind) =>
+    [
+      'incoming_file_imports_file',
+      'incoming_file_reexports_file',
+      'outgoing_file_reexports_file',
+      'api_client_to_route',
+      'api_propagation',
+    ].includes(kind),
+  );
 }
 
 function toConnectionKind(entry: Awaited<ReturnType<typeof getRelatedFiles>>[number]): FileContextConnectionKind {

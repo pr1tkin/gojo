@@ -13,6 +13,7 @@ const {
   readRepositoryFileMock,
   getObservedPropNamesForComponentMock,
   getUiParentsForComponentMock,
+  collectApiPropagationForSymbolMock,
 } = vi.hoisted(() => ({
   getDefinedSymbolsMock: vi.fn(),
   getFileNodeMock: vi.fn(),
@@ -26,6 +27,7 @@ const {
   readRepositoryFileMock: vi.fn(),
   getObservedPropNamesForComponentMock: vi.fn(),
   getUiParentsForComponentMock: vi.fn(),
+  collectApiPropagationForSymbolMock: vi.fn(),
 }));
 
 vi.mock('../../src/graph/query.js', () => ({
@@ -59,6 +61,10 @@ vi.mock('../../src/files.js', () => ({
 vi.mock('../../src/orchestrator/ui-hierarchy-service.js', () => ({
   getObservedPropNamesForComponent: getObservedPropNamesForComponentMock,
   getUiParentsForComponent: getUiParentsForComponentMock,
+}));
+
+vi.mock('../../src/typescript/api-propagation.js', () => ({
+  collectApiPropagationForSymbol: collectApiPropagationForSymbolMock,
 }));
 
 import { analyzeSymbolImpact } from '../../src/orchestrator/impact-analysis-service.js';
@@ -434,6 +440,11 @@ describe('impact analysis service', () => {
     });
     getObservedPropNamesForComponentMock.mockResolvedValue([]);
     getUiParentsForComponentMock.mockResolvedValue([]);
+    collectApiPropagationForSymbolMock.mockResolvedValue({
+      routeHandlers: [],
+      clientCalls: [],
+      propagatedClients: [],
+    });
   });
 
   it('resolves the target by symbolId and collects direct impacts', async () => {
@@ -722,6 +733,145 @@ describe('impact analysis service', () => {
       confidence: 'high',
     }));
     expect(importerSymbol).toBeUndefined();
+  });
+
+  it('classifies api-mediated hook consumers as indirect rather than exact', async () => {
+    collectApiPropagationForSymbolMock.mockResolvedValue({
+      routeHandlers: [
+        {
+          kind: 'api_route_handler',
+          routeId: '/api/widgets',
+          routeFileId: 'repo-a:src/app/api/widgets/route.ts',
+          routeFilePath: 'src/app/api/widgets/route.ts',
+          handlerName: 'GET',
+          referenceCount: 1,
+        },
+      ],
+      clientCalls: [
+        {
+          kind: 'api_client_to_route',
+          routeId: '/api/widgets',
+          clientFileId: 'repo-a:src/hooks/useWidgets.ts',
+          clientFilePath: 'src/hooks/useWidgets.ts',
+          method: 'GET',
+          line: 3,
+          snippet: "return fetch('/api/widgets');",
+        },
+      ],
+      propagatedClients: [
+        {
+          kind: 'api_propagation',
+          routeId: '/api/widgets',
+          routeFileId: 'repo-a:src/app/api/widgets/route.ts',
+          routeFilePath: 'src/app/api/widgets/route.ts',
+          clientFileId: 'repo-a:src/hooks/useWidgets.ts',
+          clientFilePath: 'src/hooks/useWidgets.ts',
+          method: 'GET',
+          line: 3,
+          snippet: "return fetch('/api/widgets');",
+          handlerName: 'GET',
+        },
+      ],
+    });
+    getFileNodeMock.mockImplementation(async (fileId: string) => {
+      if (fileId === 'repo-a:src/hooks/useWidgets.ts') {
+        return fileNode(fileId, 'repo-a', 'src/hooks/useWidgets.ts');
+      }
+
+      if (fileId === targetSymbol.fileId) {
+        return fileNode(targetSymbol.fileId, 'repo-a', targetSymbol.filePath);
+      }
+
+      if (fileId === consumerFile.fileId) {
+        return consumerFile;
+      }
+
+      if (fileId === barrelFile.fileId) {
+        return barrelFile;
+      }
+
+      if (fileId === transitivePageFile.fileId) {
+        return transitivePageFile;
+      }
+
+      return null;
+    });
+    getDefinedSymbolsMock.mockImplementation(async (fileId: string) => {
+      if (fileId === 'repo-a:src/hooks/useWidgets.ts') {
+        return [
+          symbolNode('use-widgets', fileId, 'repo-a', 'src/hooks/useWidgets.ts', 'useWidgets', 1, 4),
+        ];
+      }
+
+      if (fileId === targetSymbol.fileId) {
+        return [
+          symbolNode(
+            targetSymbol.symbolId,
+            targetSymbol.fileId,
+            'repo-a',
+            targetSymbol.filePath,
+            targetSymbol.name,
+            targetSymbol.startLine,
+            targetSymbol.endLine,
+          ),
+          widgetPropsSymbol,
+          helperSymbol,
+        ];
+      }
+
+      if (fileId === consumerFile.fileId) {
+        return [
+          symbolNode('dashboard-page', consumerFile.fileId, 'repo-a', consumerFile.filePath, 'DashboardPage', 1, 6),
+        ];
+      }
+
+      if (fileId === barrelFile.fileId) {
+        return [
+          symbolNode('widget-index-helper', barrelFile.fileId, 'repo-a', barrelFile.filePath, 'widgetIndexHelper', 1, 3),
+        ];
+      }
+
+      if (fileId === transitivePageFile.fileId) {
+        return [
+          symbolNode('home-page', transitivePageFile.fileId, 'repo-a', transitivePageFile.filePath, 'HomePage', 1, 4),
+        ];
+      }
+
+      return [];
+    });
+
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'safe',
+    });
+
+    expect(result.directConsumers.files).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ filePath: 'src/hooks/useWidgets.ts' })]),
+    );
+    expect(result.indirectConsumers.files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          filePath: 'src/hooks/useWidgets.ts',
+          tier: 'indirect',
+          impactScope: 'proxy',
+          confidence: 'medium',
+        }),
+      ]),
+    );
+    expect(result.indirectConsumers.symbols).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          symbolName: 'useWidgets',
+          filePath: 'src/hooks/useWidgets.ts',
+          tier: 'indirect',
+        }),
+      ]),
+    );
+    expect(result.summary.notes).toEqual(
+      expect.arrayContaining([
+        'API-mediated consumers are inferred through client -> route -> service propagation and remain indirect because the client does not call the target symbol directly',
+      ]),
+    );
   });
 
   it('captures barrel re-export file evidence as proxy impact', async () => {

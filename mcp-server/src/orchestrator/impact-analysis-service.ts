@@ -11,6 +11,7 @@ import { loadRequiredSymbolIndex } from '../symbol-index/store.js';
 import type { ExportRecord, ImportBinding, IndexedSymbol } from '../symbol-index/types.js';
 import { loadConfig } from '../config.js';
 import { findTypeScriptReferencesForIndexedSymbol } from '../typescript/symbol-references.js';
+import { collectApiPropagationForSymbol } from '../typescript/api-propagation.js';
 import {
   getObservedPropNamesForComponent,
   getUiParentsForComponent,
@@ -92,6 +93,12 @@ function reasonWeight(reason: ImpactReason): number {
       return 6;
     case 'reexports-target':
       return 5;
+    case 'api-propagation':
+      return 4;
+    case 'api-route-handler':
+      return 3;
+    case 'api-client-route':
+      return 2;
     case 'exports-target':
       return 4;
     case 'same-file-reference':
@@ -1294,6 +1301,124 @@ async function collectReexportImpacts(target: IndexedSymbol): Promise<{
   return { indirectFiles, indirectSymbols };
 }
 
+async function collectApiPropagationImpacts(target: IndexedSymbol): Promise<{
+  indirectFiles: ImpactedFile[];
+  indirectSymbols: ImpactedSymbol[];
+}> {
+  let repository: Awaited<ReturnType<typeof getRepositoryById>> | null = null;
+
+  try {
+    repository = await getRepositoryById(loadConfig().reposRoot, target.repo);
+  } catch {
+    repository = null;
+  }
+
+  if (!repository) {
+    return {
+      indirectFiles: [],
+      indirectSymbols: [],
+    };
+  }
+
+  const index = await loadRequiredSymbolIndex();
+  const apiPropagation = await collectApiPropagationForSymbol(repository, target, index.byFile, index.symbols).catch(() => ({
+    routeHandlers: [],
+    clientCalls: [],
+    propagatedClients: [],
+  }));
+  const indirectFiles: ImpactedFile[] = [];
+  const indirectSymbols: ImpactedSymbol[] = [];
+
+  for (const propagatedClient of apiPropagation.propagatedClients) {
+    const [clientFile, definedSymbols] = await Promise.all([
+      getFileNode(propagatedClient.clientFileId),
+      getDefinedSymbols(propagatedClient.clientFileId).catch(() => []),
+    ]);
+
+    const fileEvidence = buildEvidence(
+      'api-propagation',
+      'medium',
+      propagatedClient.clientFilePath,
+      [
+        `file calls API route "${propagatedClient.routeId}" and that route handler references the target service symbol in "${propagatedClient.routeFilePath}"`,
+      ],
+      'proxy',
+      'indirect',
+      'graph',
+      undefined,
+      undefined,
+      1,
+      [
+        {
+          fileId: propagatedClient.routeFileId,
+          filePath: propagatedClient.routeFilePath,
+          reason: 'api-route-handler',
+        },
+      ],
+      ['proxy_only'],
+    );
+
+    indirectFiles.push(buildImpactedFile({
+      file: clientFile,
+      fileId: propagatedClient.clientFileId,
+      filePath: propagatedClient.clientFilePath,
+      repoId: target.repo,
+      impactScope: 'proxy',
+      tier: 'indirect',
+      evidence: [fileEvidence],
+    }));
+
+    for (const definedSymbol of definedSymbols) {
+      if (propagatedClient.line < definedSymbol.startLine || propagatedClient.line > definedSymbol.endLine) {
+        continue;
+      }
+
+      const symbolFile = clientFile ?? (await getFileNode(definedSymbol.fileId));
+      const symbolEvidence = buildEvidence(
+        'api-propagation',
+        'medium',
+        propagatedClient.clientFilePath,
+        [
+          `symbol spans an API call to "${propagatedClient.routeId}", which reaches the target through route handler "${propagatedClient.routeFilePath}"`,
+        ],
+        'proxy',
+        'indirect',
+        'graph',
+        definedSymbol.symbolId,
+        definedSymbol.name,
+        1,
+        [
+          {
+            fileId: propagatedClient.routeFileId,
+            filePath: propagatedClient.routeFilePath,
+            reason: 'api-route-handler',
+          },
+        ],
+        ['proxy_only'],
+      );
+
+      indirectSymbols.push(buildImpactedSymbol({
+        symbol: definedSymbol,
+        file: symbolFile,
+        symbolId: definedSymbol.symbolId,
+        symbolName: definedSymbol.name,
+        kind: definedSymbol.kind,
+        exported: definedSymbol.exported,
+        filePath: definedSymbol.filePath,
+        repoId: definedSymbol.repoId,
+        impactScope: 'proxy',
+        tier: 'indirect',
+        evidence: [symbolEvidence],
+      }));
+    }
+  }
+
+  return {
+    indirectFiles,
+    indirectSymbols,
+  };
+}
+
 function mergeImpactedFiles(entries: ImpactedFile[]): ImpactedFile[] {
   const byFile = new Map<string, ImpactedFile>();
 
@@ -1564,11 +1689,12 @@ export async function analyzeSymbolImpact(input: AnalyzeSymbolImpactInput): Prom
   const effectiveMaxDepth = getEffectiveMaxDepth(input);
   const notes: string[] = [];
 
-  const [sameFileSymbols, importerImpacts, reexportImpacts, compilerReferenceImpacts] = await Promise.all([
+  const [sameFileSymbols, importerImpacts, reexportImpacts, compilerReferenceImpacts, apiPropagationImpacts] = await Promise.all([
     collectSameFileImpacts(target.symbol),
     collectImporterImpacts(target.symbol),
     collectReexportImpacts(target.symbol),
     collectCompilerReferenceImpacts(target.symbol),
+    collectApiPropagationImpacts(target.symbol),
   ]);
 
   const directConsumers: ImpactResultBucket = {
@@ -1576,8 +1702,8 @@ export async function analyzeSymbolImpact(input: AnalyzeSymbolImpactInput): Prom
     symbols: mergeImpactedSymbols([...importerImpacts.directSymbols, ...compilerReferenceImpacts.directSymbols]),
   };
   const indirectConsumers: ImpactIndirectConsumers = {
-    files: mergeImpactedFiles(reexportImpacts.indirectFiles),
-    symbols: mergeImpactedSymbols(reexportImpacts.indirectSymbols),
+    files: mergeImpactedFiles([...reexportImpacts.indirectFiles, ...apiPropagationImpacts.indirectFiles]),
+    symbols: mergeImpactedSymbols([...reexportImpacts.indirectSymbols, ...apiPropagationImpacts.indirectSymbols]),
     transitive: [],
   };
   const relatedContext: ImpactResultBucket = {
@@ -1614,6 +1740,10 @@ export async function analyzeSymbolImpact(input: AnalyzeSymbolImpactInput): Prom
 
   if (indirectConsumers.files.length > 0 || indirectConsumers.symbols.length > 0 || transitiveImpacts.length > 0) {
     notes.push('re-exports, wrapper layers, and bounded transitive propagation are reported as inferred indirect consumers, not exact breakage');
+  }
+
+  if (apiPropagationImpacts.indirectFiles.length > 0 || apiPropagationImpacts.indirectSymbols.length > 0) {
+    notes.push('API-mediated consumers are inferred through client -> route -> service propagation and remain indirect because the client does not call the target symbol directly');
   }
 
   if (relatedContext.files.length > 0 || relatedContext.symbols.length > 0) {
