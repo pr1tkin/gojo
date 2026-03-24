@@ -1,5 +1,5 @@
 import { createFileId } from '../symbol-index/ids.js';
-import type { IndexedSymbol, SymbolIndex } from '../symbol-index/types.js';
+import type { IndexedSymbol, SymbolIndex, SymbolIndexCoverageIssue } from '../symbol-index/types.js';
 import type { RepositoryInfo } from '../types.js';
 import { collectApiPropagationForSymbol } from '../typescript/api-propagation.js';
 import { findTypeScriptReferencesForIndexedSymbol } from '../typescript/symbol-references.js';
@@ -94,9 +94,15 @@ function dedupeEdges(edges: SemanticGraphEdge[]): SemanticGraphEdge[] {
   return deduped.sort((left, right) => left.edgeId.localeCompare(right.edgeId));
 }
 
+const LARGE_REPO_SEMANTIC_GRAPH_FILE_LIMIT = 12000;
+const LARGE_REPO_SEMANTIC_GRAPH_EXPORTED_SYMBOL_LIMIT = 12000;
+
 export async function buildSemanticGraph(
   index: SymbolIndex,
   repositories: RepositoryInfo[],
+  options: {
+    onIssue?: (issue: SymbolIndexCoverageIssue) => void;
+  } = {},
 ): Promise<SemanticGraphSnapshot> {
   const repositoriesById = new Map(repositories.map((repository) => [repository.id, repository]));
   const symbolsByFileId = new Map<string, IndexedSymbol[]>();
@@ -109,6 +115,30 @@ export async function buildSemanticGraph(
 
   const exportedSymbols = index.symbols.filter((symbol) => symbol.exported);
   const edges: SemanticGraphEdge[] = [];
+
+  if (
+    Object.keys(index.byFile).length > LARGE_REPO_SEMANTIC_GRAPH_FILE_LIMIT ||
+    exportedSymbols.length > LARGE_REPO_SEMANTIC_GRAPH_EXPORTED_SYMBOL_LIMIT
+  ) {
+    options.onIssue?.({
+      repoId: repositories[0]?.id ?? 'unknown',
+      filePath: '*',
+      classification: 'source',
+      language: 'unknown',
+      stage: 'semantic_graph',
+      disposition: 'partial',
+      source: 'policy',
+      reason:
+        `bounded semantic graph build skipped full exact reference materialization for a large repository (${Object.keys(index.byFile).length} files, ${exportedSymbols.length} exported symbols) to avoid OOM`,
+    });
+
+    return {
+      schemaVersion: SEMANTIC_GRAPH_SCHEMA_VERSION,
+      sourceSymbolIndexSchemaVersion: index.schemaVersion,
+      generatedAt: new Date().toISOString(),
+      edges: [],
+    };
+  }
 
   for (const target of exportedSymbols) {
     const repository = repositoriesById.get(target.repo);

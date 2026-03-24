@@ -89,6 +89,8 @@ function isFileRelation(value: unknown): value is FileRelation {
     (value.classification === 'source' ||
       value.classification === 'generated' ||
       value.classification === 'unknown') &&
+    (value.coverage === undefined || value.coverage === 'full' || value.coverage === 'partial') &&
+    (value.analysisWarnings === undefined || isStringArray(value.analysisWarnings)) &&
     isStringArray(value.symbolIds) &&
     isStringArray(value.symbolNames) &&
     Array.isArray(value.imports) &&
@@ -283,6 +285,8 @@ function normalizeFileRelationTable(value: unknown): Record<string, FileRelation
         repo: relation.repo,
         filePath: relation.filePath,
         classification: 'source',
+        coverage: 'partial',
+        analysisWarnings: ['legacy file relation normalized without parser-backed metadata'],
         symbolIds: [],
         symbolNames: relation.symbols,
         imports: [],

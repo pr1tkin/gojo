@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { evaluateHighRiskRefreshValidation } from '../../src/indexing/high-risk-validation.js';
 import { loadCurrentGenerationState } from '../../src/indexing/generation-store.js';
 import { runCurrentGenerationConsistencyMaintenance } from '../../src/indexing/consistency.js';
 import { getCurrentIndexHealth } from '../../src/indexing/health.js';
@@ -253,6 +254,195 @@ describe.sequential('high-risk post-refresh validation', () => {
     const state = await loadCurrentGenerationState();
 
     expect(state?.generationId).toBe(first.diagnostics.generationId);
+  });
+
+  it('does not treat explicitly skipped coverage files as missing symbol-index corruption during high-risk validation', () => {
+    const validation = evaluateHighRiskRefreshValidation({
+      checkedAt: '2026-03-23T17:00:00.000Z',
+      current: {
+        schemaVersion: 3,
+        generationId: 'gen-1',
+        reposRoot: '/repos',
+        repositories: [{ repoId: 'app-repo', repoRoot: '/repos/app-repo' }],
+        createdAt: '2026-03-23T17:00:00.000Z',
+        status: 'ready',
+        manifest: [
+          {
+            key: 'app-repo/src/kept.ts',
+            repoId: 'app-repo',
+            repoRoot: '/repos/app-repo',
+            filePath: 'src/kept.ts',
+            normalizedPath: 'src/kept.ts',
+            fileSizeBytes: 10,
+            contentHash: 'a',
+          },
+          {
+            key: 'app-repo/bench/ignored.ts',
+            repoId: 'app-repo',
+            repoRoot: '/repos/app-repo',
+            filePath: 'bench/ignored.ts',
+            normalizedPath: 'bench/ignored.ts',
+            fileSizeBytes: 10,
+            contentHash: 'b',
+          },
+        ],
+        delta: { added: 2, modified: 0, deleted: 0 },
+        counts: {
+          files: 1,
+          symbols: 1,
+          fileRecords: 1,
+          graphFiles: 1,
+          graphSymbols: 1,
+          graphEdges: 0,
+          uiCompositionEdges: 0,
+          uiPropUsages: 0,
+          patterns: 0,
+        },
+        rebuild: {
+          symbolFilesRebuilt: 2,
+          patternFilesRebuilt: 1,
+          graphMode: 'full',
+          uiCompositionMode: 'full',
+          uiPropsMode: 'full',
+        },
+        cleanup: {
+          deletedFileRecordsRemoved: 0,
+          deletedSymbolsRemoved: 0,
+          deletedPatternEntriesRemoved: 0,
+        },
+        changeSummary: {
+          filesChanged: 2,
+          added: 2,
+          modified: 0,
+          deleted: 0,
+          highRiskFiles: 1,
+          signalCounts: { unknownStructuralChange: 1 },
+          impactHintCounts: {},
+        },
+        search: {
+          status: 'ready',
+          requestedAt: '2026-03-23T17:00:00.000Z',
+          refreshedAt: '2026-03-23T17:00:01.000Z',
+          aggregateFingerprint: 'fp',
+          repoFingerprints: [],
+          coordinationMode: 'shared-marker',
+        },
+        indexingCoverage: {
+          schemaVersion: 1,
+          generatedAt: '2026-03-23T17:00:00.000Z',
+          totalSourceFiles: 2,
+          fullyIndexedFiles: 1,
+          partialFiles: 0,
+          skippedFiles: 1,
+          trustImpact: 'none',
+          issueCounts: {
+            parserFailures: 0,
+            readFailures: 0,
+            metadataFallbacks: 0,
+            policySkipped: 1,
+          },
+          issues: [
+            {
+              repoId: 'app-repo',
+              filePath: 'bench/ignored.ts',
+              fileId: 'app-repo:bench/ignored.ts',
+              classification: 'source',
+              language: 'ts',
+              stage: 'symbol_extraction',
+              disposition: 'skipped',
+              source: 'policy',
+              reason: 'skipped benchmark harness source outside the main application surface',
+            },
+          ],
+          omittedIssueCount: 0,
+        },
+        warnings: [],
+        errors: [],
+      },
+      changeSummary: {
+        schemaVersion: 1,
+        generatedAt: '2026-03-23T17:00:00.000Z',
+        files: [
+          {
+            key: 'app-repo/bench/ignored.ts',
+            repoId: 'app-repo',
+            filePath: 'bench/ignored.ts',
+            changeKind: 'added',
+            confidence: 'low',
+            signals: ['unknownStructuralChange'],
+            impactHints: ['highRiskStructuralChange'],
+            notes: [],
+          },
+        ],
+        overview: {
+          filesChanged: 2,
+          added: 2,
+          modified: 0,
+          deleted: 0,
+          highRiskFiles: 1,
+          signalCounts: { unknownStructuralChange: 1 },
+          impactHintCounts: {},
+        },
+      },
+      baseline: null,
+      symbolIndex: {
+        schemaVersion: 4,
+        symbols: [],
+        byName: Object.create(null),
+        byNameLower: Object.create(null),
+        byFile: {
+          'app-repo:src/kept.ts': {
+            fileId: 'app-repo:src/kept.ts',
+            repo: 'app-repo',
+            filePath: 'src/kept.ts',
+            classification: 'source',
+            coverage: 'full',
+            symbolIds: [],
+            symbolNames: [],
+            imports: [],
+            exports: [],
+            importTokens: [],
+          },
+        },
+        stats: {
+          globalByName: Object.create(null),
+          globalByNameLower: Object.create(null),
+          byRepo: Object.create(null),
+          exportedByName: Object.create(null),
+          byKind: Object.create(null),
+        },
+      },
+      graph: {
+        schemaVersion: 1,
+        generatedAt: '2026-03-23T17:00:00.000Z',
+        nodes: {
+          repos: { 'repo:app-repo': { id: 'repo:app-repo', type: 'repo', repo: 'app-repo' } },
+          files: { 'app-repo:src/kept.ts': { id: 'app-repo:src/kept.ts', type: 'file', repo: 'app-repo', filePath: 'src/kept.ts' } },
+          symbols: {},
+        },
+        edges: [],
+      },
+      uiComposition: {
+        schemaVersion: 1,
+        sourceSymbolIndexSchemaVersion: 4,
+        generatedAt: '2026-03-23T17:00:00.000Z',
+        edges: [],
+      },
+      uiProps: {
+        schemaVersion: 1,
+        sourceSymbolIndexSchemaVersion: 4,
+        generatedAt: '2026-03-23T17:00:00.000Z',
+        propUsages: [],
+      },
+      patternIndex: {
+        schemaVersion: 1,
+        sourceSymbolIndexSchemaVersion: 4,
+        generatedAt: '2026-03-23T17:00:00.000Z',
+        patterns: [],
+      },
+    });
+
+    expect(validation.issues.find((issue) => issue.code === 'missing-symbol-relations')).toBeUndefined();
   });
 
   it('blocks publish when a high-risk refresh produces a catastrophic symbol-count regression', async () => {

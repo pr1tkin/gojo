@@ -174,6 +174,7 @@ function determineTrustState(input: {
   search: SearchFreshnessState | null;
   consistency: ConsistencyRunReport | null;
   changeSummary: GenerationChangeSummary | null;
+  indexingCoverageTrustImpact: 'none' | 'degraded';
   refreshFailure: RefreshFailureRecord | null;
   warnings: string[];
   errors: string[];
@@ -196,6 +197,10 @@ function determineTrustState(input: {
   }
 
   if (input.criticalDataTrustImpact === 'degraded') {
+    return 'degraded';
+  }
+
+  if (input.indexingCoverageTrustImpact === 'degraded') {
     return 'degraded';
   }
 
@@ -406,6 +411,29 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     }
   }
 
+  if (state.indexingCoverage) {
+    if (state.indexingCoverage.partialFiles > 0) {
+      warnings.push(
+        `symbol indexing fell back to partial coverage for ${state.indexingCoverage.partialFiles} file(s)`,
+      );
+      reasons.push(
+        `partial indexing coverage remains for ${state.indexingCoverage.partialFiles} file or stage issue(s)`,
+      );
+    }
+
+    if (state.indexingCoverage.skippedFiles > 0) {
+      warnings.push(
+        `symbol indexing skipped ${state.indexingCoverage.skippedFiles} explicitly filtered file(s)`,
+      );
+    }
+
+    if (state.indexingCoverage.omittedIssueCount > 0) {
+      warnings.push(
+        `symbol indexing omitted ${state.indexingCoverage.omittedIssueCount} additional issue record(s) from persisted coverage details`,
+      );
+    }
+  }
+
   if (!changeSummaryStatus.exists) {
     warnings.push('change summary artifact is unavailable for the current generation');
   }
@@ -508,6 +536,7 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     search,
     consistency,
     changeSummary,
+    indexingCoverageTrustImpact: state.indexingCoverage?.trustImpact ?? 'none',
     refreshFailure: activeRefreshFailure,
     warnings,
     errors,
@@ -540,6 +569,7 @@ export async function getCurrentIndexHealth(): Promise<IndexHealthSummary> {
     search,
     changeSummary,
     consistency,
+    indexingCoverage: state.indexingCoverage,
     recentActivity,
     lastRefreshFailure: activeRefreshFailure,
     trustState,

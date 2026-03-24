@@ -6,7 +6,7 @@ import { listRepositories } from '../repositories.js';
 import { loadRepoResolutionConfigs, type RepoResolutionConfig } from '../graph/repo-config.js';
 import { collectRepositorySourceFiles } from '../symbol-index/build-index.js';
 import { createFileId } from '../symbol-index/ids.js';
-import type { IndexedSymbol, SymbolIndex } from '../symbol-index/types.js';
+import type { IndexedSymbol, SymbolIndex, SymbolIndexCoverageIssue } from '../symbol-index/types.js';
 import { parseTypeScriptSource } from '../tree-sitter.js';
 import {
   extractChildComponentCandidate,
@@ -163,7 +163,10 @@ function dedupePropUsages(propUsages: UiPropUsage[]): UiPropUsage[] {
 export async function buildUiPropSurfaceIndex(
   reposRoot: string,
   index: SymbolIndex,
-  options: { repoConfigById?: Record<string, RepoResolutionConfig> } = {},
+  options: {
+    repoConfigById?: Record<string, RepoResolutionConfig>;
+    onIssue?: (issue: SymbolIndexCoverageIssue) => void;
+  } = {},
 ): Promise<UiPropSurfaceIndex> {
   const repositories = await listRepositories(reposRoot);
   const repoConfigById =
@@ -183,16 +186,30 @@ export async function buildUiPropSurfaceIndex(
         continue;
       }
 
-      const absolutePath = path.join(repository.rootPath, filePath);
-      const source = await fs.readFile(absolutePath, 'utf8');
-      const tree = parseTypeScriptSource(filePath, source);
-      const fileSymbols = index.symbols.filter((symbol) => symbol.fileId === relation.fileId);
+      try {
+        const absolutePath = path.join(repository.rootPath, filePath);
+        const source = await fs.readFile(absolutePath, 'utf8');
+        const tree = parseTypeScriptSource(filePath, source);
+        const fileSymbols = index.symbols.filter((symbol) => symbol.fileId === relation.fileId);
 
-      walkJsxNodes(tree.rootNode, (node) => {
-        propUsages.push(
-          ...createPropUsagesForNode(relation, fileSymbols, node, source, index, repoConfigById),
-        );
-      });
+        walkJsxNodes(tree.rootNode, (node) => {
+          propUsages.push(
+            ...createPropUsagesForNode(relation, fileSymbols, node, source, index, repoConfigById),
+          );
+        });
+      } catch (error) {
+        options.onIssue?.({
+          repoId: relation.repo,
+          filePath: relation.filePath,
+          fileId: relation.fileId,
+          classification: relation.classification,
+          language: filePath.toLowerCase().endsWith('.tsx') ? 'tsx' : 'jsx',
+          stage: 'ui_props',
+          disposition: 'partial',
+          source: error instanceof Error && error.message ? 'parser' : 'io',
+          reason: error instanceof Error && error.message ? error.message : 'UI prop extraction failed',
+        });
+      }
     }
   }
 

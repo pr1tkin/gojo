@@ -285,6 +285,44 @@ export interface HighRiskRefreshValidationAssessment {
   issues: HighRiskRefreshValidationIssue[];
 }
 
+export interface GenerationIndexingCoverageIssue {
+  repoId: string;
+  filePath: string;
+  fileId?: string;
+  classification: 'source' | 'generated' | 'unknown';
+  language: 'ts' | 'tsx' | 'js' | 'jsx' | 'unknown';
+  stage:
+    | 'read'
+    | 'symbol_extraction'
+    | 'file_metadata'
+    | 'pattern_extraction'
+    | 'semantic_graph'
+    | 'ui_composition'
+    | 'ui_props'
+    | 'ui_semantics';
+  disposition: 'partial' | 'skipped';
+  source: 'io' | 'parser' | 'policy';
+  reason: string;
+}
+
+export interface GenerationIndexingCoverage {
+  schemaVersion: number;
+  generatedAt: string;
+  totalSourceFiles: number;
+  fullyIndexedFiles: number;
+  partialFiles: number;
+  skippedFiles: number;
+  trustImpact: 'none' | 'degraded';
+  issueCounts: {
+    parserFailures: number;
+    readFailures: number;
+    metadataFallbacks: number;
+    policySkipped: number;
+  };
+  issues: GenerationIndexingCoverageIssue[];
+  omittedIssueCount: number;
+}
+
 export interface IndexGenerationState {
   schemaVersion: number;
   generationId: string;
@@ -306,6 +344,7 @@ export interface IndexGenerationState {
   search: SearchFreshnessState;
   patternIntegrity?: PatternIntegrityAssessment;
   highRiskRefreshValidation?: HighRiskRefreshValidationAssessment;
+  indexingCoverage?: GenerationIndexingCoverage;
   warnings: string[];
   errors: string[];
 }
@@ -416,6 +455,7 @@ export interface IndexHealthSummary {
   search: SearchFreshnessState | null;
   changeSummary: GenerationChangeSummary | null;
   consistency: ConsistencyRunReport | null;
+  indexingCoverage?: GenerationIndexingCoverage;
   recentActivity: IndexHealthRecentActivity;
   lastRefreshFailure?: RefreshFailureRecord | null;
   trustState: IndexHealthTrustState;

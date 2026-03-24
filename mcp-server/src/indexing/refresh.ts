@@ -11,7 +11,7 @@ import { loadPatternIndexResult } from '../patterns/store.js';
 import { runPatternExtractionStage } from '../patterns/stage.js';
 import type { PatternIndex } from '../patterns/types.js';
 import { listRepositories } from '../repositories.js';
-import { buildIndexedSymbols, collectRepositorySourceFiles } from '../symbol-index/build-index.js';
+import { buildIndexedSymbolsWithCoverage, collectRepositorySourceFiles } from '../symbol-index/build-index.js';
 import { createFileId } from '../symbol-index/ids.js';
 import { loadSymbolIndex } from '../symbol-index/store.js';
 import type { IndexedSymbol, SymbolFrequencyStats, SymbolIndex } from '../symbol-index/types.js';
@@ -64,6 +64,8 @@ import { synchronizeSearchIndexes } from '../runtime/search-service.js';
 import { SearchHelperError } from '../search/helpers.js';
 import type {
   FileFingerprintManifestEntry,
+  GenerationIndexingCoverage,
+  GenerationIndexingCoverageIssue,
   IndexGenerationCleanupSummary,
   IndexGenerationCounts,
   IndexGenerationRebuildSummary,
@@ -74,7 +76,7 @@ import type {
   GenerationChangeSummary,
 } from './types.js';
 
-const INDEX_GENERATION_STATE_SCHEMA_VERSION = 2;
+const INDEX_GENERATION_STATE_SCHEMA_VERSION = 3;
 
 export interface RefreshIndexesOptions {
   logger?: Pick<Console, 'info' | 'warn' | 'error'>;
@@ -359,6 +361,35 @@ function createCounts(
   };
 }
 
+function appendIndexingCoverageIssue(
+  coverage: GenerationIndexingCoverage,
+  issue: GenerationIndexingCoverageIssue,
+): void {
+  if (coverage.issues.length < 200) {
+    coverage.issues.push(issue);
+  } else {
+    coverage.omittedIssueCount += 1;
+  }
+
+  if (issue.disposition === 'skipped') {
+    coverage.skippedFiles += 1;
+  } else {
+    coverage.partialFiles += 1;
+    coverage.trustImpact = 'degraded';
+  }
+
+  if (issue.source === 'parser' && issue.stage === 'file_metadata') {
+    coverage.issueCounts.metadataFallbacks += 1;
+  } else if (issue.source === 'parser') {
+    coverage.issueCounts.parserFailures += 1;
+  } else if (issue.source === 'io') {
+    coverage.issueCounts.readFailures += 1;
+    coverage.trustImpact = 'degraded';
+  } else if (issue.source === 'policy') {
+    coverage.issueCounts.policySkipped += 1;
+  }
+}
+
 function logDiagnostics(
   logger: Pick<Console, 'info' | 'warn' | 'error'>,
   diagnostics: IndexRefreshDiagnostics,
@@ -502,7 +533,7 @@ async function refreshIndexesUnlocked(
   try {
     const changedOrAddedKeys = new Set([...delta.added, ...delta.modified]);
     const deletedKeys = new Set(delta.deleted);
-    const freshSymbolIndex = await buildIndexedSymbols(reposRoot);
+    const { index: freshSymbolIndex, coverage: indexingCoverage } = await buildIndexedSymbolsWithCoverage(reposRoot);
     await applyRefreshFaultInjection(faultInjection, {
       stage: 'rebuild-symbols',
       generationId,
@@ -517,7 +548,9 @@ async function refreshIndexesUnlocked(
       changedOrAddedKeys,
       deletedKeys,
     );
-    const extractedPatternIndex = await runPatternExtractionStage(reposRoot, mergedSymbolIndex);
+    const extractedPatternIndex = await runPatternExtractionStage(reposRoot, mergedSymbolIndex, {
+      onIssue: (issue) => appendIndexingCoverageIssue(indexingCoverage, issue),
+    });
     await applyRefreshFaultInjection(faultInjection, {
       stage: 'rebuild-patterns',
       generationId,
@@ -578,6 +611,18 @@ async function refreshIndexesUnlocked(
       'code graph and UI artifacts rebuild globally on changed generations to keep cross-file resolution deterministic',
     );
 
+    if (indexingCoverage.partialFiles > 0) {
+      warnings.push(
+        `indexing completed with partial coverage for ${indexingCoverage.partialFiles} source file(s); parser-backed extraction was degraded for those files`,
+      );
+    }
+
+    if (indexingCoverage.skippedFiles > 0) {
+      warnings.push(
+        `symbol indexing skipped ${indexingCoverage.skippedFiles} low-value source file(s) by explicit policy`,
+      );
+    }
+
     if (previousPatternLoadResult && previousPatternLoadResult.status !== 'ok') {
       warnings.push(
         `previous pattern artifact was ${previousPatternLoadResult.status}: ${previousPatternLoadResult.reason}; refresh rebuilt patterns from the current symbol index instead of trusting persisted pattern state`,
@@ -598,15 +643,24 @@ async function refreshIndexesUnlocked(
         rootPath: repository.repoRoot,
         isGitRepository: true,
       })),
+      {
+        onIssue: (issue) => appendIndexingCoverageIssue(indexingCoverage, issue),
+      },
     );
     await applyRefreshFaultInjection(faultInjection, {
       stage: 'rebuild-graph',
       generationId,
       logger,
     });
-    const uiComposition = await buildUiCompositionIndex(reposRoot, mergedSymbolIndex);
-    const uiProps = await buildUiPropSurfaceIndex(reposRoot, mergedSymbolIndex);
-    const uiSemantics = await buildUiSemanticsIndex(reposRoot);
+    const uiComposition = await buildUiCompositionIndex(reposRoot, mergedSymbolIndex, {
+      onIssue: (issue) => appendIndexingCoverageIssue(indexingCoverage, issue),
+    });
+    const uiProps = await buildUiPropSurfaceIndex(reposRoot, mergedSymbolIndex, {
+      onIssue: (issue) => appendIndexingCoverageIssue(indexingCoverage, issue),
+    });
+    const uiSemantics = await buildUiSemanticsIndex(reposRoot, {
+      onIssue: (issue) => appendIndexingCoverageIssue(indexingCoverage, issue),
+    });
     const mutatedArtifacts =
       (await options.testHooks?.mutateDerivedArtifacts?.({
         reposRoot: path.resolve(reposRoot),
@@ -721,6 +775,7 @@ async function refreshIndexesUnlocked(
       search,
       patternIntegrity,
       highRiskRefreshValidation: undefined,
+      indexingCoverage,
       warnings,
       errors: [],
     };

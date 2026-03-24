@@ -101,6 +101,14 @@ function collectManifestFileIds(current: IndexGenerationState): Set<string> {
   return new Set(current.manifest.map((entry) => `${entry.repoId}:${entry.filePath}`));
 }
 
+function collectExplicitCoverageExemptions(current: IndexGenerationState): Set<string> {
+  return new Set(
+    (current.indexingCoverage?.issues ?? [])
+      .filter((issue) => typeof issue.fileId === 'string' && issue.fileId.length > 0)
+      .map((issue) => issue.fileId as string),
+  );
+}
+
 function getUiRelatedChangedFiles(changeSummary: GenerationChangeSummary): RepositoryFileChangeRecord[] {
   return changeSummary.files.filter(
     (file) =>
@@ -138,18 +146,25 @@ export function evaluateHighRiskRefreshValidation(options: {
 
   const issues: HighRiskRefreshValidationIssue[] = [];
   const manifestFileIds = collectManifestFileIds(current);
+  const explicitCoverageExemptions = collectExplicitCoverageExemptions(current);
   const symbolFileIds = new Set(Object.keys(symbolIndex.byFile));
   const missingRelations = current.manifest
     .filter((entry) => !symbolFileIds.has(`${entry.repoId}:${entry.filePath}`))
+    .filter((entry) => !explicitCoverageExemptions.has(`${entry.repoId}:${entry.filePath}`))
     .map((entry) => entry.key);
+  const allowableMissingRelationCount = current.indexingCoverage?.skippedFiles ?? 0;
+  const unresolvedMissingRelations =
+    missingRelations.length > allowableMissingRelationCount
+      ? missingRelations.slice(0, missingRelations.length - allowableMissingRelationCount)
+      : [];
 
-  if (missingRelations.length > 0) {
+  if (unresolvedMissingRelations.length > 0) {
     issues.push(
       createIssue(
         'missing-symbol-relations',
         'error',
         'high-risk refresh left manifest files without symbol-index relations',
-        `${missingRelations.length} manifest file(s) were missing from symbol-index.json after a high-risk refresh (${missingRelations.slice(0, 5).join(', ')})`,
+        `${unresolvedMissingRelations.length} manifest file(s) were missing from symbol-index.json beyond the explicit skipped-file allowance after a high-risk refresh (${unresolvedMissingRelations.slice(0, 5).join(', ')})`,
         'rebuild the generation and verify the symbol index completed before publish',
       ),
     );

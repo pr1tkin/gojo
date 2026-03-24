@@ -4,6 +4,7 @@ import type Parser from 'tree-sitter';
 
 import { listRepositories } from '../repositories.js';
 import { collectRepositorySourceFiles } from '../symbol-index/build-index.js';
+import type { SymbolIndexCoverageIssue } from '../symbol-index/types.js';
 import { parseTypeScriptSource } from '../tree-sitter.js';
 import { getJsxOpeningNode, getNodeText, isPascalCaseComponentName } from '../ui-composition/shared.js';
 import { getGenerationArtifactFilePath } from './generation-store.js';
@@ -310,7 +311,12 @@ function buildUiSemanticFileSummary(
   };
 }
 
-export async function buildUiSemanticsIndex(reposRoot: string): Promise<UiSemanticsIndex> {
+export async function buildUiSemanticsIndex(
+  reposRoot: string,
+  options: {
+    onIssue?: (issue: SymbolIndexCoverageIssue) => void;
+  } = {},
+): Promise<UiSemanticsIndex> {
   const repositories = await listRepositories(reposRoot);
   const files: Record<string, UiSemanticFileSummary> = {};
 
@@ -320,10 +326,24 @@ export async function buildUiSemanticsIndex(reposRoot: string): Promise<UiSemant
     const sourceFiles = (await collectRepositorySourceFiles(repoRoot, repoId)).filter(isUiSourceFile);
 
     for (const filePath of sourceFiles) {
-      const absolutePath = path.join(repoRoot, filePath);
-      const source = await fs.readFile(absolutePath, 'utf8');
-      const tree = parseTypeScriptSource(filePath, source);
-      files[`${repoId}/${filePath}`] = buildUiSemanticFileSummary(repoId, filePath, tree, source);
+      try {
+        const absolutePath = path.join(repoRoot, filePath);
+        const source = await fs.readFile(absolutePath, 'utf8');
+        const tree = parseTypeScriptSource(filePath, source);
+        files[`${repoId}/${filePath}`] = buildUiSemanticFileSummary(repoId, filePath, tree, source);
+      } catch (error) {
+        options.onIssue?.({
+          repoId,
+          filePath,
+          fileId: `${repoId}:${filePath}`,
+          classification: 'source',
+          language: 'tsx',
+          stage: 'ui_semantics',
+          disposition: 'partial',
+          source: error instanceof Error && error.message ? 'parser' : 'io',
+          reason: error instanceof Error && error.message ? error.message : 'UI semantics extraction failed',
+        });
+      }
     }
   }
 

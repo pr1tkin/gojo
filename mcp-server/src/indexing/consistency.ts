@@ -15,6 +15,7 @@ import type { SemanticGraphSnapshot } from '../graph/semantic-types.js';
 import type { CodeGraphSnapshot } from '../graph/types.js';
 import { loadPatternIndexResult, savePatternIndex } from '../patterns/store.js';
 import type { PatternIndex } from '../patterns/types.js';
+import { getSymbolIndexSkipReason } from '../symbol-index/build-index.js';
 import { loadSymbolIndex, saveSymbolIndex } from '../symbol-index/store.js';
 import type { IndexedSymbol, SymbolFrequencyStats, SymbolIndex } from '../symbol-index/types.js';
 import { loadUiCompositionIndex, saveUiCompositionIndex } from '../ui-composition/store.js';
@@ -292,6 +293,14 @@ function normalizeFileId(repoId: string, filePath: string): string {
   return `${repoId}:${filePath}`;
 }
 
+function collectExplicitCoverageExemptions(state: IndexGenerationState): Set<string> {
+  return new Set(
+    (state.indexingCoverage?.issues ?? [])
+      .filter((issue) => typeof issue.fileId === 'string' && issue.fileId.length > 0)
+      .map((issue) => issue.fileId as string),
+  );
+}
+
 function createManifestFileMapsFromRelations(symbolIndex: SymbolIndex): Map<string, string> {
   const paths = new Map<string, string>();
 
@@ -398,10 +407,17 @@ export async function runCurrentGenerationConsistencyMaintenance(
     'artifact',
   );
   const manifestFileIds = new Set(generationState.manifest.map((entry) => normalizeFileId(entry.repoId, entry.filePath)));
+  const explicitCoverageExemptions = collectExplicitCoverageExemptions(generationState);
   const byFileIds = new Set(Object.keys(symbolIndex.byFile));
   const missingRelations = generationState.manifest
     .filter((entry) => !byFileIds.has(normalizeFileId(entry.repoId, entry.filePath)))
+    .filter((entry) => !explicitCoverageExemptions.has(normalizeFileId(entry.repoId, entry.filePath)))
     .map((entry) => `${entry.repoId}/${entry.filePath}`);
+  const allowableMissingRelationCount = generationState.indexingCoverage?.skippedFiles ?? 0;
+  const unresolvedMissingRelations =
+    missingRelations.length > allowableMissingRelationCount
+      ? missingRelations.slice(0, missingRelations.length - allowableMissingRelationCount)
+      : [];
   const relationSymbolGaps = Object.values(symbolIndex.byFile)
     .filter((relation) => relation.symbolIds.length > 0)
     .filter((relation) => symbolIndex.symbols.filter((symbol) => symbol.fileId === relation.fileId).length === 0)
@@ -409,6 +425,8 @@ export async function runCurrentGenerationConsistencyMaintenance(
   const riskyMissingUiOrPattern = (changeSummaryStatus.value?.files ?? [])
     .filter((file) => file.changeKind !== 'deleted')
     .filter((file) => file.signals.includes('unknownStructuralChange') || file.impactHints.includes('highRiskStructuralChange'))
+    .filter((file) => !explicitCoverageExemptions.has(normalizeFileId(file.repoId, file.filePath)))
+    .filter((file) => getSymbolIndexSkipReason(file.filePath) === null)
     .filter((file) => {
       const hasPattern = patternIndex.patterns.some(
         (pattern) => pattern.repoId === file.repoId && pattern.fileId === normalizeFileId(file.repoId, file.filePath),
@@ -417,16 +435,16 @@ export async function runCurrentGenerationConsistencyMaintenance(
     })
     .map((file) => file.key);
 
-  if (missingRelations.length > 0 || relationSymbolGaps.length > 0 || riskyMissingUiOrPattern.length > 0) {
+  if (unresolvedMissingRelations.length > 0 || relationSymbolGaps.length > 0 || riskyMissingUiOrPattern.length > 0) {
     structuralCheck.status = 'failed';
     structuralCheck.summary = 'published structure artifacts are missing expected file-level records';
     structuralCheck.affectedFiles = sortStrings([
-      ...missingRelations,
+      ...unresolvedMissingRelations,
       ...relationSymbolGaps,
       ...riskyMissingUiOrPattern,
     ]);
     structuralCheck.details = [
-      ...missingRelations.map((file) => `${file} is present in the manifest but missing a file relation in symbol-index.json`),
+      ...unresolvedMissingRelations.map((file) => `${file} is present in the manifest but missing a file relation in symbol-index.json`),
       ...relationSymbolGaps.map((file) => `${file} declares symbol ids but no symbols exist for that file`),
       ...riskyMissingUiOrPattern.map((file) => `${file} was marked high-risk during refresh but no pattern artifacts were published for the file`),
     ];

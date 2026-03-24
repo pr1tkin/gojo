@@ -53,6 +53,8 @@ export interface FileRelation {
   repo: string;
   filePath: string;
   classification: FileClassification;
+  coverage?: 'full' | 'partial';
+  analysisWarnings?: string[];
   symbolIds: string[];
   symbolNames: string[];
   imports: ImportRecord[];
@@ -75,4 +77,51 @@ export interface SymbolIndex {
   byNameLower: Record<string, IndexedSymbol[]>;
   byFile: Record<string, FileRelation>;
   stats: SymbolFrequencyStats;
+}
+
+export type SymbolIndexCoverageIssueStage =
+  | 'read'
+  | 'symbol_extraction'
+  | 'file_metadata'
+  | 'pattern_extraction'
+  | 'semantic_graph'
+  | 'ui_composition'
+  | 'ui_props'
+  | 'ui_semantics';
+export type SymbolIndexCoverageIssueDisposition = 'partial' | 'skipped';
+export type SymbolIndexCoverageIssueSource = 'io' | 'parser' | 'policy';
+
+export interface SymbolIndexCoverageIssue {
+  repoId: string;
+  filePath: string;
+  fileId?: string;
+  classification: FileClassification;
+  language: IndexedFileMetadata['language'];
+  stage: SymbolIndexCoverageIssueStage;
+  disposition: SymbolIndexCoverageIssueDisposition;
+  source: SymbolIndexCoverageIssueSource;
+  reason: string;
+}
+
+export interface SymbolIndexCoverageSummary {
+  schemaVersion: number;
+  generatedAt: string;
+  totalSourceFiles: number;
+  fullyIndexedFiles: number;
+  partialFiles: number;
+  skippedFiles: number;
+  trustImpact: 'none' | 'degraded';
+  issueCounts: {
+    parserFailures: number;
+    readFailures: number;
+    metadataFallbacks: number;
+    policySkipped: number;
+  };
+  issues: SymbolIndexCoverageIssue[];
+  omittedIssueCount: number;
+}
+
+export interface SymbolIndexBuildResult {
+  index: SymbolIndex;
+  coverage: SymbolIndexCoverageSummary;
 }

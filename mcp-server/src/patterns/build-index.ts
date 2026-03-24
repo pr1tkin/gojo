@@ -5,7 +5,12 @@ import { readRepositoryFile } from '../files.js';
 import { listRepositories } from '../repositories.js';
 import { parseTypeScriptSource } from '../tree-sitter.js';
 import type { SymbolKind } from '../types.js';
-import type { FileRelation, IndexedSymbol, SymbolIndex } from '../symbol-index/types.js';
+import type {
+  FileRelation,
+  IndexedSymbol,
+  SymbolIndex,
+  SymbolIndexCoverageIssue,
+} from '../symbol-index/types.js';
 import {
   createEmptyPatternIndex,
   createPatternCandidate,
@@ -1104,6 +1109,16 @@ function collectPatternsForFile(
 }
 
 export async function buildPatternIndex(reposRoot: string, index: SymbolIndex): Promise<PatternIndex> {
+  return buildPatternIndexWithOptions(reposRoot, index, {});
+}
+
+export async function buildPatternIndexWithOptions(
+  reposRoot: string,
+  index: SymbolIndex,
+  options: {
+    onIssue?: (issue: SymbolIndexCoverageIssue) => void;
+  } = {},
+): Promise<PatternIndex> {
   const repositories = await listRepositories(reposRoot);
   const repositoryById = new Map(repositories.map((repository) => [repository.id, repository]));
   let patternIndex = createEmptyPatternIndex(index.schemaVersion, new Date().toISOString());
@@ -1125,12 +1140,26 @@ export async function buildPatternIndex(reposRoot: string, index: SymbolIndex): 
       continue;
     }
 
-    const file = await readRepositoryFile(repository, relation.filePath);
-    const symbols = index.symbols.filter((entry) => entry.fileId === relation.fileId);
-    const candidates = collectPatternsForFile(relation, file.content, symbols, index.byFile);
+    try {
+      const file = await readRepositoryFile(repository, relation.filePath);
+      const symbols = index.symbols.filter((entry) => entry.fileId === relation.fileId);
+      const candidates = collectPatternsForFile(relation, file.content, symbols, index.byFile);
 
-    for (const candidate of candidates) {
-      patternIndex = registerPatternCandidateInIndex(patternIndex, candidate);
+      for (const candidate of candidates) {
+        patternIndex = registerPatternCandidateInIndex(patternIndex, candidate);
+      }
+    } catch (error) {
+      options.onIssue?.({
+        repoId: relation.repo,
+        filePath: relation.filePath,
+        fileId: relation.fileId,
+        classification: relation.classification,
+        language: getLanguage(relation.filePath),
+        stage: 'pattern_extraction',
+        disposition: 'partial',
+        source: error instanceof Error && error.message ? 'parser' : 'io',
+        reason: error instanceof Error && error.message ? error.message : 'pattern extraction failed',
+      });
     }
   }
 

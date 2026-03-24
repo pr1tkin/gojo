@@ -31,6 +31,33 @@ function inferResolvedKind(source: string): ImportRecord['resolvedKind'] {
   return 'unknown';
 }
 
+function createPartialFileRelation(
+  fileId: string,
+  repo: string,
+  filePath: string,
+  classification: FileClassification,
+  symbols: IndexedSymbol[],
+  imports: ImportRecord[],
+  exports: ExportRecord[],
+  warning: string,
+): FileRelation {
+  return {
+    fileId,
+    repo,
+    filePath,
+    classification,
+    coverage: 'partial',
+    analysisWarnings: [warning],
+    symbolIds: symbols.map((symbol) => symbol.symbolId),
+    symbolNames: Array.from(new Set(symbols.map((symbol) => symbol.name))).sort((left, right) =>
+      left.localeCompare(right),
+    ),
+    imports,
+    exports,
+    importTokens: collectImportTokens(imports),
+  };
+}
+
 function parseNamedBinding(bindingText: string, statementTypeOnly: boolean): ImportBinding | null {
   const trimmed = bindingText.trim();
 
@@ -403,6 +430,7 @@ export function extractFileMetadata(
     repo,
     filePath,
     classification,
+    coverage: 'full',
     symbolIds: symbols.map((symbol) => symbol.symbolId),
     symbolNames: Array.from(new Set(symbols.map((symbol) => symbol.name))).sort((left, right) =>
       left.localeCompare(right),
@@ -411,4 +439,47 @@ export function extractFileMetadata(
     exports,
     importTokens: collectImportTokens(imports),
   };
+}
+
+export function extractFileMetadataFallback(
+  fileId: string,
+  repo: string,
+  filePath: string,
+  classification: FileClassification,
+  source: string,
+  symbols: IndexedSymbol[],
+  warning: string,
+): FileRelation {
+  const imports: ImportRecord[] = [];
+  const exports: ExportRecord[] = [];
+
+  for (const line of source.split(/\r?\n/)) {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    const importRecord = parseImportRecord(trimmed, fileId);
+
+    if (importRecord) {
+      imports.push(importRecord);
+      continue;
+    }
+
+    if (trimmed.startsWith('export ')) {
+      exports.push(...parseExportRecord(trimmed, fileId, filePath, buildSymbolLookup(symbols)));
+    }
+  }
+
+  return createPartialFileRelation(
+    fileId,
+    repo,
+    filePath,
+    classification,
+    symbols,
+    imports,
+    exports,
+    warning,
+  );
 }
