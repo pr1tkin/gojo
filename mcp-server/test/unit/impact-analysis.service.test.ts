@@ -645,6 +645,117 @@ describe('impact analysis service', () => {
     );
   });
 
+  it('caps persisted semantic consumers while preserving strongest exact edges first', async () => {
+    const routeFile = fileNode('repo-a:app/api/widget/route.ts', 'repo-a', 'app/api/widget/route.ts');
+    const routeSymbol = symbolNode('route-get', routeFile.fileId, 'repo-a', routeFile.filePath, 'GET', 1, 3);
+    const extraFiles = Array.from({ length: 300 }, (_, index) =>
+      fileNode(`repo-a:src/generated/consumer-${index}.ts`, 'repo-a', `src/generated/consumer-${index}.ts`),
+    );
+
+    getImportingFilesMock.mockResolvedValue([]);
+    getReexportingFilesMock.mockResolvedValue([]);
+    getFileNodeMock.mockImplementation(async (fileId: string) => {
+      if (fileId === targetSymbol.fileId) {
+        return fileNode(targetSymbol.fileId, 'repo-a', targetSymbol.filePath);
+      }
+
+      if (fileId === routeFile.fileId) {
+        return routeFile;
+      }
+
+      return extraFiles.find((entry) => entry.fileId === fileId) ?? null;
+    });
+    getSemanticGraphMock.mockResolvedValue({
+      schemaVersion: 1,
+      sourceSymbolIndexSchemaVersion: 4,
+      generatedAt: '2026-03-23T00:00:00.000Z',
+      edges: [{}],
+    });
+    getIncomingSemanticEdgesForSymbolMock.mockImplementation(async (_symbolId: string, options?: { exactness?: string }) => {
+      if (options?.exactness === 'inferred') {
+        return [];
+      }
+
+      return [
+        {
+          edge: {
+            edgeId: 'exact-route',
+            kind: 'api_route_handler',
+            strength: 'strong',
+            confidence: 'high',
+            exactness: 'exact',
+            fromFileId: routeFile.fileId,
+            fromSymbolId: routeSymbol.symbolId,
+            toFileId: targetSymbol.fileId,
+            toSymbolId: targetSymbol.symbolId,
+            metadata: {
+              routeId: '/api/widget',
+              routeFileId: routeFile.fileId,
+              routeFilePath: routeFile.filePath,
+            },
+          },
+          fromFile: routeFile,
+          fromSymbol: routeSymbol,
+          toFile: fileNode(targetSymbol.fileId, 'repo-a', targetSymbol.filePath),
+          toSymbol: symbolNode(
+            targetSymbol.symbolId,
+            targetSymbol.fileId,
+            'repo-a',
+            targetSymbol.filePath,
+            targetSymbol.name,
+            targetSymbol.startLine,
+            targetSymbol.endLine,
+          ),
+        },
+        ...extraFiles.map((file, index) => ({
+          edge: {
+            edgeId: `type-${index}`,
+            kind: 'type_reference' as const,
+            strength: 'weak' as const,
+            confidence: 'medium' as const,
+            exactness: 'exact' as const,
+            fromFileId: file.fileId,
+            fromSymbolId: `consumer-symbol-${index}`,
+            toFileId: targetSymbol.fileId,
+            toSymbolId: targetSymbol.symbolId,
+            metadata: {},
+          },
+          fromFile: file,
+          fromSymbol: symbolNode(
+            `consumer-symbol-${index}`,
+            file.fileId,
+            'repo-a',
+            file.filePath,
+            `consumer${index}`,
+            1,
+            2,
+          ),
+          toFile: fileNode(targetSymbol.fileId, 'repo-a', targetSymbol.filePath),
+          toSymbol: symbolNode(
+            targetSymbol.symbolId,
+            targetSymbol.fileId,
+            'repo-a',
+            targetSymbol.filePath,
+            targetSymbol.name,
+            targetSymbol.startLine,
+            targetSymbol.endLine,
+          ),
+        })),
+      ];
+    });
+
+    const result = await analyzeSymbolImpact({
+      symbolId: targetSymbol.symbolId,
+      mode: 'safe',
+    });
+
+    expect(result.directConsumers.files[0]).toEqual(
+      expect.objectContaining({ filePath: routeFile.filePath }),
+    );
+    expect(result.directConsumers.files).toHaveLength(256);
+    expect(result.directConsumers.symbols).toHaveLength(256);
+  });
+
   it('resolves the target by filePath and symbolName', async () => {
     const result = await analyzeSymbolImpact({
       repoId: 'repo-a',

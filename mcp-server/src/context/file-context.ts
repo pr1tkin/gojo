@@ -5,6 +5,7 @@ import { getFileRelationById } from '../symbol-index/query.js';
 import type { FileRelation } from '../symbol-index/types.js';
 import type {
   AssembleFileContextOptions,
+  ExplorationBudget,
   FileContextConnectionKind,
   FileContextBundle,
   RelatedFileContextBucket,
@@ -15,6 +16,11 @@ import type {
 const DEFAULT_RELATED_LIMIT = 10;
 const EXACT_RELATED_LIMIT_FLOOR = 24;
 const INFERRED_RELATED_LIMIT_FLOOR = 8;
+const DEFAULT_EXPLORATION_BUDGET: ExplorationBudget = {
+  maxNodes: 480,
+  maxEdges: 3200,
+  maxDepth: 2,
+};
 
 function isNoisePath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
@@ -43,6 +49,26 @@ function hasMediumEdge(via: FileContextConnectionKind[]): boolean {
       'api_propagation',
     ].includes(kind),
   );
+}
+
+function edgeStrengthRank(kind: FileContextConnectionKind): number {
+  if (hasStrongEdge([kind])) {
+    return 3;
+  }
+
+  if (hasMediumEdge([kind])) {
+    return 2;
+  }
+
+  return 1;
+}
+
+function resolveExplorationBudget(options: AssembleFileContextOptions): ExplorationBudget {
+  return {
+    maxNodes: Math.max(1, options.explorationBudget?.maxNodes ?? DEFAULT_EXPLORATION_BUDGET.maxNodes),
+    maxEdges: Math.max(1, options.explorationBudget?.maxEdges ?? DEFAULT_EXPLORATION_BUDGET.maxEdges),
+    maxDepth: Math.max(1, options.explorationBudget?.maxDepth ?? DEFAULT_EXPLORATION_BUDGET.maxDepth),
+  };
 }
 
 function toConnectionKind(entry: Awaited<ReturnType<typeof getRelatedFiles>>[number]): FileContextConnectionKind {
@@ -220,6 +246,37 @@ function mergeReferenceSignals(
   }
 }
 
+function prioritizeCandidateFileIds(
+  signalsByFileId: Map<string, { edgeTypes: FileContextConnectionKind[]; connectionCount: number }>,
+  requestedLimit: number,
+  budget: ExplorationBudget,
+): string[] {
+  const candidateFloor = Math.max(requestedLimit * 6, EXACT_RELATED_LIMIT_FLOOR + INFERRED_RELATED_LIMIT_FLOOR);
+  const maxCandidates = Math.min(budget.maxNodes, Math.max(candidateFloor, requestedLimit * 12));
+
+  return Array.from(signalsByFileId.entries())
+    .map(([fileId, signal]) => {
+      const strongestEdgeRank = signal.edgeTypes.reduce((current, kind) => Math.max(current, edgeStrengthRank(kind)), 0);
+
+      return {
+        fileId,
+        strongestEdgeRank,
+        connectionCount: signal.connectionCount,
+        distinctEdgeCount: signal.edgeTypes.length,
+      };
+    })
+    .sort((left, right) => {
+      return (
+        right.strongestEdgeRank - left.strongestEdgeRank ||
+        right.connectionCount - left.connectionCount ||
+        right.distinctEdgeCount - left.distinctEdgeCount ||
+        left.fileId.localeCompare(right.fileId)
+      );
+    })
+    .slice(0, maxCandidates)
+    .map((entry) => entry.fileId);
+}
+
 function mapRankedRelatedFiles(
   ranked: ReturnType<typeof rankRelatedFileCandidates>,
   filesById: Map<string, FileNode>,
@@ -261,12 +318,20 @@ export async function assembleRelatedFileContext(
   }
 
   const relatedFiles = await getRelatedFiles(fileId);
+  const budget = resolveExplorationBudget(options);
   const signalsByFileId = buildGraphSignalsByFileId(relatedFiles);
   mergeReferenceSignals(signalsByFileId, options.referenceSignalsByFileId);
-  const filesById = new Map(relatedFiles.map((entry) => [entry.file.fileId, entry.file]));
+  const totalCandidateCount = signalsByFileId.size;
+  const candidateFileIds = prioritizeCandidateFileIds(signalsByFileId, options.relatedLimit ?? DEFAULT_RELATED_LIMIT, budget);
+  const candidateFileIdSet = new Set(candidateFileIds);
+  const filesById = new Map(
+    relatedFiles
+      .filter((entry) => candidateFileIdSet.has(entry.file.fileId))
+      .map((entry) => [entry.file.fileId, entry.file]),
+  );
   const candidateRelations: FileRelation[] = [];
 
-  for (const candidateFileId of signalsByFileId.keys()) {
+  for (const candidateFileId of candidateFileIds) {
     if (!filesById.has(candidateFileId)) {
       const file = await getFileNode(candidateFileId);
 
@@ -288,7 +353,7 @@ export async function assembleRelatedFileContext(
       relation,
       graphSignals: signalsByFileId.get(relation.fileId),
     })),
-    Number.MAX_SAFE_INTEGER,
+    Math.min(candidateRelations.length, budget.maxNodes),
   );
 
   const mapped = mapRankedRelatedFiles(ranked, filesById, signalsByFileId);
@@ -296,7 +361,7 @@ export async function assembleRelatedFileContext(
 
   return {
     items: bucketed.items,
-    totalCount: mapped.length,
+    totalCount: totalCandidateCount,
     buckets: bucketed.buckets,
   };
 }

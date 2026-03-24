@@ -11,9 +11,26 @@ import { loadRequiredSymbolIndex } from '../symbol-index/store.js';
 import type { FileRelation, IndexedSymbol } from '../symbol-index/types.js';
 import { collectApiPropagationForSymbol } from '../typescript/api-propagation.js';
 import { findTypeScriptReferencesForIndexedSymbol } from '../typescript/symbol-references.js';
-import type { FileContextConnectionKind, SymbolContextBundle, SymbolContextQuery } from './types.js';
+import type { ExplorationBudget, FileContextConnectionKind, SymbolContextBundle, SymbolContextQuery } from './types.js';
 import { assembleRelatedFileContext } from './file-context.js';
 import type { RelatedFileContextBuckets } from './types.js';
+
+const DEFAULT_REFERENCE_EXPLORATION_BUDGET: ExplorationBudget = {
+  maxNodes: 480,
+  maxEdges: 3200,
+  maxDepth: 2,
+};
+
+function confidenceRank(confidence: 'low' | 'medium' | 'high'): number {
+  switch (confidence) {
+    case 'high':
+      return 3;
+    case 'medium':
+      return 2;
+    case 'low':
+      return 1;
+  }
+}
 
 function buildFileFanInById(relationsByFile: Record<string, FileRelation>): Record<string, number> {
   const fanInById: Record<string, number> = Object.create(null);
@@ -124,8 +141,37 @@ function mapSemanticEdgeKindsToConnectionKinds(
   }
 }
 
+function semanticEdgePriority(
+  kind: Awaited<ReturnType<typeof getSemanticConsumersForSymbol>>[number]['edge']['kind'],
+): number {
+  switch (kind) {
+    case 'symbol_call':
+      return 7;
+    case 'api_route_handler':
+      return 6;
+    case 'symbol_reference':
+    case 'jsx_reference':
+      return 5;
+    case 'api_propagation':
+      return 4;
+    case 'api_client_to_route':
+      return 3;
+    case 'type_reference':
+      return 2;
+  }
+}
+
+function resolveExplorationBudget(query: SymbolContextQuery): ExplorationBudget {
+  return {
+    maxNodes: Math.max(1, query.explorationBudget?.maxNodes ?? DEFAULT_REFERENCE_EXPLORATION_BUDGET.maxNodes),
+    maxEdges: Math.max(1, query.explorationBudget?.maxEdges ?? DEFAULT_REFERENCE_EXPLORATION_BUDGET.maxEdges),
+    maxDepth: Math.max(1, query.explorationBudget?.maxDepth ?? DEFAULT_REFERENCE_EXPLORATION_BUDGET.maxDepth),
+  };
+}
+
 async function buildPersistedReferenceSignalsByFileId(
   primarySymbol: IndexedSymbol,
+  budget: ExplorationBudget,
 ): Promise<Record<string, { kinds: FileContextConnectionKind[]; connectionCount: number }> | null> {
   const semanticGraph = await getSemanticGraph();
 
@@ -133,7 +179,15 @@ async function buildPersistedReferenceSignalsByFileId(
     return null;
   }
 
-  const edges = await getSemanticConsumersForSymbol(primarySymbol.symbolId);
+  const edges = (await getSemanticConsumersForSymbol(primarySymbol.symbolId))
+    .sort((left, right) => {
+      return (
+        semanticEdgePriority(right.edge.kind) - semanticEdgePriority(left.edge.kind) ||
+        confidenceRank(right.edge.confidence) - confidenceRank(left.edge.confidence) ||
+        (right.fromFile?.filePath ?? '').localeCompare(left.fromFile?.filePath ?? '')
+      );
+    })
+    .slice(0, budget.maxEdges);
   const signalsByFileId: Record<string, { kinds: FileContextConnectionKind[]; connectionCount: number }> = {};
 
   for (const entry of edges) {
@@ -153,12 +207,13 @@ async function buildReferenceSignalsByFileId(
   primarySymbol: IndexedSymbol | null,
   indexedSymbols: IndexedSymbol[],
   relationsByFile: Record<string, FileRelation>,
+  budget: ExplorationBudget,
 ): Promise<Record<string, { kinds: FileContextConnectionKind[]; connectionCount: number }>> {
   if (!primarySymbol) {
     return {};
   }
 
-  const persistedSignals = await buildPersistedReferenceSignalsByFileId(primarySymbol).catch(() => null);
+  const persistedSignals = await buildPersistedReferenceSignalsByFileId(primarySymbol, budget).catch(() => null);
 
   if (persistedSignals) {
     return persistedSignals;
@@ -240,6 +295,7 @@ async function buildReferenceSignalsByFileId(
 
 export async function assembleSymbolContext(query: SymbolContextQuery): Promise<SymbolContextBundle> {
   const index = await loadRequiredSymbolIndex();
+  const explorationBudget = resolveExplorationBudget(query);
   const candidates = collectSymbolCandidates(index.symbols, query);
   const rankedSymbols = rankSymbolCandidates(
     candidates,
@@ -258,10 +314,16 @@ export async function assembleSymbolContext(query: SymbolContextQuery): Promise<
   const ambiguity = detectRankingAmbiguity(limitedRankedSymbols);
   const primarySymbol = limitedRankedSymbols[0]?.item ?? null;
   const primaryFile = primarySymbol ? await getFileNode(primarySymbol.fileId) : null;
-  const referenceSignalsByFileId = await buildReferenceSignalsByFileId(primarySymbol, index.symbols, index.byFile);
+  const referenceSignalsByFileId = await buildReferenceSignalsByFileId(
+    primarySymbol,
+    index.symbols,
+    index.byFile,
+    explorationBudget,
+  );
   const relatedFiles = primarySymbol
     ? await assembleRelatedFileContext(primarySymbol.fileId, {
         relatedLimit: query.relatedLimit,
+        explorationBudget,
         referenceSignalsByFileId,
       })
     : {

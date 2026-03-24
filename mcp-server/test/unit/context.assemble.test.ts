@@ -237,6 +237,64 @@ describe('context assembly', () => {
     );
   });
 
+  it('applies exploration budgets after prioritizing stronger symbol edges', async () => {
+    const tempRoot = await createTempDirectory();
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    const reposRoot = path.join(tempRoot, 'repos');
+    const repositoryRoot = path.join(reposRoot, 'budget-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(path.join(repositoryRoot, 'src', 'shared.ts'), 'export const shared = 1;', 'utf8');
+    await fs.writeFile(path.join(repositoryRoot, 'src', 'barrel.ts'), "export { shared } from './shared';", 'utf8');
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { shared } from './shared';",
+        'export function useShared() {',
+        '  return shared;',
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    await saveSymbolIndex(index);
+    await saveCodeGraph(await buildCodeGraph());
+
+    const sharedFileId = createFileId('budget-repo', 'src/shared.ts');
+    const consumerFileId = createFileId('budget-repo', 'src/consumer.ts');
+
+    const related = await assembleRelatedFileContext(sharedFileId, {
+      relatedLimit: 1,
+      explorationBudget: {
+        maxNodes: 1,
+        maxEdges: 8,
+        maxDepth: 2,
+      },
+      referenceSignalsByFileId: {
+        [consumerFileId]: {
+          kinds: ['call_reference'],
+          connectionCount: 1,
+        },
+      },
+    });
+
+    expect(related.totalCount).toBe(2);
+    expect(related.items).toEqual([
+      expect.objectContaining({
+        file: expect.objectContaining({ filePath: 'src/consumer.ts' }),
+        via: expect.arrayContaining(['call_reference']),
+      }),
+    ]);
+    expect(related.buckets.directConsumers.entries).toEqual([
+      expect.objectContaining({
+        file: expect.objectContaining({ filePath: 'src/consumer.ts' }),
+      }),
+    ]);
+  });
+
   it('degrades safely for missing file and unresolved symbol context requests', async () => {
     const tempRoot = await createTempDirectory();
     tempDirectories.push(tempRoot);

@@ -46,6 +46,13 @@ const DEFAULT_SAFE_MAX_DEPTH = 1;
 const DEFAULT_EXPLORATORY_MAX_DEPTH = 2;
 const MAX_EXPLORATORY_DEPTH = 2;
 const MAX_TRANSITIVE_IMPACTS = 200;
+const MAX_IMPORTER_FILE_CANDIDATES = 160;
+const MAX_REEXPORT_FILE_CANDIDATES = 96;
+const MAX_EXACT_SEMANTIC_EDGES = 256;
+const MAX_INFERRED_SEMANTIC_EDGES = 320;
+const MAX_API_PROPAGATION_CLIENTS = 160;
+const MAX_TRANSITIVE_SEEDS = 40;
+const MAX_TRANSITIVE_IMPORTERS_PER_SEED = 16;
 
 function normalizePath(filePath: string): string {
   return filePath.replace(/\\/g, '/').replace(/^\/+/, '');
@@ -87,6 +94,16 @@ function confidenceWeight(confidence: ImpactConfidence): number {
     case 'low':
       return 1;
   }
+}
+
+function prioritizeFiles<T extends { filePath: string; repoId?: string }>(entries: T[]): T[] {
+  return [...entries].sort((left, right) => {
+    return (
+      architectureSurfaceWeight(right.filePath) - architectureSurfaceWeight(left.filePath) ||
+      pathSegmentCount(left.filePath) - pathSegmentCount(right.filePath) ||
+      compareFiles(left, right)
+    );
+  });
 }
 
 function reasonWeight(reason: ImpactReason): number {
@@ -952,12 +969,8 @@ async function collectImporterImpacts(target: IndexedSymbol): Promise<{
   const directSymbols: ImpactedSymbol[] = [];
   const relatedFiles: ImpactedFile[] = [];
 
-  for (const importingFile of importingFiles) {
-    const [relation, definedSymbols, content] = await Promise.all([
-      getFileRelationById(importingFile.fileId),
-      getDefinedSymbols(importingFile.fileId),
-      getFileContent(importingFile.repoId, importingFile.filePath),
-    ]);
+  for (const importingFile of prioritizeFiles(importingFiles).slice(0, MAX_IMPORTER_FILE_CANDIDATES)) {
+    const relation = await getFileRelationById(importingFile.fileId);
 
     const matchingBindings = (relation?.imports ?? []).flatMap((entry) => {
       const targetsFile =
@@ -1022,7 +1035,16 @@ async function collectImporterImpacts(target: IndexedSymbol): Promise<{
       }));
     }
 
-    if (!content || matchingBindings.length === 0) {
+    if (matchingBindings.length === 0) {
+      continue;
+    }
+
+    const [definedSymbols, content] = await Promise.all([
+      getDefinedSymbols(importingFile.fileId),
+      getFileContent(importingFile.repoId, importingFile.filePath),
+    ]);
+
+    if (!content) {
       continue;
     }
 
@@ -1109,6 +1131,30 @@ function inferSemanticEdgeReason(
   }
 }
 
+function semanticEdgeKindWeight(
+  kind: Awaited<ReturnType<typeof getIncomingSemanticEdgesForSymbol>>[number]['edge']['kind'],
+): number {
+  switch (kind) {
+    case 'symbol_call':
+      return 7;
+    case 'api_route_handler':
+      return 6;
+    case 'symbol_reference':
+    case 'jsx_reference':
+      return 5;
+    case 'api_propagation':
+      return 4;
+    case 'api_client_to_route':
+      return 3;
+    case 'type_reference':
+      return 2;
+  }
+}
+
+function getSemanticEdgeLimit(exactness: 'exact' | 'inferred'): number {
+  return exactness === 'exact' ? MAX_EXACT_SEMANTIC_EDGES : MAX_INFERRED_SEMANTIC_EDGES;
+}
+
 async function loadPersistedSemanticConsumerEdges(
   target: IndexedSymbol,
   exactness: 'exact' | 'inferred',
@@ -1119,7 +1165,45 @@ async function loadPersistedSemanticConsumerEdges(
     return null;
   }
 
-  return getIncomingSemanticEdgesForSymbol(target.symbolId, { exactness }).catch(() => []);
+  const entries = await getIncomingSemanticEdgesForSymbol(target.symbolId, { exactness }).catch(() => []);
+  const deduped = new Map<string, (typeof entries)[number]>();
+
+  for (const entry of entries) {
+    const key = [
+      entry.edge.fromFileId ?? '',
+      entry.edge.fromSymbolId ?? '',
+      entry.edge.kind,
+      entry.edge.metadata?.routeId ?? '',
+    ].join('|');
+    const existing = deduped.get(key);
+
+    if (!existing) {
+      deduped.set(key, entry);
+      continue;
+    }
+
+    const existingWeight =
+      semanticEdgeKindWeight(existing.edge.kind) * 10 + confidenceWeight(existing.edge.confidence);
+    const nextWeight =
+      semanticEdgeKindWeight(entry.edge.kind) * 10 + confidenceWeight(entry.edge.confidence);
+
+    if (nextWeight > existingWeight) {
+      deduped.set(key, entry);
+    }
+  }
+
+  return Array.from(deduped.values())
+    .sort((left, right) => {
+      return (
+        semanticEdgeKindWeight(right.edge.kind) - semanticEdgeKindWeight(left.edge.kind) ||
+        confidenceWeight(right.edge.confidence) - confidenceWeight(left.edge.confidence) ||
+        compareFiles(
+          { repoId: left.fromFile?.repoId, filePath: left.fromFile?.filePath ?? '' },
+          { repoId: right.fromFile?.repoId, filePath: right.fromFile?.filePath ?? '' },
+        )
+      );
+    })
+    .slice(0, getSemanticEdgeLimit(exactness));
 }
 
 async function collectCompilerReferenceImpacts(target: IndexedSymbol): Promise<{
@@ -1321,12 +1405,8 @@ async function collectReexportImpacts(target: IndexedSymbol): Promise<{
   const indirectFiles: ImpactedFile[] = [];
   const indirectSymbols: ImpactedSymbol[] = [];
 
-  for (const reexportingFile of reexportingFiles) {
-    const [relation, definedSymbols, content] = await Promise.all([
-      getFileRelationById(reexportingFile.fileId),
-      getDefinedSymbols(reexportingFile.fileId),
-      getFileContent(reexportingFile.repoId, reexportingFile.filePath),
-    ]);
+  for (const reexportingFile of prioritizeFiles(reexportingFiles).slice(0, MAX_REEXPORT_FILE_CANDIDATES)) {
+    const relation = await getFileRelationById(reexportingFile.fileId);
 
     const evidence = buildEvidence(
       'reexports-target',
@@ -1353,17 +1433,22 @@ async function collectReexportImpacts(target: IndexedSymbol): Promise<{
       evidence: [evidence],
     }));
 
-    if (!relation || !content) {
-      continue;
-    }
-
-    const hasNamedLocalReference = relation.exports.some(
+    const hasNamedLocalReference = relation?.exports.some(
       (entry) =>
         entry.kind === 'named' &&
         (entry.symbolId === target.symbolId || entry.localName === target.name),
-    );
+    ) ?? false;
 
     if (!hasNamedLocalReference) {
+      continue;
+    }
+
+    const [definedSymbols, content] = await Promise.all([
+      getDefinedSymbols(reexportingFile.fileId),
+      getFileContent(reexportingFile.repoId, reexportingFile.filePath),
+    ]);
+
+    if (!content) {
       continue;
     }
 
@@ -1532,7 +1617,7 @@ async function collectApiPropagationImpacts(target: IndexedSymbol): Promise<{
   const indirectFiles: ImpactedFile[] = [];
   const indirectSymbols: ImpactedSymbol[] = [];
 
-  for (const propagatedClient of apiPropagation.propagatedClients) {
+  for (const propagatedClient of apiPropagation.propagatedClients.slice(0, MAX_API_PROPAGATION_CLIENTS)) {
     const [clientFile, definedSymbols] = await Promise.all([
       getFileNode(propagatedClient.clientFileId),
       getDefinedSymbols(propagatedClient.clientFileId).catch(() => []),
@@ -1724,7 +1809,8 @@ async function collectTransitiveImpacts(
     return { impacts: [], truncated: false };
   }
 
-  const seeds = collectDirectImpactFileSeeds(seedFiles, seedSymbols, target.file.fileId);
+  const allSeeds = collectDirectImpactFileSeeds(seedFiles, seedSymbols, target.file.fileId);
+  const seeds = allSeeds.slice(0, MAX_TRANSITIVE_SEEDS);
   const directFileIds = new Set<string>([
     target.file.fileId,
     ...seedFiles.map((entry) => entry.fileId).filter((entry): entry is string => typeof entry === 'string'),
@@ -1733,6 +1819,10 @@ async function collectTransitiveImpacts(
   const visited = new Set<string>([target.file.fileId]);
   const groupOrder = new Map<string, number>();
   let truncated = false;
+
+  if (allSeeds.length > seeds.length) {
+    truncated = true;
+  }
 
   for (const seed of seeds) {
     visited.add(seed.fileId);
@@ -1743,9 +1833,14 @@ async function collectTransitiveImpacts(
   });
 
   for (const seed of seeds) {
-    const importers = await getImportingFiles(seed.fileId);
+    const importers = prioritizeFiles(await getImportingFiles(seed.fileId));
+    const boundedImporters = importers.slice(0, MAX_TRANSITIVE_IMPORTERS_PER_SEED);
 
-    for (const importer of importers) {
+    if (importers.length > boundedImporters.length) {
+      truncated = true;
+    }
+
+    for (const importer of boundedImporters) {
       if (visited.has(importer.fileId) || directFileIds.has(importer.fileId)) {
         continue;
       }

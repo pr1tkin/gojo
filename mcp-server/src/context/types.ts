@@ -60,6 +60,7 @@ export interface FileContextBundle {
 
 export interface AssembleFileContextOptions {
   relatedLimit?: number;
+  explorationBudget?: Partial<ExplorationBudget>;
   referenceSignalsByFileId?: Record<
     string,
     {
@@ -69,12 +70,19 @@ export interface AssembleFileContextOptions {
   >;
 }
 
+export interface ExplorationBudget {
+  maxNodes: number;
+  maxEdges: number;
+  maxDepth: number;
+}
+
 export interface SymbolContextQuery {
   name: string;
   repo?: string;
   kind?: SymbolKind;
   limit?: number;
   relatedLimit?: number;
+  explorationBudget?: Partial<ExplorationBudget>;
 }
 
 export interface SymbolContextBundle {
