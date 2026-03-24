@@ -1,5 +1,5 @@
 import { planChangeInputSchema } from '../schemas.js';
-import { planSymbolChange } from '../orchestrator/index.js';
+import { getSymbolExplorationContext, planSymbolChange } from '../orchestrator/index.js';
 import type { PlanChangeInput } from '../types.js';
 import {
   normalizePlanChangeResponse,
@@ -31,14 +31,45 @@ export const planChangeToolDefinition = {
   inputSchema: planChangeInputSchema,
 };
 
+async function resolvePlanTarget(input: PlanChangeInput): Promise<{
+  repoId?: string;
+  filePath?: string;
+  symbolId?: string;
+  symbolName: string;
+}> {
+  if (input.filePath) {
+    return {
+      repoId: input.repo,
+      filePath: input.filePath,
+      symbolName: input.symbol,
+    };
+  }
+
+  const symbolContext = await getSymbolExplorationContext(input.symbol, {
+    repo: input.repo,
+    limit: 3,
+    relatedLimit: 4,
+  });
+
+  return {
+    repoId: symbolContext.primarySymbol?.repo ?? symbolContext.primaryFile?.repoId ?? input.repo,
+    filePath: symbolContext.primarySymbol?.filePath ?? symbolContext.primaryFile?.filePath,
+    symbolId: symbolContext.primarySymbol?.symbolId,
+    symbolName: symbolContext.primarySymbol?.name ?? input.symbol,
+  };
+}
+
 export async function runPlanChangeTool(
   input: PlanChangeInput,
 ): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
+  const resolvedTarget = await resolvePlanTarget(input);
   const result = await planSymbolChange({
-    symbolName: input.symbol,
-    filePath: input.filePath,
-    repoId: input.repo,
+    symbolId: resolvedTarget.symbolId,
+    symbolName: resolvedTarget.symbolName,
+    filePath: resolvedTarget.filePath,
+    repoId: resolvedTarget.repoId,
     impactMode: input.mode,
+    maxDepth: 2,
   });
   const rawOutput: RawPlanChangeResponse = {
     ...result,

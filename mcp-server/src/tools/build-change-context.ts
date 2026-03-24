@@ -586,28 +586,45 @@ export async function runBuildChangeContextTool(
       ? input.filePath!
       : explore.target.symbolName ?? input.symbolName ?? input.filePath ?? targetName;
 
-  const precedents = parseToolResult<FindPrecedentsNormalizedResponse>(
-    await runFindPrecedentsTool({
-      name: precedentTargetName,
-      repo: input.repo ?? explore.target.repoId ?? undefined,
-      mode: targetMode === 'file' ? 'file' : 'component',
-      detail,
-      limit: DEFAULT_PRECEDENT_LIMIT,
-      ...(detail === 'debug' ? { expandDebug: true } : {}),
-    }),
-  );
+  const resolvedRepo = input.repo ?? explore.target.repoId ?? undefined;
+  const preliminaryPlanDecision = shouldGeneratePlan({
+    intent: input.intent,
+    targetFilePath: explore.target.filePath,
+    targetSymbolName: explore.target.symbolName,
+    targetConfidence: explore.target.confidence,
+    ambiguityDetected: Boolean(explore.target.resolution?.ambiguityDetected),
+  });
+  const precedentsPromise = runFindPrecedentsTool({
+    name: precedentTargetName,
+    repo: resolvedRepo,
+    mode: targetMode === 'file' ? 'file' : 'component',
+    detail,
+    limit: DEFAULT_PRECEDENT_LIMIT,
+    ...(detail === 'debug' ? { expandDebug: true } : {}),
+  });
+  const refactorContextPromise = runCollectRefactorContextTool({
+    name: targetMode === 'file' ? input.filePath! : explore.target.symbolName ?? targetName,
+    repo: resolvedRepo,
+    mode: targetMode === 'file' ? 'file' : 'component',
+    detail,
+    limit: DEFAULT_REFACTOR_LIMIT,
+    ...(detail === 'debug' ? { expandDebug: true } : {}),
+  });
+  const planChangePromise = preliminaryPlanDecision.shouldGenerate
+    ? runPlanChangeTool({
+        symbol: explore.target.symbolName ?? input.symbolName ?? targetName,
+        filePath: explore.target.filePath ?? input.filePath,
+        repo: resolvedRepo,
+        mode: derivePlanMode(input.intent),
+      })
+    : null;
 
-  const refactorContext = parseToolResult<CollectRefactorContextNormalizedResponse>(
-    await runCollectRefactorContextTool({
-      name: targetMode === 'file' ? input.filePath! : explore.target.symbolName ?? targetName,
-      repo: input.repo ?? explore.target.repoId ?? undefined,
-      mode: targetMode === 'file' ? 'file' : 'component',
-      detail,
-      limit: DEFAULT_REFACTOR_LIMIT,
-      ...(detail === 'debug' ? { expandDebug: true } : {}),
-    }),
-  );
-
+  const [precedentsResult, refactorContextResult] = await Promise.all([
+    precedentsPromise,
+    refactorContextPromise,
+  ]);
+  const precedents = parseToolResult<FindPrecedentsNormalizedResponse>(precedentsResult);
+  const refactorContext = parseToolResult<CollectRefactorContextNormalizedResponse>(refactorContextResult);
   const planDecision = shouldGeneratePlan({
     intent: input.intent,
     targetFilePath: explore.target.filePath ?? refactorContext.target.filePath,
@@ -619,12 +636,13 @@ export async function runBuildChangeContextTool(
 
   const planChange = planDecision.shouldGenerate
     ? parseToolResult<PlanChangeNormalizedResponse>(
-        await runPlanChangeTool({
-          symbol: explore.target.symbolName ?? refactorContext.target.symbolName ?? input.symbolName!,
-          filePath: explore.target.filePath ?? refactorContext.target.filePath ?? input.filePath,
-          repo: input.repo ?? explore.target.repoId ?? refactorContext.target.repoId ?? undefined,
-          mode: derivePlanMode(input.intent),
-        }),
+        await (planChangePromise ??
+          runPlanChangeTool({
+            symbol: explore.target.symbolName ?? refactorContext.target.symbolName ?? input.symbolName!,
+            filePath: explore.target.filePath ?? refactorContext.target.filePath ?? input.filePath,
+            repo: input.repo ?? explore.target.repoId ?? refactorContext.target.repoId ?? undefined,
+            mode: derivePlanMode(input.intent),
+          })),
       )
     : null;
 

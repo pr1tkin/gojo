@@ -11,7 +11,6 @@ const {
   getReexportingFilesMock,
   getFileRelationMock,
   getFileRelationByIdMock,
-  listFileRelationsMock,
   getFileExplorationContextMock,
   getSymbolExplorationContextMock,
 } = vi.hoisted(() => ({
@@ -25,7 +24,6 @@ const {
   getReexportingFilesMock: vi.fn(),
   getFileRelationMock: vi.fn(),
   getFileRelationByIdMock: vi.fn(),
-  listFileRelationsMock: vi.fn(),
   getFileExplorationContextMock: vi.fn(),
   getSymbolExplorationContextMock: vi.fn(),
 }));
@@ -44,7 +42,6 @@ vi.mock('../../src/graph/query.js', () => ({
 vi.mock('../../src/symbol-index/query.js', () => ({
   getFileRelation: getFileRelationMock,
   getFileRelationById: getFileRelationByIdMock,
-  listFileRelations: listFileRelationsMock,
 }));
 
 vi.mock('../../src/orchestrator/file-service.js', () => ({
@@ -120,11 +117,12 @@ describe('refactor context service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    getFileRelationMock.mockResolvedValue(primaryRelation);
+    getFileRelationMock.mockImplementation(async (filePath: string) => {
+      return [primaryRelation, bundleTestRelation, sameDirRelation].find((entry) => entry.filePath === filePath) ?? primaryRelation;
+    });
     getFileRelationByIdMock.mockImplementation(async (fileId: string) => {
       return [primaryRelation, bundleTestRelation, sameDirRelation].find((entry) => entry.fileId === fileId) ?? null;
     });
-    listFileRelationsMock.mockResolvedValue([primaryRelation, bundleTestRelation, sameDirRelation]);
     getFileNodeMock.mockImplementation(async (fileId: string) => {
       const relation = [primaryRelation, bundleTestRelation, sameDirRelation].find((entry) => entry.fileId === fileId);
       return relation ? fileNode(relation.fileId, relation.repo, relation.filePath) : null;

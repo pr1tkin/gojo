@@ -202,6 +202,28 @@ function noisePenalty(filePath: string): number {
   return 0;
 }
 
+function apiConsumerBias(targetPath: string, candidatePath: string, strengthRank: number): number {
+  const normalizedTarget = targetPath.replace(/\\/g, '/');
+  const normalizedCandidate = candidatePath.replace(/\\/g, '/');
+  const targetIsApiOrServer = /(^|\/)(api|server|api-utils|api-utils\/)/i.test(normalizedTarget);
+  const candidateIsApiEntry = /(^|\/)(app\/api|pages\/api)\//i.test(normalizedCandidate) || /(^|\/)route\.(tsx?|jsx?)$/i.test(normalizedCandidate);
+  const candidateIsBroadServerModule = /(^|\/)(server|lib\/server|src\/server|lib\/services?)\//i.test(normalizedCandidate);
+
+  if (!targetIsApiOrServer) {
+    return 0;
+  }
+
+  if (candidateIsApiEntry) {
+    return 5;
+  }
+
+  if (strengthRank < 3 && candidateIsBroadServerModule) {
+    return -4;
+  }
+
+  return 0;
+}
+
 function graphEvidenceScore(edgeTypes: string[], connectionCount: number): { score: number; primaryEdgeType?: string; strengthRank: number } {
   const primaryEdgeType = strongestGraphEdgeType(edgeTypes);
   const strengthRank = edgeStrengthRank(primaryEdgeType);
@@ -282,6 +304,13 @@ export function rankRelatedFileCandidates(
       if (candidateNoisePenalty !== 0) {
         score += candidateNoisePenalty;
         reasons.push(createReason('noise_penalty', candidateNoisePenalty));
+      }
+
+      const apiBias = apiConsumerBias(target.filePath, candidate.relation.filePath, primaryEdgeStrengthRank);
+
+      if (apiBias !== 0) {
+        score += apiBias;
+        reasons.push(createReason('api_consumer_bias', apiBias));
       }
 
       return {

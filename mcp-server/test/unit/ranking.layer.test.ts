@@ -377,4 +377,45 @@ describe('ranking layer', () => {
     expect(ranked[0].filePath).toBe('src/components/ButtonConsumer.tsx');
     expect(ranked.find((entry) => entry.filePath === 'src/components/Button.stories.tsx')).toBeUndefined();
   });
+
+  it('keeps exact api callers above broad server modules for api helpers', () => {
+    const target = createRelation({
+      fileId: 'repo-a:server/api-utils.ts',
+      filePath: 'server/api-utils.ts',
+    });
+    const ranked = rankRelatedFileCandidates(
+      target,
+      [
+        {
+          relation: createRelation({
+            fileId: 'repo-a:lib/server/router.ts',
+            filePath: 'lib/server/router.ts',
+          }),
+          graphSignals: {
+            edgeTypes: ['incoming_file_imports_file'],
+            connectionCount: 1,
+          },
+        },
+        {
+          relation: createRelation({
+            fileId: 'repo-a:pages/api/widgets.ts',
+            filePath: 'pages/api/widgets.ts',
+          }),
+          graphSignals: {
+            edgeTypes: ['incoming_file_imports_file', 'call_reference'],
+            connectionCount: 2,
+          },
+        },
+      ],
+      10,
+    );
+
+    expect(ranked.map((entry) => entry.filePath)).toEqual([
+      'pages/api/widgets.ts',
+      'lib/server/router.ts',
+    ]);
+    expect(ranked[0].reasons).toEqual(expect.arrayContaining([
+      expect.objectContaining({ signal: 'api_consumer_bias' }),
+    ]));
+  });
 });

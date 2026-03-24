@@ -4,9 +4,13 @@ import { z } from 'zod';
 const { planSymbolChangeMock } = vi.hoisted(() => ({
   planSymbolChangeMock: vi.fn(),
 }));
+const { getSymbolExplorationContextMock } = vi.hoisted(() => ({
+  getSymbolExplorationContextMock: vi.fn(),
+}));
 
 vi.mock('../../src/orchestrator/index.js', () => ({
   planSymbolChange: planSymbolChangeMock,
+  getSymbolExplorationContext: getSymbolExplorationContextMock,
 }));
 
 import { planChangeToolDefinition, runPlanChangeTool } from '../../src/tools/plan-change.js';
@@ -68,6 +72,29 @@ function makeImpactBuckets() {
 describe('plan_change tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getSymbolExplorationContextMock.mockResolvedValue({
+      primarySymbol: null,
+      primaryFile: null,
+      rankedSymbols: [],
+      relatedFiles: [],
+      exportedSymbols: [],
+      query: 'Button',
+      summary: {
+        candidateCount: 0,
+        totalCandidateCount: 0,
+        ambiguityDetected: false,
+        viableAlternativeCount: 0,
+        relatedFileCount: 0,
+        totalRelatedFileCount: 0,
+        exportedSymbolCount: 0,
+      },
+      relatedFileBuckets: {
+        directConsumers: { entries: [], total: 0, shown: 0, truncated: false },
+        indirectConsumers: { entries: [], total: 0, shown: 0, truncated: false },
+        relatedContext: { entries: [], total: 0, shown: 0, truncated: false },
+      },
+      rawContext: {},
+    });
   });
 
   it('accepts the public input shape', () => {
@@ -132,10 +159,12 @@ describe('plan_change tool', () => {
     const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
 
     expect(planSymbolChangeMock).toHaveBeenCalledWith({
+      symbolId: undefined,
       symbolName: 'Button',
       filePath: 'src/app/_components/button/Button.tsx',
       repoId: 'repo-alpha',
       impactMode: 'exploratory',
+      maxDepth: 2,
     });
     expect(parsed).toEqual(expect.objectContaining({
       tool: 'plan_change',
@@ -260,10 +289,95 @@ describe('plan_change tool', () => {
     });
 
     expect(planSymbolChangeMock).toHaveBeenCalledWith({
+      symbolId: undefined,
       symbolName: 'useAdminCleanupStore',
       filePath: 'components/admin/cleanup/store/admin-cleanup-context.ts',
       repoId: undefined,
       impactMode: undefined,
+      maxDepth: 2,
+    });
+    expect(getSymbolExplorationContextMock).not.toHaveBeenCalled();
+  });
+
+  it('resolves symbol-only input before delegating to the planning service', async () => {
+    getSymbolExplorationContextMock.mockResolvedValue({
+      primarySymbol: {
+        symbolId: 'banner-symbol',
+        fileId: 'repo-alpha:src/components/Banner.tsx',
+        repo: 'repo-alpha',
+        filePath: 'src/components/Banner.tsx',
+        name: 'Banner',
+        kind: 'function',
+        startLine: 1,
+        endLine: 12,
+        exported: true,
+      },
+      primaryFile: {
+        fileId: 'repo-alpha:src/components/Banner.tsx',
+        repoId: 'repo-alpha',
+        filePath: 'src/components/Banner.tsx',
+      },
+      rankedSymbols: [],
+      relatedFiles: [],
+      exportedSymbols: [],
+      query: 'Banner',
+      summary: {
+        candidateCount: 1,
+        totalCandidateCount: 1,
+        ambiguityDetected: false,
+        viableAlternativeCount: 0,
+        relatedFileCount: 0,
+        totalRelatedFileCount: 0,
+        exportedSymbolCount: 1,
+      },
+      relatedFileBuckets: {
+        directConsumers: { entries: [], total: 0, shown: 0, truncated: false },
+        indirectConsumers: { entries: [], total: 0, shown: 0, truncated: false },
+        relatedContext: { entries: [], total: 0, shown: 0, truncated: false },
+      },
+      rawContext: {},
+    });
+    planSymbolChangeMock.mockResolvedValue({
+      target: {
+        filePath: 'src/components/Banner.tsx',
+        symbolId: 'banner-symbol',
+        symbolName: 'Banner',
+        kind: 'function',
+      },
+      scope: 'feature-bounded',
+      risk: 'low',
+      summary: 'resolved banner consumers',
+      signals: [],
+      primaryEditFiles: ['src/components/Banner.tsx'],
+      secondaryEditFiles: [],
+      reviewFiles: ['src/pages/index.tsx'],
+      impactBuckets: makeImpactBuckets(),
+      orderedPlan: [
+        {
+          order: 1,
+          filePath: 'src/components/Banner.tsx',
+          role: 'edit-primary',
+          reason: 'defining file should be updated first',
+          confidence: 'high',
+        },
+      ],
+    });
+
+    await runPlanChangeTool({
+      symbol: 'Banner',
+      repo: 'repo-alpha',
+    });
+
+    expect(getSymbolExplorationContextMock).toHaveBeenCalledWith('Banner', expect.objectContaining({
+      repo: 'repo-alpha',
+    }));
+    expect(planSymbolChangeMock).toHaveBeenCalledWith({
+      symbolId: 'banner-symbol',
+      symbolName: 'Banner',
+      filePath: 'src/components/Banner.tsx',
+      repoId: 'repo-alpha',
+      impactMode: undefined,
+      maxDepth: 2,
     });
   });
 });

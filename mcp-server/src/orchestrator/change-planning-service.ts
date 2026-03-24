@@ -1,5 +1,6 @@
 import type { SymbolKind } from '../types.js';
-import { getImportedFiles, getRepoFiles } from '../graph/query.js';
+import { getImportedFiles } from '../graph/query.js';
+import { getFileRelation } from '../symbol-index/query.js';
 import { analyzeSymbolImpact } from './impact-analysis-service.js';
 import type {
   ImpactAnalysisResult,
@@ -52,6 +53,9 @@ interface PlanningFacts {
   barrelSurface: boolean;
   repoWide: boolean;
 }
+
+const MAX_FRAMEWORK_SURFACE_CANDIDATES = 12;
+const MAX_ORDERED_PLAN_CANDIDATES = 48;
 
 function getDirectImpactFiles(impact: ImpactAnalysisResult): ImpactedFile[] {
   return impact.directConsumers?.files ?? impact.directlyImpactedFiles;
@@ -670,8 +674,6 @@ async function getFrameworkSurfaceCandidates(targetFileId: string | undefined, r
       bucket: isEntrySurfacePath(filePath) ? 'surface' : 'review',
     });
   }
-
-  const repoFiles = await getRepoFiles(repoId);
   const targetSegments = pathSegments(targetFilePath);
   const appRoot = targetSegments[0] === 'src' && targetSegments[1] === 'app'
     ? 'src/app'
@@ -679,33 +681,50 @@ async function getFrameworkSurfaceCandidates(targetFileId: string | undefined, r
       ? 'app'
       : '';
 
-  for (const file of repoFiles) {
-    const filePath = normalizePath(file.filePath);
+  if (appRoot !== '') {
+    const targetedPaths = [
+      `${appRoot}/page.tsx`,
+      `${appRoot}/page.ts`,
+      `${appRoot}/layout.tsx`,
+      `${appRoot}/layout.ts`,
+      `${appRoot}/providers.tsx`,
+      `${appRoot}/providers.ts`,
+      `${appRoot}/provider.tsx`,
+      `${appRoot}/provider.ts`,
+      `${appRoot}/contexts.tsx`,
+      `${appRoot}/contexts.ts`,
+    ];
 
-    if (!filePath || filePath === normalizePath(targetFilePath) || seen.has(filePath) || isTestOrStoryPath(filePath)) {
-      continue;
+    for (const candidatePath of targetedPaths) {
+      if (
+        candidatePath === normalizePath(targetFilePath) ||
+        seen.has(candidatePath) ||
+        isTestOrStoryPath(candidatePath)
+      ) {
+        continue;
+      }
+
+      try {
+        await getFileRelation(candidatePath, repoId);
+      } catch {
+        continue;
+      }
+
+      const isSiblingPage = candidatePath === `${appRoot}/page.tsx` || candidatePath === `${appRoot}/page.ts`;
+      seen.add(candidatePath);
+      candidates.push({
+        filePath: candidatePath,
+        role: isEntrySurfacePath(candidatePath) ? 'entry-surface' : 'review-only',
+        reason: isSiblingPage
+          ? 'top-level page module should be reviewed for framework entry changes'
+          : 'high-level provider module should be reviewed for framework entry changes',
+        confidence: 'low',
+        bucket: isEntrySurfacePath(candidatePath) ? 'surface' : 'review',
+      });
     }
-
-    const isSiblingPage = appRoot !== '' && filePath === `${appRoot}/page.tsx`;
-    const isProviderLike = appRoot !== '' && filePath.startsWith(`${appRoot}/`) && /(^|\/)(providers?|contexts?)\//i.test(filePath);
-
-    if (!isSiblingPage && !isProviderLike) {
-      continue;
-    }
-
-    seen.add(filePath);
-    candidates.push({
-      filePath,
-      role: isEntrySurfacePath(filePath) ? 'entry-surface' : 'review-only',
-      reason: isSiblingPage
-        ? 'top-level page module should be reviewed for framework entry changes'
-        : 'high-level provider module should be reviewed for framework entry changes',
-      confidence: 'low',
-      bucket: isEntrySurfacePath(filePath) ? 'surface' : 'review',
-    });
   }
 
-  return candidates;
+  return candidates.slice(0, MAX_FRAMEWORK_SURFACE_CANDIDATES);
 }
 
 async function toOrderedPlan(
@@ -786,7 +805,7 @@ async function toOrderedPlan(
       bucketOrder.indexOf(left.bucket) - bucketOrder.indexOf(right.bucket) ||
       compareFilePaths(left.filePath, right.filePath)
     );
-  });
+  }).slice(0, MAX_ORDERED_PLAN_CANDIDATES);
 
   return orderedCandidates.map((entry, index) => ({
     order: index + 1,

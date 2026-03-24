@@ -10,7 +10,7 @@ import {
   getReexportedFiles,
   getReexportingFiles,
 } from '../graph/query.js';
-import { getFileRelation, getFileRelationById, listFileRelations } from '../symbol-index/query.js';
+import { getFileRelation, getFileRelationById } from '../symbol-index/query.js';
 import type { CollectRefactorContextInput, RefactorContextMode } from '../types.js';
 import { getFileExplorationContext } from './file-service.js';
 import { getSymbolExplorationContext } from './symbol-service.js';
@@ -19,6 +19,7 @@ import type { RelatedFileContextBuckets } from '../context/types.js';
 
 const DEFAULT_LIMIT = 10;
 const BUNDLE_SUFFIXES = ['test', 'spec', 'stories', 'story', 'styles', 'style', 'css'];
+const BUNDLE_EXTENSIONS = ['ts', 'tsx', 'js', 'jsx', 'css'];
 
 interface RefactorOptions {
   repo?: string;
@@ -106,6 +107,7 @@ async function collectNearbyFiles(
   fileId: string,
   repo: string,
   limit: number,
+  candidateFiles: Array<{ repoId?: string; filePath: string }>,
 ): Promise<{ items: RefactorNearbyFile[]; totalCount: number }> {
   const targetRelation = await getFileRelationById(fileId);
 
@@ -116,12 +118,34 @@ async function collectNearbyFiles(
     };
   }
 
-  const relations = await listFileRelations();
   const targetDir = path.posix.dirname(targetRelation.filePath);
   const targetStem = getBundleStem(targetRelation.filePath);
   const nearby = new Map<string, RefactorNearbyFile>();
+  const candidatePaths = new Set<string>();
 
-  for (const relation of relations) {
+  for (const file of candidateFiles) {
+    if (file.repoId && file.repoId !== repo) {
+      continue;
+    }
+
+    candidatePaths.add(file.filePath);
+  }
+
+  for (const suffix of BUNDLE_SUFFIXES) {
+    for (const extension of BUNDLE_EXTENSIONS) {
+      candidatePaths.add(path.posix.join(targetDir, `${targetStem}.${suffix}.${extension}`));
+    }
+  }
+
+  for (const candidatePath of candidatePaths) {
+    let relation;
+
+    try {
+      relation = await getFileRelation(candidatePath, repo);
+    } catch {
+      continue;
+    }
+
     if (relation.fileId === fileId || relation.repo !== repo) {
       continue;
     }
@@ -234,7 +258,6 @@ async function buildResolvedContext(
     graphNeighbors,
     definedSymbols,
     fileContext,
-    nearbyFiles,
   ] = await Promise.all([
     getFileNode(fileId),
     getExportedSymbols(fileId),
@@ -245,8 +268,21 @@ async function buildResolvedContext(
     getNeighboringFiles(fileId),
     getDefinedSymbols(fileId),
     getFileExplorationContext(fileId, { relatedLimit: limit }),
-    collectNearbyFiles(fileId, repo, limit),
   ]);
+
+  const nearbyFiles = await collectNearbyFiles(
+    fileId,
+    repo,
+    limit,
+    [
+      ...importingFiles,
+      ...importedFiles,
+      ...reexportingFiles,
+      ...reexportedFiles,
+      ...graphNeighbors,
+      ...fileContext.relatedFiles.map((entry) => entry.file),
+    ],
+  );
 
   if (!primaryFile) {
     return buildMissingContext(name, mode, repo, symbolCandidates);
