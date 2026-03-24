@@ -26,7 +26,13 @@ const defaultExecutionContext: ExecutionContext = {
   outputMode: 'json',
 };
 
-type AnyRuntimeHandler = RuntimeCapabilityHandler<any, RuntimeCapabilityResponseMap[RuntimeCapabilityName]>;
+type AnyRuntimeHandler = {
+  capability: RuntimeCapabilityName;
+  execute: (
+    request: unknown,
+    context: RuntimeHandlerContext,
+  ) => Promise<RuntimeCapabilityResponseMap[RuntimeCapabilityName]>;
+};
 
 export class RuntimeHost {
   private readonly handlers = new Map<RuntimeCapabilityName, AnyRuntimeHandler>();
@@ -73,7 +79,9 @@ export class RuntimeHost {
     return handler.execute(request, handlerContext) as Promise<RuntimeCapabilityResponseMap[TName]>;
   }
 
-  private register(handler: AnyRuntimeHandler): void {
-    this.handlers.set(handler.capability, handler);
+  private register<TRequest, TResponse extends RuntimeCapabilityResponseMap[RuntimeCapabilityName]>(
+    handler: RuntimeCapabilityHandler<TRequest, TResponse>,
+  ): void {
+    this.handlers.set(handler.capability, handler as unknown as AnyRuntimeHandler);
   }
 }

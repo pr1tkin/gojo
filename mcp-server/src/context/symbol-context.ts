@@ -1,4 +1,5 @@
 import { loadConfig } from '../config.js';
+import { traceAsync, traceHotspot } from '../instrumentation/trace.js';
 import {
   getExportedSymbols,
   getFileNode,
@@ -11,15 +12,20 @@ import { loadRequiredSymbolIndex } from '../symbol-index/store.js';
 import type { FileRelation, IndexedSymbol } from '../symbol-index/types.js';
 import { collectApiPropagationForSymbol } from '../typescript/api-propagation.js';
 import { findTypeScriptReferencesForIndexedSymbol } from '../typescript/symbol-references.js';
-import type { ExplorationBudget, FileContextConnectionKind, SymbolContextBundle, SymbolContextQuery } from './types.js';
+import type {
+  ExplorationBudget,
+  FileContextConnectionKind,
+  SymbolContextBudget,
+  SymbolContextBundle,
+  SymbolContextQuery,
+} from './types.js';
 import { assembleRelatedFileContext } from './file-context.js';
 import type { RelatedFileContextBuckets } from './types.js';
+import { EXECUTION_BUDGETS } from '../execution/budgets.js';
 
-const DEFAULT_REFERENCE_EXPLORATION_BUDGET: ExplorationBudget = {
-  maxNodes: 480,
-  maxEdges: 3200,
-  maxDepth: 2,
-};
+const DEFAULT_REFERENCE_EXPLORATION_BUDGET: ExplorationBudget = EXECUTION_BUDGETS.standard.graph;
+const DEFAULT_SYMBOL_CONTEXT_BUDGET: SymbolContextBudget = EXECUTION_BUDGETS.standard.symbolContext;
+const fileFanInCache = new WeakMap<object, Record<string, number>>();
 
 function confidenceRank(confidence: 'low' | 'medium' | 'high'): number {
   switch (confidence) {
@@ -33,6 +39,12 @@ function confidenceRank(confidence: 'low' | 'medium' | 'high'): number {
 }
 
 function buildFileFanInById(relationsByFile: Record<string, FileRelation>): Record<string, number> {
+  const cached = fileFanInCache.get(relationsByFile);
+
+  if (cached) {
+    return cached;
+  }
+
   const fanInById: Record<string, number> = Object.create(null);
 
   for (const relation of Object.values(relationsByFile)) {
@@ -45,6 +57,7 @@ function buildFileFanInById(relationsByFile: Record<string, FileRelation>): Reco
     }
   }
 
+  fileFanInCache.set(relationsByFile, fanInById);
   return fanInById;
 }
 
@@ -72,17 +85,17 @@ function detectRankingAmbiguity(rankedSymbols: ReturnType<typeof rankSymbolCandi
 }
 
 function collectSymbolCandidates(
-  symbols: IndexedSymbol[],
+  index: Awaited<ReturnType<typeof loadRequiredSymbolIndex>>,
   query: SymbolContextQuery,
+  budget: SymbolContextBudget,
 ): IndexedSymbol[] {
-  return symbols.filter((symbol) => {
-    const exactNameMatch = symbol.name === query.name;
-    const caseInsensitiveNameMatch = symbol.name.toLowerCase() === query.name.toLowerCase();
+  const exactMatches = index.byName[query.name] ?? [];
+  const lowerCaseMatches =
+    exactMatches.length > 0
+      ? exactMatches
+      : index.byNameLower[query.name.toLowerCase()] ?? [];
 
-    if (!exactNameMatch && !caseInsensitiveNameMatch) {
-      return false;
-    }
-
+  const filtered = lowerCaseMatches.filter((symbol) => {
     if (query.kind && symbol.kind !== query.kind) {
       return false;
     }
@@ -93,6 +106,30 @@ function collectSymbolCandidates(
 
     return true;
   });
+
+  if (filtered.length <= budget.maxCandidateSymbols) {
+    return filtered;
+  }
+
+  return filtered
+    .slice()
+    .sort((left, right) => {
+      const exportedDelta = Number(Boolean(right.exported)) - Number(Boolean(left.exported));
+
+      if (exportedDelta !== 0) {
+        return exportedDelta;
+      }
+
+      const pathExactDelta = Number(right.filePath.endsWith(`/${query.name}.ts`) || right.filePath.endsWith(`/${query.name}.tsx`))
+        - Number(left.filePath.endsWith(`/${query.name}.ts`) || left.filePath.endsWith(`/${query.name}.tsx`));
+
+      if (pathExactDelta !== 0) {
+        return pathExactDelta;
+      }
+
+      return left.filePath.localeCompare(right.filePath);
+    })
+    .slice(0, budget.maxCandidateSymbols);
 }
 
 function mergeSignal(
@@ -169,9 +206,63 @@ function resolveExplorationBudget(query: SymbolContextQuery): ExplorationBudget 
   };
 }
 
+function getRepoFileCount(
+  index: Awaited<ReturnType<typeof loadRequiredSymbolIndex>>,
+  repo: string | undefined,
+): number {
+  if (!repo) {
+    return 0;
+  }
+
+  let count = 0;
+
+  for (const relation of Object.values(index.byFile)) {
+    if (relation.repo === repo) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function resolveSymbolContextBudget(
+  query: SymbolContextQuery,
+  index: Awaited<ReturnType<typeof loadRequiredSymbolIndex>>,
+): SymbolContextBudget {
+  const profile =
+    query.repo && getRepoFileCount(index, query.repo) >= 5000
+      ? EXECUTION_BUDGETS.large.symbolContext
+      : DEFAULT_SYMBOL_CONTEXT_BUDGET;
+
+  return {
+    maxCandidateSymbols: Math.max(1, query.symbolContextBudget?.maxCandidateSymbols ?? profile.maxCandidateSymbols),
+    maxDirectConsumerEdges: Math.max(1, query.symbolContextBudget?.maxDirectConsumerEdges ?? profile.maxDirectConsumerEdges),
+    maxIndirectConsumerEdges: Math.max(1, query.symbolContextBudget?.maxIndirectConsumerEdges ?? profile.maxIndirectConsumerEdges),
+    maxRelatedFiles: Math.max(1, query.symbolContextBudget?.maxRelatedFiles ?? profile.maxRelatedFiles),
+    maxWeakExpansions: Math.max(0, query.symbolContextBudget?.maxWeakExpansions ?? profile.maxWeakExpansions),
+    strongEvidenceThreshold: Math.max(1, query.symbolContextBudget?.strongEvidenceThreshold ?? profile.strongEvidenceThreshold),
+  };
+}
+
+function fileSignalStrength(kinds: FileContextConnectionKind[]): 'strong' | 'medium' | 'weak' {
+  if (
+    kinds.some((kind) =>
+      ['call_reference', 'symbol_reference', 'jsx_reference', 'type_reference', 'import_usage', 'api_route_handler'].includes(kind),
+    )
+  ) {
+    return 'strong';
+  }
+
+  if (kinds.some((kind) => ['api_client_to_route', 'api_propagation'].includes(kind))) {
+    return 'medium';
+  }
+
+  return 'weak';
+}
+
 async function buildPersistedReferenceSignalsByFileId(
   primarySymbol: IndexedSymbol,
-  budget: ExplorationBudget,
+  budget: SymbolContextBudget,
 ): Promise<Record<string, { kinds: FileContextConnectionKind[]; connectionCount: number }> | null> {
   const semanticGraph = await getSemanticGraph();
 
@@ -179,25 +270,60 @@ async function buildPersistedReferenceSignalsByFileId(
     return null;
   }
 
-  const edges = (await getSemanticConsumersForSymbol(primarySymbol.symbolId))
+  const sortedEdges = (await getSemanticConsumersForSymbol(primarySymbol.symbolId))
+    .slice()
     .sort((left, right) => {
       return (
         semanticEdgePriority(right.edge.kind) - semanticEdgePriority(left.edge.kind) ||
         confidenceRank(right.edge.confidence) - confidenceRank(left.edge.confidence) ||
         (right.fromFile?.filePath ?? '').localeCompare(left.fromFile?.filePath ?? '')
       );
-    })
-    .slice(0, budget.maxEdges);
+    });
   const signalsByFileId: Record<string, { kinds: FileContextConnectionKind[]; connectionCount: number }> = {};
+  let directEdges = 0;
+  let indirectEdges = 0;
+  let weakEdges = 0;
 
-  for (const entry of edges) {
+  for (const entry of sortedEdges) {
     const fileId = entry.fromFile?.fileId ?? entry.edge.fromFileId;
 
     if (!fileId || fileId === primarySymbol.fileId) {
       continue;
     }
 
-    mergeSignal(signalsByFileId, fileId, mapSemanticEdgeKindsToConnectionKinds(entry.edge.kind), 1);
+    const kinds = mapSemanticEdgeKindsToConnectionKinds(entry.edge.kind);
+    const strength = fileSignalStrength(kinds);
+
+    if (strength === 'strong') {
+      if (directEdges >= budget.maxDirectConsumerEdges) {
+        continue;
+      }
+
+      directEdges += 1;
+    } else if (strength === 'medium') {
+      if (indirectEdges >= budget.maxIndirectConsumerEdges) {
+        continue;
+      }
+
+      indirectEdges += 1;
+    } else {
+      if (weakEdges >= budget.maxWeakExpansions) {
+        continue;
+      }
+
+      weakEdges += 1;
+    }
+
+    mergeSignal(signalsByFileId, fileId, kinds, 1);
+
+    const strongFileCount = Object.values(signalsByFileId).filter((signal) => fileSignalStrength(signal.kinds) === 'strong').length;
+
+    if (
+      strongFileCount >= budget.strongEvidenceThreshold &&
+      indirectEdges >= Math.min(2, budget.maxIndirectConsumerEdges)
+    ) {
+      break;
+    }
   }
 
   return signalsByFileId;
@@ -207,13 +333,14 @@ async function buildReferenceSignalsByFileId(
   primarySymbol: IndexedSymbol | null,
   indexedSymbols: IndexedSymbol[],
   relationsByFile: Record<string, FileRelation>,
-  budget: ExplorationBudget,
+  explorationBudget: ExplorationBudget,
+  symbolContextBudget: SymbolContextBudget,
 ): Promise<Record<string, { kinds: FileContextConnectionKind[]; connectionCount: number }>> {
   if (!primarySymbol) {
     return {};
   }
 
-  const persistedSignals = await buildPersistedReferenceSignalsByFileId(primarySymbol, budget).catch(() => null);
+  const persistedSignals = await buildPersistedReferenceSignalsByFileId(primarySymbol, symbolContextBudget).catch(() => null);
 
   if (persistedSignals) {
     return persistedSignals;
@@ -278,6 +405,12 @@ async function buildReferenceSignalsByFileId(
     }
 
     mergeSignal(signalsByFileId, fileId, [...kinds], 1);
+
+    const strongFileCount = Object.values(signalsByFileId).filter((signal) => fileSignalStrength(signal.kinds) === 'strong').length;
+
+    if (strongFileCount >= symbolContextBudget.strongEvidenceThreshold) {
+      break;
+    }
   }
 
   const apiPropagation = await collectApiPropagationForSymbol(repository, primarySymbol, relationsByFile, indexedSymbols);
@@ -290,13 +423,37 @@ async function buildReferenceSignalsByFileId(
     mergeSignal(signalsByFileId, propagatedClient.clientFileId, ['api_client_to_route', 'api_propagation'], 1);
   }
 
-  return signalsByFileId;
+  return Object.fromEntries(
+    Object.entries(signalsByFileId)
+      .sort((left, right) => {
+        const leftStrength = fileSignalStrength(left[1].kinds);
+        const rightStrength = fileSignalStrength(right[1].kinds);
+        const strengthRank = { strong: 3, medium: 2, weak: 1 };
+
+        return (
+          strengthRank[rightStrength] - strengthRank[leftStrength] ||
+          right[1].connectionCount - left[1].connectionCount ||
+          left[0].localeCompare(right[0])
+        );
+      })
+      .slice(0, explorationBudget.maxNodes),
+  );
 }
 
 export async function assembleSymbolContext(query: SymbolContextQuery): Promise<SymbolContextBundle> {
-  const index = await loadRequiredSymbolIndex();
+  const index = await traceAsync('symbol_context', 'load_symbol_index', () => loadRequiredSymbolIndex(), {
+    query: query.name,
+    repo: query.repo ?? null,
+  });
   const explorationBudget = resolveExplorationBudget(query);
-  const candidates = collectSymbolCandidates(index.symbols, query);
+  const symbolContextBudget = resolveSymbolContextBudget(query, index);
+  const candidates = collectSymbolCandidates(index, query, symbolContextBudget);
+  traceHotspot('symbol_context', 'candidate_collection', {
+    query: query.name,
+    repo: query.repo ?? null,
+    candidates: candidates.length,
+    maxCandidateSymbols: symbolContextBudget.maxCandidateSymbols,
+  });
   const rankedSymbols = rankSymbolCandidates(
     candidates,
     {
@@ -310,21 +467,40 @@ export async function assembleSymbolContext(query: SymbolContextQuery): Promise<
       fileFanInById: buildFileFanInById(index.byFile),
     },
   );
+  traceHotspot('symbol_context', 'candidate_ranking', {
+    query: query.name,
+    rankedSymbols: rankedSymbols.length,
+  });
   const limitedRankedSymbols = rankedSymbols.slice(0, query.limit);
   const ambiguity = detectRankingAmbiguity(limitedRankedSymbols);
   const primarySymbol = limitedRankedSymbols[0]?.item ?? null;
-  const primaryFile = primarySymbol ? await getFileNode(primarySymbol.fileId) : null;
-  const referenceSignalsByFileId = await buildReferenceSignalsByFileId(
+  const primaryFile = primarySymbol
+    ? await traceAsync('symbol_context', 'load_primary_file', () => getFileNode(primarySymbol.fileId), {
+        symbolId: primarySymbol.symbolId,
+      })
+    : null;
+  const referenceSignalsByFileId = await traceAsync('symbol_context', 'build_reference_signals', () => buildReferenceSignalsByFileId(
     primarySymbol,
     index.symbols,
     index.byFile,
     explorationBudget,
-  );
+    symbolContextBudget,
+  ), {
+    symbolId: primarySymbol?.symbolId ?? null,
+    budgetNodes: explorationBudget.maxNodes,
+    budgetEdges: explorationBudget.maxEdges,
+    maxDirectConsumerEdges: symbolContextBudget.maxDirectConsumerEdges,
+    maxIndirectConsumerEdges: symbolContextBudget.maxIndirectConsumerEdges,
+  });
   const relatedFiles = primarySymbol
-    ? await assembleRelatedFileContext(primarySymbol.fileId, {
+    ? await traceAsync('symbol_context', 'assemble_related_file_context', () => assembleRelatedFileContext(primarySymbol.fileId, {
         relatedLimit: query.relatedLimit,
         explorationBudget,
+        symbolContextBudget,
         referenceSignalsByFileId,
+      }), {
+        symbolId: primarySymbol.symbolId,
+        relatedLimit: query.relatedLimit ?? null,
       })
     : {
         items: [],
@@ -365,7 +541,19 @@ export async function assembleSymbolContext(query: SymbolContextQuery): Promise<
           },
         } satisfies RelatedFileContextBuckets,
       };
-  const exportedSymbols = primarySymbol ? await getExportedSymbols(primarySymbol.fileId) : [];
+  const exportedSymbols = primarySymbol
+    ? await traceAsync('symbol_context', 'load_exported_symbols', () => getExportedSymbols(primarySymbol.fileId), {
+        symbolId: primarySymbol.symbolId,
+      })
+    : [];
+  traceHotspot('symbol_context', 'result_summary', {
+    query: query.name,
+    relatedFiles: relatedFiles.totalCount,
+    direct: relatedFiles.buckets.directConsumers.total,
+    indirect: relatedFiles.buckets.indirectConsumers.total,
+    related: relatedFiles.buckets.relatedContext.total,
+    ambiguityDetected: ambiguity.ambiguityDetected,
+  });
 
   return {
     query: query.name,

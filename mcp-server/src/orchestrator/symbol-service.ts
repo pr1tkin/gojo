@@ -1,16 +1,22 @@
 import { assembleSymbolContext } from '../context/index.js';
+import { traceAsync } from '../instrumentation/trace.js';
 import type { GetSymbolExplorationContextOptions, SymbolExplorationContext } from './types.js';
 
 export async function getSymbolExplorationContext(
   name: string,
   options: GetSymbolExplorationContextOptions = {},
 ): Promise<SymbolExplorationContext> {
-  const context = await assembleSymbolContext({
+  const context = await traceAsync('symbol_exploration', 'assemble_symbol_context', () => assembleSymbolContext({
     name,
     repo: options.repo,
     kind: options.kind,
     limit: options.limit,
     relatedLimit: options.relatedLimit,
+  }), {
+    name,
+    repo: options.repo ?? null,
+    limit: options.limit ?? null,
+    relatedLimit: options.relatedLimit ?? null,
   });
 
   return {

@@ -29,6 +29,16 @@ import type { RelatedFileContextBuckets } from '../context/types.js';
 const DEFAULT_CANDIDATE_LIMIT = 5;
 const DEFAULT_RELATED_LIMIT = 10;
 
+interface CompactTreeNode {
+  name?: string | null;
+  resolution?: string | null;
+  filePath?: string;
+  symbolId?: string;
+  hint?: string;
+  source?: string;
+  children?: CompactTreeNode[];
+}
+
 export const exploreComponentToolDefinition = {
   name: 'explore_component',
   title: 'Explore Component',
@@ -39,21 +49,21 @@ export const exploreComponentToolDefinition = {
 };
 
 function compactTreeNodes(
-  nodes: Array<Record<string, any>> | null | undefined,
+  nodes: CompactTreeNode[] | null | undefined,
   options: { expandRelated?: boolean },
 ): RawExploreComponentUiTreeNode[] {
   return (nodes ?? []).map((node) => ({
-    name: node.name,
-    resolution: node.resolution,
+    name: node.name ?? 'unknown',
+    resolution: node.resolution ?? 'unresolved',
     ...(node.filePath ? { filePath: node.filePath } : {}),
     ...(node.symbolId ? { symbolId: node.symbolId } : {}),
     ...(node.hint ? { hint: node.hint } : {}),
     ...(node.source ? { source: node.source } : {}),
     ...(options.expandRelated && Array.isArray(node.children) && node.children.length > 0
       ? {
-          children: node.children.map((child: Record<string, any>) => ({
-            name: child.name,
-            resolution: child.resolution,
+          children: node.children.map((child) => ({
+            name: child.name ?? 'unknown',
+            resolution: child.resolution ?? 'unresolved',
             ...(child.filePath ? { filePath: child.filePath } : {}),
             ...(child.symbolId ? { symbolId: child.symbolId } : {}),
             ...(child.hint ? { hint: child.hint } : {}),

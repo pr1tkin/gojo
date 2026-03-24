@@ -133,30 +133,6 @@ function directFile(filePath: string, reason: 'imports-target' | 'reexports-targ
   };
 }
 
-function directSymbol(filePath: string, symbolName: string, confidence: 'high' | 'medium' | 'low' = 'high') {
-  return {
-    symbol: null,
-    file: null,
-    symbolId: `repo-a:${filePath}:${symbolName}`,
-    symbolName,
-    kind: 'function' as const,
-    exported: true,
-    filePath,
-    repoId: 'repo-a',
-    impactScope: 'symbol-direct' as const,
-    confidence,
-    evidence: [{
-      reason: 'calls-target' as const,
-      confidence,
-      source: 'graph' as const,
-      impactScope: 'symbol-direct' as const,
-      depth: 0,
-      via: [],
-      notes: [],
-    }],
-  };
-}
-
 function transitiveFile(filePath: string, confidence: 'medium' | 'low' = 'medium') {
   return {
     depth: 1,

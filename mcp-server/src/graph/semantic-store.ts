@@ -8,6 +8,7 @@ import {
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
+import { traceHotspot } from '../instrumentation/trace.js';
 import {
   SEMANTIC_GRAPH_SCHEMA_VERSION,
   type SemanticEdgeConfidence,
@@ -83,6 +84,29 @@ function createEmptySemanticGraphSnapshot(): SemanticGraphSnapshot {
   };
 }
 
+let cachedSemanticGraphPath: string | null = null;
+let cachedSemanticGraphValue: SemanticGraphSnapshot | null = null;
+let cachedSemanticGraphPromise: Promise<SemanticGraphSnapshot> | null = null;
+let cachedSemanticGraphSignature: string | null = null;
+
+async function getFileSignature(filePath: string): Promise<string> {
+  try {
+    const stat = await fs.stat(filePath);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: string }).code)
+        : '';
+
+    if (code === 'ENOENT') {
+      return 'missing';
+    }
+
+    throw error;
+  }
+}
+
 function normalizeSemanticGraphSnapshot(value: unknown): SemanticGraphSnapshot {
   if (!isObject(value)) {
     return createEmptySemanticGraphSnapshot();
@@ -105,21 +129,61 @@ function normalizeSemanticGraphSnapshot(value: unknown): SemanticGraphSnapshot {
 }
 
 export async function loadSemanticGraph(): Promise<SemanticGraphSnapshot> {
-  try {
-    const content = await fs.readFile(await resolveArtifactFilePath('semantic-graph.json'), 'utf8');
-    return normalizeSemanticGraphSnapshot(JSON.parse(content) as unknown);
-  } catch (error) {
-    const code =
-      typeof error === 'object' && error !== null && 'code' in error
-        ? String((error as { code?: string }).code)
-        : '';
+  const filePath = await resolveArtifactFilePath('semantic-graph.json');
+  const fileSignature = await getFileSignature(filePath);
 
-    if (code === 'ENOENT') {
-      return createEmptySemanticGraphSnapshot();
-    }
-
-    throw error;
+  if (
+    cachedSemanticGraphPath === filePath &&
+    cachedSemanticGraphSignature === fileSignature &&
+    cachedSemanticGraphValue
+  ) {
+    traceHotspot('semantic_graph', 'cache_hit', { filePath });
+    return cachedSemanticGraphValue;
   }
+
+  if (
+    cachedSemanticGraphPath === filePath &&
+    cachedSemanticGraphSignature === fileSignature &&
+    cachedSemanticGraphPromise
+  ) {
+    traceHotspot('semantic_graph', 'cache_wait', { filePath });
+    return cachedSemanticGraphPromise;
+  }
+
+  cachedSemanticGraphPath = filePath;
+  cachedSemanticGraphSignature = fileSignature;
+  cachedSemanticGraphPromise = (async () => {
+    try {
+      const started = process.hrtime.bigint();
+      const content = await fs.readFile(filePath, 'utf8');
+      const graph = normalizeSemanticGraphSnapshot(JSON.parse(content) as unknown);
+      cachedSemanticGraphValue = graph;
+      traceHotspot('semantic_graph', 'load', {
+        filePath,
+        ms: Number(process.hrtime.bigint() - started) / 1_000_000,
+        edges: graph.edges.length,
+      });
+      return graph;
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: string }).code)
+          : '';
+
+      if (code === 'ENOENT') {
+        const empty = createEmptySemanticGraphSnapshot();
+        cachedSemanticGraphValue = empty;
+        return empty;
+      }
+
+      cachedSemanticGraphPath = null;
+      throw error;
+    } finally {
+      cachedSemanticGraphPromise = null;
+    }
+  })();
+
+  return cachedSemanticGraphPromise;
 }
 
 export async function saveSemanticGraph(
@@ -139,6 +203,11 @@ export async function saveSemanticGraph(
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(tempFilePath, JSON.stringify(graph, null, 2), 'utf8');
     await fs.rename(tempFilePath, filePath);
+  }
+
+  if (cachedSemanticGraphPath === filePath) {
+    cachedSemanticGraphValue = graph;
+    cachedSemanticGraphSignature = await getFileSignature(filePath);
   }
 
   return filePath;

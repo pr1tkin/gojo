@@ -1,5 +1,4 @@
 import {
-  buildSearchRepoFingerprints,
   compareSearchFingerprintSets,
   SEARCH_FINGERPRINT_CONTRACT_VERSION,
 } from './search-fingerprint.js';

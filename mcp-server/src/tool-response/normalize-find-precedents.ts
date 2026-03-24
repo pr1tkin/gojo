@@ -139,14 +139,6 @@ export interface FindPrecedentsNormalizationInput {
   mode: NormalizedMode;
 }
 
-function toStringArray(values: string[] | undefined): string[] | undefined {
-  if (!values?.length) {
-    return undefined;
-  }
-
-  return values;
-}
-
 function buildExpansionSummary(parts: Array<string | undefined>): string | undefined {
   const values = parts.map((part) => part?.trim()).filter(Boolean) as string[];
   return values.length > 0 ? values.join(' | ') : undefined;

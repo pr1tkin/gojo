@@ -1,5 +1,3 @@
-import path from 'node:path';
-
 import type { SymbolKind } from '../types.js';
 import { createFileId } from './ids.js';
 import { loadRequiredSymbolIndex } from './store.js';

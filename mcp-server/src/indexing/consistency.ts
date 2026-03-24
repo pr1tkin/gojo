@@ -24,10 +24,7 @@ import { loadUiPropSurfaceIndex, saveUiPropSurfaceIndex } from '../ui-props/stor
 import type { UiPropSurfaceIndex } from '../ui-props/types.js';
 import {
   getCoordinationDirectory,
-  getDataDirectory,
   getGenerationArtifactFilePath,
-  getGenerationsDirectory,
-  getGenerationStateFilePath,
   getTempDirectory,
   loadCurrentGenerationPointer,
   loadCurrentGenerationState,
@@ -47,7 +44,6 @@ import type {
   GenerationChangeSummary,
   IndexGenerationCounts,
   IndexGenerationState,
-  SearchFreshnessState,
 } from './types.js';
 
 const CONSISTENCY_REPORT_SCHEMA_VERSION = 1;
@@ -270,25 +266,6 @@ function isRiskyChangeSummary(changeSummary: GenerationChangeSummary | null): bo
   );
 }
 
-function collectKnownManifestMaps(state: IndexGenerationState): {
-  manifestFileIds: Set<string>;
-  manifestPaths: Set<string>;
-  pathByFileId: Map<string, string>;
-} {
-  const manifestFileIds = new Set<string>();
-  const manifestPaths = new Set<string>();
-  const pathByFileId = new Map<string, string>();
-
-  for (const relation of state.manifest) {
-    const fileId = `${relation.repoId}:${relation.filePath}`;
-    manifestFileIds.add(fileId);
-    manifestPaths.add(relation.filePath);
-    pathByFileId.set(fileId, relation.filePath);
-  }
-
-  return { manifestFileIds, manifestPaths, pathByFileId };
-}
-
 function normalizeFileId(repoId: string, filePath: string): string {
   return `${repoId}:${filePath}`;
 }
@@ -299,16 +276,6 @@ function collectExplicitCoverageExemptions(state: IndexGenerationState): Set<str
       .filter((issue) => typeof issue.fileId === 'string' && issue.fileId.length > 0)
       .map((issue) => issue.fileId as string),
   );
-}
-
-function createManifestFileMapsFromRelations(symbolIndex: SymbolIndex): Map<string, string> {
-  const paths = new Map<string, string>();
-
-  for (const relation of Object.values(symbolIndex.byFile)) {
-    paths.set(relation.fileId, relation.filePath);
-  }
-
-  return paths;
 }
 
 function sortStrings(values: Iterable<string>): string[] {

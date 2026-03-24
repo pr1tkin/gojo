@@ -12,6 +12,8 @@ import type {
   RelatedFileContextBuckets,
   RankedFileContextItem,
 } from './types.js';
+import type { SymbolContextBudget } from './types.js';
+import { EXECUTION_BUDGETS } from '../execution/budgets.js';
 
 const DEFAULT_RELATED_LIMIT = 10;
 const EXACT_RELATED_LIMIT_FLOOR = 24;
@@ -21,6 +23,7 @@ const DEFAULT_EXPLORATION_BUDGET: ExplorationBudget = {
   maxEdges: 3200,
   maxDepth: 2,
 };
+const DEFAULT_SYMBOL_CONTEXT_BUDGET: SymbolContextBudget = EXECUTION_BUDGETS.standard.symbolContext;
 
 function isNoisePath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, '/');
@@ -68,6 +71,32 @@ function resolveExplorationBudget(options: AssembleFileContextOptions): Explorat
     maxNodes: Math.max(1, options.explorationBudget?.maxNodes ?? DEFAULT_EXPLORATION_BUDGET.maxNodes),
     maxEdges: Math.max(1, options.explorationBudget?.maxEdges ?? DEFAULT_EXPLORATION_BUDGET.maxEdges),
     maxDepth: Math.max(1, options.explorationBudget?.maxDepth ?? DEFAULT_EXPLORATION_BUDGET.maxDepth),
+  };
+}
+
+function resolveSymbolContextBudget(options: AssembleFileContextOptions): SymbolContextBudget {
+  return {
+    maxCandidateSymbols: Math.max(
+      1,
+      options.symbolContextBudget?.maxCandidateSymbols ?? DEFAULT_SYMBOL_CONTEXT_BUDGET.maxCandidateSymbols,
+    ),
+    maxDirectConsumerEdges: Math.max(
+      1,
+      options.symbolContextBudget?.maxDirectConsumerEdges ?? DEFAULT_SYMBOL_CONTEXT_BUDGET.maxDirectConsumerEdges,
+    ),
+    maxIndirectConsumerEdges: Math.max(
+      1,
+      options.symbolContextBudget?.maxIndirectConsumerEdges ?? DEFAULT_SYMBOL_CONTEXT_BUDGET.maxIndirectConsumerEdges,
+    ),
+    maxRelatedFiles: Math.max(1, options.symbolContextBudget?.maxRelatedFiles ?? DEFAULT_SYMBOL_CONTEXT_BUDGET.maxRelatedFiles),
+    maxWeakExpansions: Math.max(
+      0,
+      options.symbolContextBudget?.maxWeakExpansions ?? DEFAULT_SYMBOL_CONTEXT_BUDGET.maxWeakExpansions,
+    ),
+    strongEvidenceThreshold: Math.max(
+      1,
+      options.symbolContextBudget?.strongEvidenceThreshold ?? DEFAULT_SYMBOL_CONTEXT_BUDGET.strongEvidenceThreshold,
+    ),
   };
 }
 
@@ -351,11 +380,9 @@ function prioritizeCandidateFileIds(
   signalsByFileId: Map<string, { edgeTypes: FileContextConnectionKind[]; connectionCount: number }>,
   requestedLimit: number,
   budget: ExplorationBudget,
+  symbolContextBudget: SymbolContextBudget,
 ): string[] {
-  const candidateFloor = Math.max(requestedLimit * 6, EXACT_RELATED_LIMIT_FLOOR + INFERRED_RELATED_LIMIT_FLOOR);
-  const maxCandidates = Math.min(budget.maxNodes, Math.max(candidateFloor, requestedLimit * 12));
-
-  return Array.from(signalsByFileId.entries())
+  const rankedEntries = Array.from(signalsByFileId.entries())
     .map(([fileId, signal]) => {
       const strongestEdgeRank = signal.edgeTypes.reduce((current, kind) => Math.max(current, edgeStrengthRank(kind)), 0);
 
@@ -373,9 +400,37 @@ function prioritizeCandidateFileIds(
         right.distinctEdgeCount - left.distinctEdgeCount ||
         left.fileId.localeCompare(right.fileId)
       );
-    })
-    .slice(0, maxCandidates)
-    .map((entry) => entry.fileId);
+    });
+
+  const strongEntries = rankedEntries.filter((entry) => entry.strongestEdgeRank >= 3);
+  const mediumEntries = rankedEntries.filter((entry) => entry.strongestEdgeRank === 2);
+  const weakEntries = rankedEntries.filter((entry) => entry.strongestEdgeRank <= 1);
+  const candidateFloor = Math.max(requestedLimit * 4, EXACT_RELATED_LIMIT_FLOOR);
+  const maxCandidates = Math.min(
+    Math.min(budget.maxNodes, symbolContextBudget.maxRelatedFiles),
+    Math.max(candidateFloor, requestedLimit * 6),
+  );
+  const allowWeak =
+    strongEntries.length < symbolContextBudget.strongEvidenceThreshold ||
+    mediumEntries.length === 0;
+  const selected = [
+    ...strongEntries.slice(0, Math.min(strongEntries.length, maxCandidates)),
+    ...mediumEntries.slice(
+      0,
+      Math.max(
+        0,
+        Math.min(mediumEntries.length, maxCandidates - Math.min(strongEntries.length, maxCandidates)),
+      ),
+    ),
+  ];
+
+  if (allowWeak && selected.length < maxCandidates) {
+    selected.push(
+      ...weakEntries.slice(0, Math.min(symbolContextBudget.maxWeakExpansions, maxCandidates - selected.length)),
+    );
+  }
+
+  return selected.slice(0, maxCandidates).map((entry) => entry.fileId);
 }
 
 function mapRankedRelatedFiles(
@@ -418,12 +473,32 @@ export async function assembleRelatedFileContext(
     };
   }
 
-  const relatedFiles = await getRelatedFiles(fileId);
   const budget = resolveExplorationBudget(options);
-  const signalsByFileId = buildGraphSignalsByFileId(relatedFiles);
+  const symbolContextBudget = resolveSymbolContextBudget(options);
+  const signalsByFileId = new Map<string, { edgeTypes: FileContextConnectionKind[]; connectionCount: number }>();
   mergeReferenceSignals(signalsByFileId, options.referenceSignalsByFileId);
+  const strongReferenceCount = Array.from(signalsByFileId.values()).filter((signal) => hasStrongEdge(signal.edgeTypes)).length;
+  const shouldExpandGraphContext =
+    strongReferenceCount < symbolContextBudget.strongEvidenceThreshold &&
+    signalsByFileId.size < symbolContextBudget.maxRelatedFiles;
+
+  let relatedFiles = [] as Awaited<ReturnType<typeof getRelatedFiles>>;
+
+  if (shouldExpandGraphContext) {
+    relatedFiles = await getRelatedFiles(fileId);
+
+    for (const [candidateFileId, signal] of buildGraphSignalsByFileId(relatedFiles).entries()) {
+      mergeSignalKinds(signalsByFileId, candidateFileId, signal.edgeTypes, signal.connectionCount);
+    }
+  }
+
   const totalCandidateCount = signalsByFileId.size;
-  const candidateFileIds = prioritizeCandidateFileIds(signalsByFileId, options.relatedLimit ?? DEFAULT_RELATED_LIMIT, budget);
+  const candidateFileIds = prioritizeCandidateFileIds(
+    signalsByFileId,
+    options.relatedLimit ?? DEFAULT_RELATED_LIMIT,
+    budget,
+    symbolContextBudget,
+  );
   const candidateFileIdSet = new Set(candidateFileIds);
   const filesById = new Map(
     relatedFiles
@@ -456,7 +531,7 @@ export async function assembleRelatedFileContext(
       relation,
       graphSignals: signalsByFileId.get(relation.fileId),
     })),
-    Math.min(candidateRelations.length, budget.maxNodes),
+    Math.min(candidateRelations.length, budget.maxNodes, symbolContextBudget.maxRelatedFiles),
   );
 
   const mapped = mapRankedRelatedFiles(ranked, filesById, signalsByFileId);

@@ -8,6 +8,7 @@ import {
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
+import { traceHotspot } from '../instrumentation/trace.js';
 import { createDeclarationFingerprint, createFileId, createSymbolId } from './ids.js';
 import type { FileRelation, IndexedSymbol, SymbolFrequencyStats, SymbolIndex } from './types.js';
 
@@ -173,6 +174,29 @@ function createEmptyIndex(): SymbolIndex {
   };
 }
 
+let cachedSymbolIndexPath: string | null = null;
+let cachedSymbolIndexValue: SymbolIndex | null = null;
+let cachedSymbolIndexPromise: Promise<SymbolIndex> | null = null;
+let cachedSymbolIndexSignature: string | null = null;
+
+async function getFileSignature(filePath: string): Promise<string> {
+  try {
+    const stat = await fs.stat(filePath);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: string }).code)
+        : '';
+
+    if (code === 'ENOENT') {
+      return 'missing';
+    }
+
+    throw error;
+  }
+}
+
 function normalizeSymbols(value: unknown): SymbolIndex['symbols'] {
   if (!Array.isArray(value)) {
     return [];
@@ -323,28 +347,69 @@ function normalizeLoadedIndex(value: unknown): SymbolIndex {
 }
 
 export async function loadSymbolIndex(): Promise<SymbolIndex> {
-  try {
-    const content = await fs.readFile(await resolveArtifactFilePath('symbol-index.json'), 'utf8');
-    const parsed = JSON.parse(content) as unknown;
+  const filePath = await resolveArtifactFilePath('symbol-index.json');
+  const fileSignature = await getFileSignature(filePath);
 
-    return normalizeLoadedIndex(parsed);
-  } catch (error) {
-    const code =
-      typeof error === 'object' && error !== null && 'code' in error
-        ? String((error as { code?: string }).code)
-        : '';
-
-    if (code === 'ENOENT') {
-      return createEmptyIndex();
-    }
-
-    throw error;
+  if (
+    cachedSymbolIndexPath === filePath &&
+    cachedSymbolIndexSignature === fileSignature &&
+    cachedSymbolIndexValue
+  ) {
+    traceHotspot('symbol_index', 'cache_hit', { filePath });
+    return cachedSymbolIndexValue;
   }
+
+  if (
+    cachedSymbolIndexPath === filePath &&
+    cachedSymbolIndexSignature === fileSignature &&
+    cachedSymbolIndexPromise
+  ) {
+    traceHotspot('symbol_index', 'cache_wait', { filePath });
+    return cachedSymbolIndexPromise;
+  }
+
+  cachedSymbolIndexPath = filePath;
+  cachedSymbolIndexSignature = fileSignature;
+  cachedSymbolIndexPromise = (async () => {
+    try {
+      const started = process.hrtime.bigint();
+      const content = await fs.readFile(filePath, 'utf8');
+      const index = normalizeLoadedIndex(JSON.parse(content) as unknown);
+      cachedSymbolIndexValue = index;
+      traceHotspot('symbol_index', 'load', {
+        filePath,
+        ms: Number(process.hrtime.bigint() - started) / 1_000_000,
+        symbols: index.symbols.length,
+        files: Object.keys(index.byFile).length,
+      });
+      return index;
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: string }).code)
+          : '';
+
+      if (code === 'ENOENT') {
+        const empty = createEmptyIndex();
+        cachedSymbolIndexValue = empty;
+        return empty;
+      }
+
+      cachedSymbolIndexPath = null;
+      throw error;
+    } finally {
+      cachedSymbolIndexPromise = null;
+    }
+  })();
+
+  return cachedSymbolIndexPromise;
 }
 
 export async function loadRequiredSymbolIndex(): Promise<SymbolIndex> {
+  const filePath = await resolveArtifactFilePath('symbol-index.json');
+
   try {
-    await fs.access(await resolveArtifactFilePath('symbol-index.json'));
+    await fs.access(filePath);
   } catch (error) {
     const code =
       typeof error === 'object' && error !== null && 'code' in error
@@ -378,6 +443,11 @@ export async function saveSymbolIndex(
     await fs.mkdir(symbolIndexDirectory, { recursive: true });
     await fs.writeFile(tempFilePath, JSON.stringify(index, null, 2), 'utf8');
     await fs.rename(tempFilePath, filePath);
+  }
+
+  if (cachedSymbolIndexPath === filePath) {
+    cachedSymbolIndexValue = index;
+    cachedSymbolIndexSignature = await getFileSignature(filePath);
   }
 
   return filePath;

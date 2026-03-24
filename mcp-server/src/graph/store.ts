@@ -8,6 +8,7 @@ import {
   resolveArtifactFilePath,
   resolveArtifactFilePathSync,
 } from '../indexing/generation-store.js';
+import { traceHotspot } from '../instrumentation/trace.js';
 import { CODE_GRAPH_SCHEMA_VERSION, type CodeGraphSnapshot, type GraphEdge, type GraphEdgeType } from './types.js';
 
 function getCodeGraphDirectory(): string {
@@ -61,6 +62,29 @@ function createEmptyGraphSnapshot(): CodeGraphSnapshot {
   };
 }
 
+let cachedGraphPath: string | null = null;
+let cachedGraphValue: CodeGraphSnapshot | null = null;
+let cachedGraphPromise: Promise<CodeGraphSnapshot> | null = null;
+let cachedGraphSignature: string | null = null;
+
+async function getFileSignature(filePath: string): Promise<string> {
+  try {
+    const stat = await fs.stat(filePath);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: string }).code)
+        : '';
+
+    if (code === 'ENOENT') {
+      return 'missing';
+    }
+
+    throw error;
+  }
+}
+
 function normalizeGraphSnapshot(value: unknown): CodeGraphSnapshot {
   if (!isObject(value)) {
     return createEmptyGraphSnapshot();
@@ -100,21 +124,55 @@ function normalizeGraphSnapshot(value: unknown): CodeGraphSnapshot {
 }
 
 export async function loadCodeGraph(): Promise<CodeGraphSnapshot> {
-  try {
-    const content = await fs.readFile(await resolveArtifactFilePath('code-graph.json'), 'utf8');
-    return normalizeGraphSnapshot(JSON.parse(content) as unknown);
-  } catch (error) {
-    const code =
-      typeof error === 'object' && error !== null && 'code' in error
-        ? String((error as { code?: string }).code)
-        : '';
+  const filePath = await resolveArtifactFilePath('code-graph.json');
+  const fileSignature = await getFileSignature(filePath);
 
-    if (code === 'ENOENT') {
-      return createEmptyGraphSnapshot();
-    }
-
-    throw error;
+  if (cachedGraphPath === filePath && cachedGraphSignature === fileSignature && cachedGraphValue) {
+    traceHotspot('code_graph', 'cache_hit', { filePath });
+    return cachedGraphValue;
   }
+
+  if (cachedGraphPath === filePath && cachedGraphSignature === fileSignature && cachedGraphPromise) {
+    traceHotspot('code_graph', 'cache_wait', { filePath });
+    return cachedGraphPromise;
+  }
+
+  cachedGraphPath = filePath;
+  cachedGraphSignature = fileSignature;
+  cachedGraphPromise = (async () => {
+    try {
+      const started = process.hrtime.bigint();
+      const content = await fs.readFile(filePath, 'utf8');
+      const graph = normalizeGraphSnapshot(JSON.parse(content) as unknown);
+      cachedGraphValue = graph;
+      traceHotspot('code_graph', 'load', {
+        filePath,
+        ms: Number(process.hrtime.bigint() - started) / 1_000_000,
+        files: Object.keys(graph.nodes.files).length,
+        symbols: Object.keys(graph.nodes.symbols).length,
+        edges: graph.edges.length,
+      });
+      return graph;
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: string }).code)
+          : '';
+
+      if (code === 'ENOENT') {
+        const empty = createEmptyGraphSnapshot();
+        cachedGraphValue = empty;
+        return empty;
+      }
+
+      cachedGraphPath = null;
+      throw error;
+    } finally {
+      cachedGraphPromise = null;
+    }
+  })();
+
+  return cachedGraphPromise;
 }
 
 export async function saveCodeGraph(
@@ -134,6 +192,11 @@ export async function saveCodeGraph(
     await fs.mkdir(directory, { recursive: true });
     await fs.writeFile(tempFilePath, JSON.stringify(graph, null, 2), 'utf8');
     await fs.rename(tempFilePath, filePath);
+  }
+
+  if (cachedGraphPath === filePath) {
+    cachedGraphValue = graph;
+    cachedGraphSignature = await getFileSignature(filePath);
   }
 
   return filePath;

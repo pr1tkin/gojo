@@ -391,6 +391,113 @@ describe('context assembly', () => {
     ]);
   });
 
+  it('stops broad weak related-file expansion once strong evidence is already available', async () => {
+    const tempRoot = await createTempDirectory();
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    const reposRoot = path.join(tempRoot, 'repos');
+    const repositoryRoot = path.join(reposRoot, 'pruned-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+    await fs.writeFile(path.join(repositoryRoot, 'src', 'shared.ts'), 'export const shared = 1;', 'utf8');
+    await fs.writeFile(
+      path.join(repositoryRoot, 'src', 'consumer.ts'),
+      [
+        "import { shared } from './shared';",
+        'export const consumer = shared;',
+      ].join('\n'),
+      'utf8',
+    );
+
+    for (const name of ['barrel-a', 'barrel-b', 'barrel-c', 'barrel-d']) {
+      await fs.writeFile(
+        path.join(repositoryRoot, 'src', `${name}.ts`),
+        `export { shared } from './shared';`,
+        'utf8',
+      );
+    }
+
+    const index = await buildIndexedSymbols(reposRoot);
+    await saveSymbolIndex(index);
+    await saveCodeGraph(await buildCodeGraph());
+
+    const sharedFileId = createFileId('pruned-repo', 'src/shared.ts');
+    const consumerFileId = createFileId('pruned-repo', 'src/consumer.ts');
+
+    const related = await assembleRelatedFileContext(sharedFileId, {
+      relatedLimit: 2,
+      symbolContextBudget: {
+        strongEvidenceThreshold: 1,
+        maxRelatedFiles: 4,
+        maxWeakExpansions: 0,
+        maxCandidateSymbols: 8,
+        maxDirectConsumerEdges: 4,
+        maxIndirectConsumerEdges: 2,
+      },
+      referenceSignalsByFileId: {
+        [consumerFileId]: {
+          kinds: ['call_reference'],
+          connectionCount: 1,
+        },
+      },
+    });
+
+    expect(related.totalCount).toBe(1);
+    expect(related.buckets.directConsumers.entries).toEqual([
+      expect.objectContaining({
+        file: expect.objectContaining({ filePath: 'src/consumer.ts' }),
+      }),
+    ]);
+    expect(related.buckets.relatedContext.entries).toEqual([]);
+  });
+
+  it('caps symbol-context candidates early without losing the strongest repo match', async () => {
+    const tempRoot = await createTempDirectory();
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    const reposRoot = path.join(tempRoot, 'repos');
+    const repositoryRoot = path.join(reposRoot, 'candidate-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'src'), { recursive: true });
+
+    await fs.writeFile(path.join(repositoryRoot, 'src', 'preferred.ts'), 'export function AppRouter() {}', 'utf8');
+
+    for (let indexValue = 0; indexValue < 8; indexValue += 1) {
+      await fs.writeFile(
+        path.join(repositoryRoot, 'src', `duplicate-${indexValue}.ts`),
+        `function AppRouter() { return ${indexValue}; }`,
+        'utf8',
+      );
+    }
+
+    const index = await buildIndexedSymbols(reposRoot);
+    await saveSymbolIndex(index);
+    await saveCodeGraph(await buildCodeGraph());
+
+    const bundle = await assembleSymbolContext({
+      name: 'AppRouter',
+      repo: 'candidate-repo',
+      symbolContextBudget: {
+        maxCandidateSymbols: 3,
+        maxDirectConsumerEdges: 4,
+        maxIndirectConsumerEdges: 2,
+        maxRelatedFiles: 4,
+        maxWeakExpansions: 1,
+        strongEvidenceThreshold: 2,
+      },
+    });
+
+    expect(bundle.totalRankedSymbols).toBe(3);
+    expect(bundle.primarySymbol).toEqual(
+      expect.objectContaining({
+        filePath: 'src/preferred.ts',
+        exported: true,
+      }),
+    );
+  });
+
   it('degrades safely for missing file and unresolved symbol context requests', async () => {
     const tempRoot = await createTempDirectory();
     tempDirectories.push(tempRoot);

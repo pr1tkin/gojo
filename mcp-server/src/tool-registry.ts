@@ -29,7 +29,7 @@ export interface ToolDefinitionLike {
   description: string;
   visibility: ToolVisibility;
   role?: ToolRole;
-  inputSchema: any;
+  inputSchema: unknown;
 }
 
 interface ToolRegistration {
@@ -69,14 +69,14 @@ function buildDescription(definition: ToolDefinitionLike): string {
 function registerTool(
   server: McpServer,
   definition: ToolDefinitionLike,
-  handler: (input: any) => Promise<{ content: Array<{ type: 'text'; text: string }> }>,
+  handler: (input: unknown) => Promise<{ content: Array<{ type: 'text'; text: string }> }>,
 ): void {
   server.registerTool(
     definition.name,
     {
       title: definition.title,
       description: buildDescription(definition),
-      inputSchema: definition.inputSchema,
+      inputSchema: definition.inputSchema as never,
       _meta: {
         visibility: definition.visibility,
         internal: definition.visibility === 'internal',
@@ -84,7 +84,7 @@ function registerTool(
         recommendedEntryPoint: definition.role === 'primary',
       },
     },
-    handler,
+    handler as never,
   );
 }
 
@@ -93,71 +93,93 @@ export function getToolRegistrations(): ToolRegistration[] {
     {
       definition: buildChangeContextToolDefinition,
       register: (server, _config) =>
-        registerTool(server, buildChangeContextToolDefinition, async (input) => runBuildChangeContextTool(input)),
+        registerTool(server, buildChangeContextToolDefinition, async (input) =>
+          runBuildChangeContextTool(input as Parameters<typeof runBuildChangeContextTool>[0]),
+        ),
     },
     {
       definition: exploreComponentToolDefinition,
       register: (server, _config) =>
-        registerTool(server, exploreComponentToolDefinition, async (input) => runExploreComponentTool(input)),
+        registerTool(server, exploreComponentToolDefinition, async (input) =>
+          runExploreComponentTool(input as Parameters<typeof runExploreComponentTool>[0]),
+        ),
     },
     {
       definition: findPrecedentsToolDefinition,
       register: (server, _config) =>
-        registerTool(server, findPrecedentsToolDefinition, async (input) => runFindPrecedentsTool(input)),
+        registerTool(server, findPrecedentsToolDefinition, async (input) =>
+          runFindPrecedentsTool(input as Parameters<typeof runFindPrecedentsTool>[0]),
+        ),
     },
     {
       definition: collectRefactorContextToolDefinition,
       register: (server, _config) =>
         registerTool(server, collectRefactorContextToolDefinition, async (input) =>
-          runCollectRefactorContextTool(input),
+          runCollectRefactorContextTool(input as Parameters<typeof runCollectRefactorContextTool>[0]),
         ),
     },
     {
       definition: planChangeToolDefinition,
       register: (server, _config) =>
-        registerTool(server, planChangeToolDefinition, async (input) => runPlanChangeTool(input)),
+        registerTool(server, planChangeToolDefinition, async (input) =>
+          runPlanChangeTool(input as Parameters<typeof runPlanChangeTool>[0]),
+        ),
     },
     {
       definition: searchCodeToolDefinition,
       register: (server, config) =>
-        registerTool(server, searchCodeToolDefinition, async (input) => runSearchCodeTool(config.search.baseUrl, input)),
+        registerTool(server, searchCodeToolDefinition, async (input) =>
+          runSearchCodeTool(config.search.baseUrl, input as Parameters<typeof runSearchCodeTool>[1]),
+        ),
     },
     {
       definition: openFileToolDefinition,
       register: (server, config) =>
-        registerTool(server, openFileToolDefinition, async (input) => runOpenFileTool(config.reposRoot, input)),
+        registerTool(server, openFileToolDefinition, async (input) =>
+          runOpenFileTool(config.reposRoot, input as Parameters<typeof runOpenFileTool>[1]),
+        ),
     },
     {
       definition: listSymbolsToolDefinition,
       register: (server, config) =>
-        registerTool(server, listSymbolsToolDefinition, async (input) => runListSymbolsTool(config.reposRoot, input)),
+        registerTool(server, listSymbolsToolDefinition, async (input) =>
+          runListSymbolsTool(config.reposRoot, input as Parameters<typeof runListSymbolsTool>[1]),
+        ),
     },
     {
       definition: findSymbolToolDefinition,
       register: (server, config) =>
-        registerTool(server, findSymbolToolDefinition, async (input) => runFindSymbolTool(config.reposRoot, input)),
+        registerTool(server, findSymbolToolDefinition, async (input) =>
+          runFindSymbolTool(config.reposRoot, input as Parameters<typeof runFindSymbolTool>[1]),
+        ),
     },
     {
       definition: findReferencesToolDefinition,
       register: (server, config) =>
         registerTool(server, findReferencesToolDefinition, async (input) =>
-          runFindReferencesTool(config.reposRoot, config.search.baseUrl, input),
+          runFindReferencesTool(config.reposRoot, config.search.baseUrl, input as Parameters<typeof runFindReferencesTool>[2]),
         ),
     },
     {
       definition: findRelatedFilesToolDefinition,
       register: (server, _config) =>
-        registerTool(server, findRelatedFilesToolDefinition, async (input) => runFindRelatedFilesTool(input)),
+        registerTool(server, findRelatedFilesToolDefinition, async (input) =>
+          runFindRelatedFilesTool(input as Parameters<typeof runFindRelatedFilesTool>[0]),
+        ),
     },
     {
       definition: analyzeSymbolToolDefinition,
       register: (server, _config) =>
-        registerTool(server, analyzeSymbolToolDefinition, async (input) => runAnalyzeSymbolTool(input)),
+        registerTool(server, analyzeSymbolToolDefinition, async (input) =>
+          runAnalyzeSymbolTool(input as Parameters<typeof runAnalyzeSymbolTool>[0]),
+        ),
     },
     {
       definition: searchPatternsToolDefinition,
       register: (server, _config) =>
-        registerTool(server, searchPatternsToolDefinition, async (input) => runSearchPatternsTool(input)),
+        registerTool(server, searchPatternsToolDefinition, async (input) =>
+          runSearchPatternsTool(input as Parameters<typeof runSearchPatternsTool>[0]),
+        ),
     },
   ];
 }

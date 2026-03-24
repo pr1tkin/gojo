@@ -17,16 +17,96 @@ export interface SemanticEdgeResult {
   toSymbol: SymbolNode | null;
 }
 
+interface GraphLookupIndex {
+  incomingByNodeId: Map<string, GraphEdge[]>;
+  outgoingByNodeId: Map<string, GraphEdge[]>;
+}
+
+interface SemanticLookupIndex {
+  incomingBySymbolId: Map<string, SemanticGraphEdge[]>;
+  outgoingBySymbolId: Map<string, SemanticGraphEdge[]>;
+}
+
+const graphLookupIndexCache = new WeakMap<CodeGraphSnapshot, GraphLookupIndex>();
+const semanticLookupIndexCache = new WeakMap<object, SemanticLookupIndex>();
+
+function buildGraphLookupIndex(graph: CodeGraphSnapshot): GraphLookupIndex {
+  const cached = graphLookupIndexCache.get(graph);
+
+  if (cached) {
+    return cached;
+  }
+
+  const incomingByNodeId = new Map<string, GraphEdge[]>();
+  const outgoingByNodeId = new Map<string, GraphEdge[]>();
+
+  for (const edge of graph.edges) {
+    const outgoing = outgoingByNodeId.get(edge.fromId) ?? [];
+    outgoing.push(edge);
+    outgoingByNodeId.set(edge.fromId, outgoing);
+
+    const incoming = incomingByNodeId.get(edge.toId) ?? [];
+    incoming.push(edge);
+    incomingByNodeId.set(edge.toId, incoming);
+  }
+
+  const index = {
+    incomingByNodeId,
+    outgoingByNodeId,
+  };
+  graphLookupIndexCache.set(graph, index);
+  return index;
+}
+
+function buildSemanticLookupIndex(graph: { edges: SemanticGraphEdge[] }): SemanticLookupIndex {
+  const cached = semanticLookupIndexCache.get(graph);
+
+  if (cached) {
+    return cached;
+  }
+
+  const incomingBySymbolId = new Map<string, SemanticGraphEdge[]>();
+  const outgoingBySymbolId = new Map<string, SemanticGraphEdge[]>();
+
+  for (const edge of graph.edges) {
+    if (edge.toSymbolId) {
+      const incoming = incomingBySymbolId.get(edge.toSymbolId) ?? [];
+      incoming.push(edge);
+      incomingBySymbolId.set(edge.toSymbolId, incoming);
+    }
+
+    if (edge.fromSymbolId) {
+      const outgoing = outgoingBySymbolId.get(edge.fromSymbolId) ?? [];
+      outgoing.push(edge);
+      outgoingBySymbolId.set(edge.fromSymbolId, outgoing);
+    }
+  }
+
+  const index = {
+    incomingBySymbolId,
+    outgoingBySymbolId,
+  };
+  semanticLookupIndexCache.set(graph, index);
+  return index;
+}
+
 function getEdgeMatches(
   graph: CodeGraphSnapshot,
   nodeId: string,
   direction: 'incoming' | 'outgoing',
   edgeType?: GraphEdgeType,
 ): GraphEdge[] {
-  return graph.edges.filter((edge) => {
-    const matchesDirection = direction === 'outgoing' ? edge.fromId === nodeId : edge.toId === nodeId;
-    return matchesDirection && (!edgeType || edge.type === edgeType);
-  });
+  const index = buildGraphLookupIndex(graph);
+  const edges =
+    direction === 'outgoing'
+      ? index.outgoingByNodeId.get(nodeId) ?? []
+      : index.incomingByNodeId.get(nodeId) ?? [];
+
+  if (!edgeType) {
+    return edges;
+  }
+
+  return edges.filter((edge) => edge.type === edgeType);
 }
 
 function mapEdgesToFileNodes(
@@ -263,10 +343,11 @@ export async function getIncomingSemanticEdgesForSymbol(
   options: { exactness?: SemanticEdgeExactness } = {},
 ): Promise<SemanticEdgeResult[]> {
   const [semanticGraph, graph] = await Promise.all([loadSemanticGraph(), loadCodeGraph()]);
+  const index = buildSemanticLookupIndex(semanticGraph);
 
   return mapSemanticEdges(
     graph,
-    semanticGraph.edges.filter((edge) => edge.toSymbolId === symbolId && matchesExactness(edge, options.exactness)),
+    (index.incomingBySymbolId.get(symbolId) ?? []).filter((edge) => matchesExactness(edge, options.exactness)),
   );
 }
 
@@ -275,10 +356,11 @@ export async function getOutgoingSemanticEdgesForSymbol(
   options: { exactness?: SemanticEdgeExactness } = {},
 ): Promise<SemanticEdgeResult[]> {
   const [semanticGraph, graph] = await Promise.all([loadSemanticGraph(), loadCodeGraph()]);
+  const index = buildSemanticLookupIndex(semanticGraph);
 
   return mapSemanticEdges(
     graph,
-    semanticGraph.edges.filter((edge) => edge.fromSymbolId === symbolId && matchesExactness(edge, options.exactness)),
+    (index.outgoingBySymbolId.get(symbolId) ?? []).filter((edge) => matchesExactness(edge, options.exactness)),
   );
 }
 

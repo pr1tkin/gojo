@@ -10,7 +10,6 @@ import type { SearchRefreshSnapshot } from '../indexing/types.js';
 import type { AppConfig } from '../types.js';
 import {
   SearchHelperError,
-  resolveSearchHelper,
   validateSearchHelper,
 } from '../search/helpers.js';
 import type { RuntimeLogger } from './types.js';
@@ -357,7 +356,7 @@ export async function inspectSearchRuntime(config: AppConfig): Promise<{
   };
 }
 
-export async function getSearchReadinessSignal(config: AppConfig): Promise<string> {
+export async function getSearchReadinessSignal(_config: AppConfig): Promise<string> {
   const freshness = await getCurrentSearchFreshness();
 
   if (!freshness) {

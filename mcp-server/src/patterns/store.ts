@@ -131,6 +131,29 @@ function createEmptyPatternIndex(): PatternIndex {
   };
 }
 
+let cachedPatternIndexPath: string | null = null;
+let cachedPatternIndexResult: PatternIndexLoadResult | null = null;
+let cachedPatternIndexPromise: Promise<PatternIndexLoadResult> | null = null;
+let cachedPatternIndexSignature: string | null = null;
+
+async function getFileSignature(filePath: string): Promise<string> {
+  try {
+    const stat = await fs.stat(filePath);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String((error as { code?: string }).code)
+        : '';
+
+    if (code === 'ENOENT') {
+      return 'missing';
+    }
+
+    throw error;
+  }
+}
+
 function normalizeLoadedIndex(value: unknown): PatternIndex {
   if (!isObject(value)) {
     return createEmptyPatternIndex();
@@ -160,98 +183,125 @@ export async function loadPatternIndex(): Promise<PatternIndex> {
 
 export async function loadPatternIndexResult(): Promise<PatternIndexLoadResult> {
   const filePath = await resolveArtifactFilePath('pattern-candidates.json');
+  const fileSignature = await getFileSignature(filePath);
 
-  try {
-    const content = await fs.readFile(filePath, 'utf8');
-    const parsed = JSON.parse(content) as unknown;
+  if (
+    cachedPatternIndexPath === filePath &&
+    cachedPatternIndexSignature === fileSignature &&
+    cachedPatternIndexResult
+  ) {
+    return cachedPatternIndexResult;
+  }
 
-    if (!isObject(parsed) || !Array.isArray(parsed.patterns)) {
+  if (
+    cachedPatternIndexPath === filePath &&
+    cachedPatternIndexSignature === fileSignature &&
+    cachedPatternIndexPromise
+  ) {
+    return cachedPatternIndexPromise;
+  }
+
+  cachedPatternIndexPath = filePath;
+  cachedPatternIndexSignature = fileSignature;
+  cachedPatternIndexPromise = (async () => {
+    try {
+      const content = await fs.readFile(filePath, 'utf8');
+      const parsed = JSON.parse(content) as unknown;
+
+      if (!isObject(parsed) || !Array.isArray(parsed.patterns)) {
+        return {
+          status: 'malformed',
+          path: filePath,
+          value: createEmptyPatternIndex(),
+          reason: 'pattern artifact JSON does not match the expected top-level structure',
+          trustDegraded: true,
+        };
+      }
+
+      const normalized = normalizeLoadedIndex(parsed);
+
+      if (
+        typeof parsed.schemaVersion === 'number' &&
+        Number.isInteger(parsed.schemaVersion) &&
+        parsed.schemaVersion !== PATTERN_INDEX_SCHEMA_VERSION
+      ) {
+        return {
+          status: 'incompatible-version',
+          path: filePath,
+          value: createEmptyPatternIndex(),
+          reason: `unsupported schemaVersion ${parsed.schemaVersion}; expected ${PATTERN_INDEX_SCHEMA_VERSION}`,
+          trustDegraded: true,
+        };
+      }
+
+      if (normalized.patterns.length !== parsed.patterns.length) {
+        return {
+          status: 'malformed',
+          path: filePath,
+          value: normalized,
+          reason: 'one or more persisted pattern candidates failed validation',
+          trustDegraded: true,
+        };
+      }
+
       return {
-        status: 'malformed',
-        path: filePath,
-        value: createEmptyPatternIndex(),
-        reason: 'pattern artifact JSON does not match the expected top-level structure',
-        trustDegraded: true,
-      };
-    }
-
-    const normalized = normalizeLoadedIndex(parsed);
-
-    if (
-      typeof parsed.schemaVersion === 'number' &&
-      Number.isInteger(parsed.schemaVersion) &&
-      parsed.schemaVersion !== PATTERN_INDEX_SCHEMA_VERSION
-    ) {
-      return {
-        status: 'incompatible-version',
-        path: filePath,
-        value: createEmptyPatternIndex(),
-        reason: `unsupported schemaVersion ${parsed.schemaVersion}; expected ${PATTERN_INDEX_SCHEMA_VERSION}`,
-        trustDegraded: true,
-      };
-    }
-
-    if (normalized.patterns.length !== parsed.patterns.length) {
-      return {
-        status: 'malformed',
+        status: 'ok',
         path: filePath,
         value: normalized,
-        reason: 'one or more persisted pattern candidates failed validation',
-        trustDegraded: true,
+        reason: 'pattern artifact loaded successfully',
+        trustDegraded: false,
       };
-    }
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: string }).code)
+          : '';
 
-    return {
-      status: 'ok',
-      path: filePath,
-      value: normalized,
-      reason: 'pattern artifact loaded successfully',
-      trustDegraded: false,
-    };
-  } catch (error) {
-    const code =
-      typeof error === 'object' && error !== null && 'code' in error
-        ? String((error as { code?: string }).code)
-        : '';
+      if (code === 'ENOENT') {
+        return {
+          status: 'missing',
+          path: filePath,
+          value: createEmptyPatternIndex(),
+          reason: 'pattern artifact file does not exist',
+          trustDegraded: true,
+        };
+      }
 
-    if (code === 'ENOENT') {
+      if (error instanceof SyntaxError) {
+        return {
+          status: 'malformed',
+          path: filePath,
+          value: createEmptyPatternIndex(),
+          reason: error.message,
+          trustDegraded: true,
+        };
+      }
+
+      if (code === 'EACCES' || code === 'EPERM' || code === 'EBUSY' || code === 'EISDIR') {
+        return {
+          status: 'unreadable',
+          path: filePath,
+          value: createEmptyPatternIndex(),
+          reason: code,
+          trustDegraded: true,
+        };
+      }
+
       return {
-        status: 'missing',
+        status: 'unknown',
         path: filePath,
         value: createEmptyPatternIndex(),
-        reason: 'pattern artifact file does not exist',
+        reason: code || (error instanceof Error ? error.message : 'unknown pattern artifact load failure'),
         trustDegraded: true,
       };
+    } finally {
+      cachedPatternIndexPromise = null;
     }
+  })();
 
-    if (error instanceof SyntaxError) {
-      return {
-        status: 'malformed',
-        path: filePath,
-        value: createEmptyPatternIndex(),
-        reason: error.message,
-        trustDegraded: true,
-      };
-    }
-
-    if (code === 'EACCES' || code === 'EPERM' || code === 'EBUSY' || code === 'EISDIR') {
-      return {
-        status: 'unreadable',
-        path: filePath,
-        value: createEmptyPatternIndex(),
-        reason: code,
-        trustDegraded: true,
-      };
-    }
-
-    return {
-      status: 'unknown',
-      path: filePath,
-      value: createEmptyPatternIndex(),
-      reason: code || (error instanceof Error ? error.message : 'unknown pattern artifact load failure'),
-      trustDegraded: true,
-    };
-  }
+  const result = await cachedPatternIndexPromise;
+  cachedPatternIndexResult = result;
+  return result;
 }
 
 export async function savePatternIndex(
@@ -272,6 +322,17 @@ export async function savePatternIndex(
     await fs.writeFile(tempFilePath, JSON.stringify(index, null, 2), 'utf8');
     await fs.rename(tempFilePath, filePath);
   }
+
+      if (cachedPatternIndexPath === filePath) {
+        cachedPatternIndexResult = {
+          status: 'ok',
+          path: filePath,
+          value: index,
+          reason: 'pattern artifact loaded successfully',
+          trustDegraded: false,
+        };
+        cachedPatternIndexSignature = await getFileSignature(filePath);
+      }
 
   return filePath;
 }

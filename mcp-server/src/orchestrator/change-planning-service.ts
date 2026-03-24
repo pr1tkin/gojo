@@ -1,6 +1,6 @@
 import type { SymbolKind } from '../types.js';
-import { getImportedFiles } from '../graph/query.js';
-import { getFileRelation } from '../symbol-index/query.js';
+import { getImportedFiles, getRepoFiles } from '../graph/query.js';
+import { EXECUTION_BUDGETS } from '../execution/budgets.js';
 import { analyzeSymbolImpact } from './impact-analysis-service.js';
 import type {
   ImpactAnalysisResult,
@@ -55,7 +55,7 @@ interface PlanningFacts {
 }
 
 const MAX_FRAMEWORK_SURFACE_CANDIDATES = 12;
-const MAX_ORDERED_PLAN_CANDIDATES = 48;
+const MAX_ORDERED_PLAN_CANDIDATES = EXECUTION_BUDGETS.standard.planning.maxOrderedFiles;
 
 function getDirectImpactFiles(impact: ImpactAnalysisResult): ImpactedFile[] {
   return impact.directConsumers?.files ?? impact.directlyImpactedFiles;
@@ -682,6 +682,8 @@ async function getFrameworkSurfaceCandidates(targetFileId: string | undefined, r
       : '';
 
   if (appRoot !== '') {
+    const repoFiles = await getRepoFiles(repoId);
+    const repoFilePaths = new Set(repoFiles.map((file) => normalizePath(file.filePath)));
     const targetedPaths = [
       `${appRoot}/page.tsx`,
       `${appRoot}/page.ts`,
@@ -699,14 +701,9 @@ async function getFrameworkSurfaceCandidates(targetFileId: string | undefined, r
       if (
         candidatePath === normalizePath(targetFilePath) ||
         seen.has(candidatePath) ||
-        isTestOrStoryPath(candidatePath)
+        isTestOrStoryPath(candidatePath) ||
+        !repoFilePaths.has(candidatePath)
       ) {
-        continue;
-      }
-
-      try {
-        await getFileRelation(candidatePath, repoId);
-      } catch {
         continue;
       }
 

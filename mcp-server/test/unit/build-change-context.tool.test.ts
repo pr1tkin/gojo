@@ -6,11 +6,21 @@ const {
   runFindPrecedentsToolMock,
   runCollectRefactorContextToolMock,
   runPlanChangeToolMock,
+  loadRequiredSymbolIndexMock,
+  getFileNodeMock,
+  getImportingFilesMock,
+  getRelatedFilesMock,
+  getSemanticConsumersForSymbolMock,
 } = vi.hoisted(() => ({
   runExploreComponentToolMock: vi.fn(),
   runFindPrecedentsToolMock: vi.fn(),
   runCollectRefactorContextToolMock: vi.fn(),
   runPlanChangeToolMock: vi.fn(),
+  loadRequiredSymbolIndexMock: vi.fn(),
+  getFileNodeMock: vi.fn(),
+  getImportingFilesMock: vi.fn(),
+  getRelatedFilesMock: vi.fn(),
+  getSemanticConsumersForSymbolMock: vi.fn(),
 }));
 
 vi.mock('../../src/tools/explore-component.js', () => ({
@@ -27,6 +37,17 @@ vi.mock('../../src/tools/collect-refactor-context.js', () => ({
 
 vi.mock('../../src/tools/plan-change.js', () => ({
   runPlanChangeTool: runPlanChangeToolMock,
+}));
+
+vi.mock('../../src/symbol-index/store.js', () => ({
+  loadRequiredSymbolIndex: loadRequiredSymbolIndexMock,
+}));
+
+vi.mock('../../src/graph/query.js', () => ({
+  getFileNode: getFileNodeMock,
+  getImportingFiles: getImportingFilesMock,
+  getRelatedFiles: getRelatedFilesMock,
+  getSemanticConsumersForSymbol: getSemanticConsumersForSymbolMock,
 }));
 
 import {
@@ -344,10 +365,49 @@ function makePlanResponse(overrides: Record<string, any> = {}) {
 describe('build_change_context tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    loadRequiredSymbolIndexMock.mockResolvedValue({
+      byName: {
+        Widget: [
+          {
+            symbolId: 'widget-symbol',
+            fileId: 'widget-file',
+            repo: 'repo-a',
+            filePath: 'src/components/Widget.tsx',
+            name: 'Widget',
+            kind: 'function',
+            exported: true,
+          },
+        ],
+      },
+      byNameLower: {
+        widget: [
+          {
+            symbolId: 'widget-symbol',
+            fileId: 'widget-file',
+            repo: 'repo-a',
+            filePath: 'src/components/Widget.tsx',
+            name: 'Widget',
+            kind: 'function',
+            exported: true,
+          },
+        ],
+      },
+      byFile: {
+        'repo-a:src/components/Widget.tsx': { repo: 'repo-a' },
+      },
+    });
     runExploreComponentToolMock.mockResolvedValue(toolResult(makeExploreResponse()));
     runFindPrecedentsToolMock.mockResolvedValue(toolResult(makePrecedentsResponse()));
     runCollectRefactorContextToolMock.mockResolvedValue(toolResult(makeRefactorResponse()));
     runPlanChangeToolMock.mockResolvedValue(toolResult(makePlanResponse()));
+    getFileNodeMock.mockResolvedValue({
+      fileId: 'widget-file',
+      repoId: 'repo-a',
+      filePath: 'src/components/Widget.tsx',
+    });
+    getImportingFilesMock.mockResolvedValue([]);
+    getRelatedFilesMock.mockResolvedValue([]);
+    getSemanticConsumersForSymbolMock.mockResolvedValue([]);
   });
 
   it('accepts the public input shape', () => {
@@ -401,6 +461,8 @@ describe('build_change_context tool', () => {
       filePath: 'src/components/Widget.tsx',
       repo: 'repo-a',
       mode: 'safe',
+    }, {
+      maxDepth: 2,
     });
 
     expect(parsed).toEqual(expect.objectContaining({
@@ -622,6 +684,248 @@ describe('build_change_context tool', () => {
     expect(runCollectRefactorContextToolMock).toHaveBeenCalledWith(expect.objectContaining({
       name: 'src/components/Widget.tsx',
       mode: 'file',
+    }));
+  });
+
+  it('switches to a focused large-repo bundle and skips broad weak stages after strong evidence is available', async () => {
+    loadRequiredSymbolIndexMock.mockResolvedValue({
+      byName: {
+        Widget: [
+          {
+            symbolId: 'widget-symbol',
+            fileId: 'widget-file',
+            repo: 'repo-large',
+            filePath: 'src/components/Widget.tsx',
+            name: 'Widget',
+            kind: 'function',
+            exported: true,
+          },
+        ],
+      },
+      byNameLower: {},
+      byFile: Object.fromEntries(
+        Array.from({ length: 6000 }, (_, index) => [`repo-large:file-${index}.ts`, { repo: 'repo-large' }]),
+      ),
+    });
+    runExploreComponentToolMock.mockResolvedValue(toolResult(makeExploreResponse({
+      query: { target: 'Widget', repo: 'repo-large' },
+      target: {
+        ...makeExploreResponse().target,
+        repoId: 'repo-large',
+      },
+      direct_consumers: {
+        entries: [
+          { filePath: 'src/routes/a.ts' },
+          { filePath: 'src/routes/b.ts' },
+          { filePath: 'src/routes/c.ts' },
+        ],
+        total: 3,
+        shown: 3,
+        truncated: false,
+        confidence: 'high',
+        coverage: 'exact',
+      },
+      indirect_consumers: {
+        entries: [],
+        total: 0,
+        shown: 0,
+        truncated: false,
+        confidence: 'medium',
+        coverage: 'inferred',
+      },
+      related_context: {
+        entries: [],
+        total: 0,
+        shown: 0,
+        truncated: false,
+        confidence: 'low',
+        coverage: 'exploratory',
+      },
+    })));
+    getImportingFilesMock.mockResolvedValue([
+      {
+        fileId: 'route-a',
+        repoId: 'repo-large',
+        filePath: 'src/routes/a.ts',
+      },
+    ]);
+
+    const result = await runBuildChangeContextTool({
+      symbolName: 'Widget',
+      repo: 'repo-large',
+      detail: 'agent',
+    });
+    const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
+
+    expect(runFindPrecedentsToolMock).not.toHaveBeenCalled();
+    expect(runCollectRefactorContextToolMock).not.toHaveBeenCalled();
+    expect(runPlanChangeToolMock).not.toHaveBeenCalled();
+    expect(parsed.diagnostics.notes).toEqual(expect.arrayContaining([
+      'large-repo focused mode activated',
+      'enough-context stop condition hit after strong consumer recovery',
+      'precedent breadth capped in large-repo focused mode',
+      'related-context expansion capped in large-repo focused mode',
+      'weak exploratory bundle expansion skipped after strong evidence was collected',
+      'change planning skipped to keep the bundled workflow within large-repo execution budget',
+    ]));
+    expect(parsed.results.primary).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        section: 'precedent_cluster',
+        status: 'skipped',
+      }),
+      expect.objectContaining({
+        section: 'refactor_context',
+        status: 'skipped',
+      }),
+      expect.objectContaining({
+        section: 'change_plan',
+        status: 'skipped',
+        explanation: expect.objectContaining({
+          short: 'change plan skipped in large-repo focused mode after strong evidence was collected',
+        }),
+      }),
+    ]));
+  });
+
+  it('enters focused large-repo mode when the CLI repo input is a path but the index uses a repo id', async () => {
+    loadRequiredSymbolIndexMock.mockResolvedValue({
+      byName: {
+        Widget: [
+          {
+            symbolId: 'widget-symbol',
+            fileId: 'widget-file',
+            repo: 'repo-large',
+            filePath: 'src/components/Widget.tsx',
+            name: 'Widget',
+            kind: 'function',
+            exported: true,
+          },
+        ],
+      },
+      byNameLower: {},
+      byFile: Object.fromEntries(
+        Array.from({ length: 6000 }, (_, index) => [`repo-large:file-${index}.ts`, { repo: 'repo-large' }]),
+      ),
+    });
+    runExploreComponentToolMock.mockResolvedValue(toolResult(makeExploreResponse({
+      query: { target: 'Widget', repo: '/tmp/repos/repo-large' },
+      target: {
+        ...makeExploreResponse().target,
+        repoId: 'repo-large',
+      },
+      direct_consumers: {
+        entries: [{ filePath: 'src/routes/a.ts' }],
+        total: 1,
+        shown: 1,
+        truncated: false,
+        confidence: 'high',
+        coverage: 'exact',
+      },
+      indirect_consumers: {
+        entries: [{ filePath: 'src/routes/b.ts' }],
+        total: 1,
+        shown: 1,
+        truncated: false,
+        confidence: 'medium',
+        coverage: 'inferred',
+      },
+    })));
+    getImportingFilesMock.mockResolvedValue([
+      {
+        fileId: 'route-a',
+        repoId: 'repo-large',
+        filePath: 'src/routes/a.ts',
+      },
+    ]);
+    getSemanticConsumersForSymbolMock.mockResolvedValue([
+      {
+        edge: {
+          kind: 'api_propagation',
+          strength: 'medium',
+        },
+        fromFile: {
+          fileId: 'route-b',
+          repoId: 'repo-large',
+          filePath: 'src/routes/b.ts',
+        },
+      },
+    ]);
+
+    const result = await runBuildChangeContextTool({
+      symbolName: 'Widget',
+      repo: '/tmp/repos/repo-large',
+      detail: 'agent',
+    });
+    const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
+
+    expect(runFindPrecedentsToolMock).not.toHaveBeenCalled();
+    expect(runCollectRefactorContextToolMock).not.toHaveBeenCalled();
+    expect(runPlanChangeToolMock).not.toHaveBeenCalled();
+    expect(parsed.diagnostics.notes).toEqual(expect.arrayContaining([
+      'large-repo focused mode activated',
+      'enough-context stop condition hit after strong consumer recovery',
+    ]));
+  });
+
+  it('dedupes canonical bucket entries by file and symbol before returning the final bundle', async () => {
+    runPlanChangeToolMock.mockResolvedValue(toolResult(makePlanResponse({
+      direct_consumers: {
+        entries: [
+          { filePath: 'src/components/Widget.tsx', symbolName: 'Widget' },
+          { filePath: 'src/components/Widget.tsx', symbolName: 'Widget' },
+        ],
+        total: 2,
+        shown: 2,
+        truncated: false,
+        confidence: 'high',
+        coverage: 'exact',
+      },
+      indirect_consumers: {
+        entries: [
+          { filePath: 'src/components/index.ts' },
+          { filePath: 'src/components/index.ts' },
+        ],
+        total: 2,
+        shown: 2,
+        truncated: false,
+        confidence: 'medium',
+        coverage: 'inferred',
+      },
+      related_context: {
+        entries: [
+          { filePath: 'src/pages/Dashboard.tsx' },
+          { filePath: 'src/pages/Dashboard.tsx' },
+        ],
+        total: 2,
+        shown: 2,
+        truncated: false,
+        confidence: 'low',
+        coverage: 'exploratory',
+      },
+    })));
+
+    const result = await runBuildChangeContextTool({
+      symbolName: 'Widget',
+      repo: 'repo-a',
+      intent: 'refactor',
+      detail: 'agent',
+    });
+    const parsed = JSON.parse(result.content[0].text) as Record<string, any>;
+
+    expect(parsed.direct_consumers).toEqual(expect.objectContaining({
+      total: 1,
+      shown: 1,
+      entries: [{ filePath: 'src/components/Widget.tsx', symbolName: 'Widget' }],
+    }));
+    expect(parsed.indirect_consumers).toEqual(expect.objectContaining({
+      total: 1,
+      shown: 1,
+      entries: [{ filePath: 'src/components/index.ts' }],
+    }));
+    expect(parsed.related_context).toEqual(expect.objectContaining({
+      total: 1,
+      shown: 1,
+      entries: [{ filePath: 'src/pages/Dashboard.tsx' }],
     }));
   });
 });

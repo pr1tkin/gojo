@@ -62,6 +62,7 @@ export interface FileContextBundle {
 export interface AssembleFileContextOptions {
   relatedLimit?: number;
   explorationBudget?: Partial<ExplorationBudget>;
+  symbolContextBudget?: Partial<SymbolContextBudget>;
   referenceSignalsByFileId?: Record<
     string,
     {
@@ -77,6 +78,15 @@ export interface ExplorationBudget {
   maxDepth: number;
 }
 
+export interface SymbolContextBudget {
+  maxCandidateSymbols: number;
+  maxDirectConsumerEdges: number;
+  maxIndirectConsumerEdges: number;
+  maxRelatedFiles: number;
+  maxWeakExpansions: number;
+  strongEvidenceThreshold: number;
+}
+
 export interface SymbolContextQuery {
   name: string;
   repo?: string;
@@ -84,6 +94,7 @@ export interface SymbolContextQuery {
   limit?: number;
   relatedLimit?: number;
   explorationBudget?: Partial<ExplorationBudget>;
+  symbolContextBudget?: Partial<SymbolContextBudget>;
 }
 
 export interface SymbolContextBundle {

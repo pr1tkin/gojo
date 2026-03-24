@@ -361,7 +361,6 @@ function collectComponentResponsibilitySignals(
   source: string,
 ): string[] {
   const signals: string[] = [];
-  const normalizedName = match.symbol.name.toLowerCase();
   const normalizedImports = relation.imports.map((entry) => entry.source.toLowerCase());
   const functionLike = getFunctionLikeValueNode(match.node, source);
   const hasLayoutName = /(^rootlayout$|layout$|^page$|page$)/i.test(match.symbol.name);

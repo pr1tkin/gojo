@@ -3,6 +3,11 @@
 ![Local-first](https://img.shields.io/badge/local--first-yes-green)
 ![Agent-first](https://img.shields.io/badge/agent--first-yes-purple)
 ![MCP](https://img.shields.io/badge/MCP-ready-black)
+![Large Repo Ready](https://img.shields.io/badge/large--repo-ready-green)
+![~8s Queries](https://img.shields.io/badge/query%20latency-~8s-blue)
+![Semantic Graph](https://img.shields.io/badge/semantic--graph-enabled-purple)
+![API Aware](https://img.shields.io/badge/api--aware-yes-black)
+![No Hallucination](https://img.shields.io/badge/no--hallucination-grounded-brightgreen)
 ![Build](https://github.com/pr1tkin/gojo/actions/workflows/release-candidate.yml/badge.svg)
 ![Release](https://github.com/pr1tkin/gojo/actions/workflows/release.yml/badge.svg)
 
@@ -401,3 +406,5 @@ Give it a star — it helps more people discover Gojo.
 ## 📄 License
 
 See [LICENSE.md](./LICENSE.md)
+> Works on real-world codebases. Not just demos.
+> 👉 [See benchmarks](./docs/gojo_benchmark_v0_2_x.md)
