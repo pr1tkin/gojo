@@ -9,6 +9,7 @@ export type FileContextConnectionKind =
   | 'outgoing_file_imports_file'
   | 'incoming_file_reexports_file'
   | 'outgoing_file_reexports_file'
+  | 'import_usage'
   | 'symbol_reference'
   | 'call_reference'
   | 'jsx_reference'

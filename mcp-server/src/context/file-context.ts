@@ -2,7 +2,7 @@ import { getDefinedSymbols, getExportedSymbols, getFileNode, getNeighboringFiles
 import type { FileNode } from '../graph/types.js';
 import { rankRelatedFileCandidates } from '../ranking/index.js';
 import { getFileRelationById } from '../symbol-index/query.js';
-import type { FileRelation } from '../symbol-index/types.js';
+import type { ExportRecord, FileRelation, ImportBinding } from '../symbol-index/types.js';
 import type {
   AssembleFileContextOptions,
   ExplorationBudget,
@@ -35,7 +35,7 @@ function isNoisePath(filePath: string): boolean {
 
 function hasStrongEdge(via: FileContextConnectionKind[]): boolean {
   return via.some((kind) =>
-    ['call_reference', 'symbol_reference', 'jsx_reference', 'type_reference', 'api_route_handler'].includes(kind),
+    ['import_usage', 'call_reference', 'symbol_reference', 'jsx_reference', 'type_reference', 'api_route_handler'].includes(kind),
   );
 }
 
@@ -246,6 +246,107 @@ function mergeReferenceSignals(
   }
 }
 
+function getTargetExportSurface(exports: ExportRecord[]): { exportedNames: Set<string>; hasDefault: boolean } {
+  const exportedNames = new Set<string>();
+  let hasDefault = false;
+
+  for (const entry of exports) {
+    if (entry.kind === 'default') {
+      hasDefault = true;
+    }
+
+    if (entry.exportedName) {
+      exportedNames.add(entry.exportedName);
+    }
+
+    if (entry.localName) {
+      exportedNames.add(entry.localName);
+    }
+  }
+
+  return { exportedNames, hasDefault };
+}
+
+function bindingTargetsTargetExport(
+  binding: ImportBinding,
+  targetExportSurface: { exportedNames: Set<string>; hasDefault: boolean },
+): boolean {
+  if (binding.isTypeOnly) {
+    return false;
+  }
+
+  if (binding.kind === 'default') {
+    return targetExportSurface.hasDefault;
+  }
+
+  if (binding.kind === 'namespace') {
+    return true;
+  }
+
+  return Boolean(binding.importedName && targetExportSurface.exportedNames.has(binding.importedName));
+}
+
+function mergeSignalKinds(
+  signalsByFileId: Map<string, { edgeTypes: FileContextConnectionKind[]; connectionCount: number }>,
+  fileId: string,
+  kinds: FileContextConnectionKind[],
+  connectionCount: number,
+): void {
+  const existing = signalsByFileId.get(fileId);
+
+  if (!existing) {
+    signalsByFileId.set(fileId, {
+      edgeTypes: [...new Set(kinds)],
+      connectionCount,
+    });
+    return;
+  }
+
+  existing.connectionCount += connectionCount;
+
+  for (const kind of kinds) {
+    if (!existing.edgeTypes.includes(kind)) {
+      existing.edgeTypes.push(kind);
+    }
+  }
+}
+
+function promoteExactImportUsageSignals(
+  targetRelation: FileRelation,
+  candidateRelations: FileRelation[],
+  signalsByFileId: Map<string, { edgeTypes: FileContextConnectionKind[]; connectionCount: number }>,
+): void {
+  const targetExportSurface = getTargetExportSurface(targetRelation.exports);
+
+  for (const relation of candidateRelations) {
+    let exactBindingCount = 0;
+
+    for (const entry of relation.imports) {
+      if (entry.resolvedTargetFileId !== targetRelation.fileId) {
+        continue;
+      }
+
+      for (const binding of entry.bindings) {
+        if (!bindingTargetsTargetExport(binding, targetExportSurface)) {
+          continue;
+        }
+
+        if (!relation.importTokens.includes(binding.localName)) {
+          continue;
+        }
+
+        exactBindingCount += 1;
+      }
+    }
+
+    if (exactBindingCount === 0) {
+      continue;
+    }
+
+    mergeSignalKinds(signalsByFileId, relation.fileId, ['import_usage'], exactBindingCount);
+  }
+}
+
 function prioritizeCandidateFileIds(
   signalsByFileId: Map<string, { edgeTypes: FileContextConnectionKind[]; connectionCount: number }>,
   requestedLimit: number,
@@ -346,6 +447,8 @@ export async function assembleRelatedFileContext(
       candidateRelations.push(relation);
     }
   }
+
+  promoteExactImportUsageSignals(targetRelation, candidateRelations, signalsByFileId);
 
   const ranked = rankRelatedFileCandidates(
     targetRelation,

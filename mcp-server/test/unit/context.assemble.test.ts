@@ -82,6 +82,21 @@ describe('context assembly', () => {
       ]),
     );
     expect(bundle.relatedFiles.every((entry) => entry.reasons.some((reason) => reason.signal === 'graph_connection'))).toBe(true);
+    expect(bundle.relatedFileBuckets.directConsumers.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          file: expect.objectContaining({ fileId: consumerFileId }),
+          via: expect.arrayContaining(['import_usage']),
+        }),
+      ]),
+    );
+    expect(bundle.relatedFileBuckets.indirectConsumers.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          file: expect.objectContaining({ fileId: barrelFileId }),
+        }),
+      ]),
+    );
     expect(bundle.definedSymbols).toEqual([
       expect.objectContaining({ symbolId: sharedSymbolId }),
     ]);
@@ -232,6 +247,87 @@ describe('context assembly', () => {
       expect.arrayContaining([
         expect.objectContaining({
           file: expect.objectContaining({ filePath: 'lib/hooks/useAutomationsQuery.ts' }),
+        }),
+      ]),
+    );
+  });
+
+  it('keeps API-only consumers indirect when no exact import-usage evidence exists', async () => {
+    const tempRoot = await createTempDirectory();
+    tempDirectories.push(tempRoot);
+    process.chdir(tempRoot);
+
+    const reposRoot = path.join(tempRoot, 'repos');
+    const repositoryRoot = path.join(reposRoot, 'api-only-repo');
+    await fs.mkdir(path.join(repositoryRoot, '.git'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'lib', 'services'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'lib', 'hooks'), { recursive: true });
+    await fs.mkdir(path.join(repositoryRoot, 'app', 'api', 'widgets'), { recursive: true });
+    await fs.writeFile(
+      path.join(repositoryRoot, 'tsconfig.json'),
+      JSON.stringify({
+        compilerOptions: {
+          target: 'ES2020',
+          module: 'ESNext',
+          moduleResolution: 'Bundler',
+          jsx: 'preserve',
+          allowJs: true,
+          skipLibCheck: true,
+        },
+        include: ['**/*.ts', '**/*.tsx'],
+      }),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'lib', 'services', 'widgets.ts'),
+      ['export async function listWidgets() {', '  return [];', '}'].join('\n'),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'app', 'api', 'widgets', 'route.ts'),
+      [
+        "import { listWidgets } from '../../../lib/services/widgets';",
+        'export async function GET() {',
+        '  return Response.json(await listWidgets());',
+        '}',
+      ].join('\n'),
+      'utf8',
+    );
+    await fs.writeFile(
+      path.join(repositoryRoot, 'lib', 'hooks', 'useWidgets.ts'),
+      ['export async function useWidgets() {', "  return fetch('/api/widgets');", '}'].join('\n'),
+      'utf8',
+    );
+
+    const index = await buildIndexedSymbols(reposRoot);
+    await saveSymbolIndex(index);
+    await saveCodeGraph(await buildCodeGraph());
+    await saveSemanticGraph(await buildSemanticGraph(index, [
+      {
+        id: 'api-only-repo',
+        name: 'api-only-repo',
+        rootPath: repositoryRoot,
+        isGitRepository: true,
+      },
+    ]));
+
+    const bundle = await assembleSymbolContext({
+      name: 'listWidgets',
+      repo: 'api-only-repo',
+    });
+
+    expect(bundle.relatedFileBuckets.indirectConsumers.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          file: expect.objectContaining({ filePath: 'lib/hooks/useWidgets.ts' }),
+          via: expect.arrayContaining(['api_client_to_route', 'api_propagation']),
+        }),
+      ]),
+    );
+    expect(bundle.relatedFileBuckets.directConsumers.entries).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          file: expect.objectContaining({ filePath: 'lib/hooks/useWidgets.ts' }),
         }),
       ]),
     );

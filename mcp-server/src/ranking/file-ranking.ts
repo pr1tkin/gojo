@@ -6,6 +6,7 @@ type EdgeStrength = 'strong' | 'medium' | 'weak';
 
 function edgeStrength(edgeType: string | undefined): EdgeStrength {
   switch (edgeType) {
+    case 'import_usage':
     case 'call_reference':
     case 'symbol_reference':
     case 'jsx_reference':
@@ -58,6 +59,10 @@ function determineReason(entry: RankedRelatedFile['reasons']): string {
     return 'exact call reference';
   }
 
+  if (graphReason?.note === 'import_usage') {
+    return 'exact import usage';
+  }
+
   if (graphReason?.note === 'symbol_reference') {
     return 'exact symbol reference';
   }
@@ -107,6 +112,8 @@ function determineReason(entry: RankedRelatedFile['reasons']): string {
 
 function graphEdgeWeight(edgeType: string | undefined): number {
   switch (edgeType) {
+    case 'import_usage':
+      return 19;
     case 'call_reference':
       return 18;
     case 'api_route_handler':
