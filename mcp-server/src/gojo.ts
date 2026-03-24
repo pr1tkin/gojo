@@ -35,7 +35,9 @@ async function runCli(parsed: ParsedCliResult): Promise<number> {
 
   if (finalizedCommand.executionContext.outputMode === 'json') {
     const payload =
-      finalizedCommand.capability === 'GetProductVersion'
+      finalizedCommand.capability === 'GetProductVersion' ||
+      finalizedCommand.capability === 'PlanChange' ||
+      finalizedCommand.capability === 'BuildChangeContext'
         ? response.machine_payload
         : response;
     process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);

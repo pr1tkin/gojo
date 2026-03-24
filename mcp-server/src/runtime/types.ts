@@ -102,6 +102,7 @@ export type RuntimeCapabilityName =
   | 'IndexRepo'
   | 'RefreshRepo'
   | 'ExploreComponent'
+  | 'PlanChange'
   | 'ServeMCP'
   | 'RunHealthChecks'
   | 'BuildChangeContext'
@@ -267,12 +268,19 @@ export interface RunHealthChecksMachinePayload {
 
 export type RunHealthChecksResponse = RuntimeResponse<RunHealthChecksMachinePayload>;
 
+export interface PlanChangeRequest {
+  symbol: string;
+  repo?: RepoTarget;
+}
+
+export type PlanChangeResponse = RuntimeResponse<Record<string, unknown>>;
+
 export interface BuildChangeContextRequest {
   target: string;
   repo?: RepoTarget;
 }
 
-export type BuildChangeContextResponse = RuntimeResponse;
+export type BuildChangeContextResponse = RuntimeResponse<Record<string, unknown>>;
 
 export interface FindPrecedentsRequest {
   target: string;
@@ -307,6 +315,7 @@ export interface RuntimeCapabilityRequestMap {
   IndexRepo: IndexRepoRequest;
   RefreshRepo: RefreshRepoRequest;
   ExploreComponent: ExploreComponentRequest;
+  PlanChange: PlanChangeRequest;
   ServeMCP: ServeMCPRequest;
   RunHealthChecks: RunHealthChecksRequest;
   BuildChangeContext: BuildChangeContextRequest;
@@ -322,6 +331,7 @@ export interface RuntimeCapabilityResponseMap {
   IndexRepo: IndexRepoResponse;
   RefreshRepo: RefreshRepoResponse;
   ExploreComponent: ExploreComponentResponse;
+  PlanChange: PlanChangeResponse;
   ServeMCP: ServeMCPResponse;
   RunHealthChecks: RunHealthChecksResponse;
   BuildChangeContext: BuildChangeContextResponse;

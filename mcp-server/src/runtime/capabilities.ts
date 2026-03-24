@@ -32,6 +32,12 @@ export const runtimeCapabilityDefinitions: RuntimeCapabilityDefinition[] = [
     implemented: true,
   },
   {
+    name: 'PlanChange',
+    executionMode: 'one_shot',
+    description: 'Build an ordered change plan for a resolved symbol using the public planning tool contract.',
+    implemented: true,
+  },
+  {
     name: 'ServeMCP',
     executionMode: 'long_running',
     description: 'Start the MCP surface on top of the runtime core.',

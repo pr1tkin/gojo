@@ -24,6 +24,8 @@ export type {
   RunDoctorResponse,
   RunHealthChecksRequest,
   RunHealthChecksResponse,
+  PlanChangeRequest,
+  PlanChangeResponse,
   RuntimeCapabilityDefinition,
   RuntimeCapabilityHandler,
   RuntimeCapabilityName,

@@ -3,14 +3,20 @@ import { loadCurrentGenerationState } from '../indexing/generation-store.js';
 import { refreshIndexes } from '../indexing/refresh.js';
 import { getSymbolExplorationContext } from '../orchestrator/index.js';
 import { fetchLatestReleaseInfo, upgradeInstalledGojo } from '../product/release-channel.js';
+import { runBuildChangeContextTool } from '../tools/build-change-context.js';
+import { runPlanChangeTool } from '../tools/plan-change.js';
 import type { RuntimeCapabilityHandler } from './types.js';
 import {
+  type BuildChangeContextRequest,
+  type BuildChangeContextResponse,
   type ExploreComponentRequest,
   type ExploreComponentResponse,
   type GetProductVersionRequest,
   type GetProductVersionResponse,
   type IndexRepoRequest,
   type IndexRepoResponse,
+  type PlanChangeRequest,
+  type PlanChangeResponse,
   type RefreshRepoRequest,
   type RefreshRepoResponse,
   type RunHealthChecksRequest,
@@ -30,6 +36,7 @@ import { assessRuntimeStateFromHealth, detectRepositoryDrift, inspectRuntimeRefr
 import { serveMcpRuntime } from './mcp-service.js';
 import { inspectSearchRuntime } from './search-service.js';
 import type { RelatedFileContextBuckets, RankedFileContextItem } from '../context/types.js';
+import type { RuntimeReadinessState, RuntimeTrustLevel } from './types.js';
 
 function formatProductVersion(version: string): string {
   return version.startsWith('v') ? version : `v${version}`;
@@ -303,6 +310,52 @@ function toMachinePayloadBuckets(buckets: RelatedFileContextBuckets): Pick<
       coverage: buckets.relatedContext.coverage,
     },
   };
+}
+
+function parseToolPayload(result: { content: Array<{ type: 'text'; text: string }> }): Record<string, unknown> {
+  return JSON.parse(result.content[0]?.text ?? '{}') as Record<string, unknown>;
+}
+
+function readBucketCount(payload: Record<string, unknown>, key: 'direct_consumers' | 'indirect_consumers' | 'related_context'): number {
+  const bucket = payload[key] as { entries?: unknown[]; total?: number } | undefined;
+
+  if (typeof bucket?.total === 'number') {
+    return bucket.total;
+  }
+
+  return Array.isArray(bucket?.entries) ? bucket.entries.length : 0;
+}
+
+function readTargetLabel(payload: Record<string, unknown>): string {
+  const target = payload.target as { symbolName?: string; filePath?: string; requestedSymbolName?: string; requestedFilePath?: string } | undefined;
+  const query = payload.query as { target?: string } | undefined;
+
+  return (
+    target?.symbolName ??
+    target?.filePath ??
+    target?.requestedSymbolName ??
+    target?.requestedFilePath ??
+    query?.target ??
+    'Target'
+  );
+}
+
+function readReadinessFromHealth(runtimeState: {
+  readinessState: RuntimeReadinessState;
+  trustLevel: RuntimeTrustLevel;
+  confidence: RuntimeTrustLevel;
+  stateSummary: string;
+  stateExplanation: string;
+  warnings: string[];
+}): {
+  readinessState: RuntimeReadinessState;
+  trustLevel: RuntimeTrustLevel;
+  confidence: RuntimeTrustLevel;
+  stateSummary: string;
+  stateExplanation: string;
+  warnings: string[];
+} {
+  return runtimeState;
 }
 
 function scopeHealthWarnings(warnings: string[], repoPath: string | undefined): string[] {
@@ -655,6 +708,162 @@ export const exploreComponentHandler: RuntimeCapabilityHandler<
       coverageSignals: transparency.coverageSignals,
       evidenceTypes: transparency.evidenceTypes,
       note: transparency.note,
+    });
+  },
+};
+
+export const planChangeHandler: RuntimeCapabilityHandler<
+  PlanChangeRequest,
+  PlanChangeResponse
+> = {
+  capability: 'PlanChange',
+  executionMode: 'one_shot',
+  async execute(request, context) {
+    const repoId = resolveRepoId(
+      request.repo?.repoId,
+      context.executionContext.repoTarget?.repoId,
+    );
+    const repoPath = request.repo?.repoPath ?? context.executionContext.repoTarget?.repoPath;
+    const reposRoot = context.dependencies.config.reposRoot;
+    const [toolResult, health, generationState, refreshActivity] = await Promise.all([
+      runPlanChangeTool({
+        symbol: request.symbol,
+        repo: repoId,
+      }),
+      getCurrentIndexHealth(),
+      loadCurrentGenerationState().catch(() => null),
+      inspectRuntimeRefreshActivity(reposRoot).catch(() => undefined),
+    ]);
+    const payload = parseToolPayload(toolResult);
+    const drift = await detectRepositoryDrift({
+      repoPath,
+      generationCreatedAt: generationState?.createdAt,
+    });
+    const runtimeState = readReadinessFromHealth(
+      assessRuntimeStateFromHealth(health, {
+        drift,
+        refreshActivity,
+        repoPath,
+      }),
+    );
+    const targetLabel = readTargetLabel(payload);
+    const directCount = readBucketCount(payload, 'direct_consumers');
+    const indirectCount = readBucketCount(payload, 'indirect_consumers');
+    const relatedCount = readBucketCount(payload, 'related_context');
+
+    return createRuntimeResponse({
+      capability: 'PlanChange',
+      executionMode: 'one_shot',
+      summary: {
+        title: targetLabel,
+        text: `Planned ${targetLabel} with ${directCount} direct, ${indirectCount} indirect, and ${relatedCount} related files. State: ${runtimeState.stateSummary} - ${runtimeState.stateExplanation}`,
+      },
+      findings: [
+        {
+          id: 'plan-change-target',
+          title: targetLabel,
+          summary: `Change plan is available for ${targetLabel}.`,
+        },
+      ],
+      signals: [
+        { name: 'direct_consumers', value: directCount, importance: 'high' },
+        { name: 'indirect_consumers', value: indirectCount, importance: 'medium' },
+        { name: 'related_context', value: relatedCount, importance: 'low' },
+        { name: 'state', value: runtimeState.stateSummary, importance: 'high' },
+      ],
+      warnings: runtimeState.warnings,
+      details: {
+        stateExplanation: runtimeState.stateExplanation,
+        ...(generationState?.createdAt ? { lastIndexedAt: generationState.createdAt } : {}),
+      },
+      machinePayload: payload,
+      trustLevel: runtimeState.trustLevel,
+      readinessState: runtimeState.readinessState,
+      confidence: runtimeState.confidence,
+      trust: runtimeState.trustLevel,
+      resultKind: directCount > 0 ? 'exact' : indirectCount > 0 ? 'inferred' : 'exploratory',
+      coverage: 'complete',
+      coverageSignals: ['complete'],
+      evidenceTypes: ['tool_output', 'planning'],
+    });
+  },
+};
+
+export const buildChangeContextHandler: RuntimeCapabilityHandler<
+  BuildChangeContextRequest,
+  BuildChangeContextResponse
+> = {
+  capability: 'BuildChangeContext',
+  executionMode: 'one_shot',
+  async execute(request, context) {
+    const repoId = resolveRepoId(
+      request.repo?.repoId,
+      context.executionContext.repoTarget?.repoId,
+    );
+    const repoPath = request.repo?.repoPath ?? context.executionContext.repoTarget?.repoPath;
+    const reposRoot = context.dependencies.config.reposRoot;
+    const [toolResult, health, generationState, refreshActivity] = await Promise.all([
+      runBuildChangeContextTool({
+        ...(request.target.includes('/') || request.target.includes('\\')
+          ? { filePath: request.target }
+          : { symbolName: request.target }),
+        repo: repoId,
+      }),
+      getCurrentIndexHealth(),
+      loadCurrentGenerationState().catch(() => null),
+      inspectRuntimeRefreshActivity(reposRoot).catch(() => undefined),
+    ]);
+    const payload = parseToolPayload(toolResult);
+    const drift = await detectRepositoryDrift({
+      repoPath,
+      generationCreatedAt: generationState?.createdAt,
+    });
+    const runtimeState = readReadinessFromHealth(
+      assessRuntimeStateFromHealth(health, {
+        drift,
+        refreshActivity,
+        repoPath,
+      }),
+    );
+    const targetLabel = readTargetLabel(payload);
+    const directCount = readBucketCount(payload, 'direct_consumers');
+    const indirectCount = readBucketCount(payload, 'indirect_consumers');
+    const relatedCount = readBucketCount(payload, 'related_context');
+
+    return createRuntimeResponse({
+      capability: 'BuildChangeContext',
+      executionMode: 'one_shot',
+      summary: {
+        title: targetLabel,
+        text: `Built change context for ${targetLabel} with ${directCount} direct, ${indirectCount} indirect, and ${relatedCount} related files. State: ${runtimeState.stateSummary} - ${runtimeState.stateExplanation}`,
+      },
+      findings: [
+        {
+          id: 'build-change-context-target',
+          title: targetLabel,
+          summary: `Bundled change context is available for ${targetLabel}.`,
+        },
+      ],
+      signals: [
+        { name: 'direct_consumers', value: directCount, importance: 'high' },
+        { name: 'indirect_consumers', value: indirectCount, importance: 'medium' },
+        { name: 'related_context', value: relatedCount, importance: 'low' },
+        { name: 'state', value: runtimeState.stateSummary, importance: 'high' },
+      ],
+      warnings: runtimeState.warnings,
+      details: {
+        stateExplanation: runtimeState.stateExplanation,
+        ...(generationState?.createdAt ? { lastIndexedAt: generationState.createdAt } : {}),
+      },
+      machinePayload: payload,
+      trustLevel: runtimeState.trustLevel,
+      readinessState: runtimeState.readinessState,
+      confidence: runtimeState.confidence,
+      trust: runtimeState.trustLevel,
+      resultKind: directCount > 0 ? 'exact' : indirectCount > 0 ? 'inferred' : 'exploratory',
+      coverage: 'complete',
+      coverageSignals: ['complete'],
+      evidenceTypes: ['tool_output', 'bundled_context'],
     });
   },
 };

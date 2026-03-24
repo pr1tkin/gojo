@@ -6,6 +6,8 @@ const usageText = `Usage:
   gojo [--repo <repo-id-or-path>] [--json] [--debug] index [repo-path]
   gojo [--repo <repo-id-or-path>] [--json] [--debug] refresh [repo-path]
   gojo [--repo <repo-id-or-path>] [--json] [--debug] explore <target>
+  gojo [--repo <repo-id-or-path>] [--json] [--debug] plan_change <symbol>
+  gojo [--repo <repo-id-or-path>] [--json] [--debug] build_change_context <symbol>
   gojo [--repo <repo-id-or-path>] [--json] [--debug] health
   gojo [--repo <repo-id-or-path>] [--json] [--debug] mcp serve
 `;
@@ -157,6 +159,48 @@ export function parseCliArgs(argv: string[]): ParsedCliResult {
       command: {
         name: 'explore',
         capability: 'ExploreComponent',
+        request: {
+          target,
+        },
+        executionContext,
+        renderResult: true,
+        repoInput: options.repo,
+      },
+    };
+  }
+
+  if (command === 'plan_change') {
+    const symbol = tail[0];
+
+    if (!symbol) {
+      throw new Error('gojo plan_change requires a <symbol>');
+    }
+
+    return {
+      command: {
+        name: 'plan_change',
+        capability: 'PlanChange',
+        request: {
+          symbol,
+        },
+        executionContext,
+        renderResult: true,
+        repoInput: options.repo,
+      },
+    };
+  }
+
+  if (command === 'build_change_context') {
+    const target = tail[0];
+
+    if (!target) {
+      throw new Error('gojo build_change_context requires a <symbol>');
+    }
+
+    return {
+      command: {
+        name: 'build_change_context',
+        capability: 'BuildChangeContext',
         request: {
           target,
         },

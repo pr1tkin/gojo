@@ -1,8 +1,10 @@
 import { runtimeCapabilityDefinitions } from './capabilities.js';
 import {
+  buildChangeContextHandler,
   exploreComponentHandler,
   getProductVersionHandler,
   indexRepoHandler,
+  planChangeHandler,
   refreshRepoHandler,
   runHealthChecksHandler,
   serveMcpHandler,
@@ -35,6 +37,8 @@ export class RuntimeHost {
     this.register(indexRepoHandler);
     this.register(refreshRepoHandler);
     this.register(exploreComponentHandler);
+    this.register(planChangeHandler);
+    this.register(buildChangeContextHandler);
     this.register(runHealthChecksHandler);
     this.register(serveMcpHandler);
   }
